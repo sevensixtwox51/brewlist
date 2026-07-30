@@ -142,6 +142,13 @@ input[type="text"], input[type="url"], input[type="file"] {
 }
 .btn:hover { filter: brightness(1.08); }
 .btn:disabled { opacity: 0.6; cursor: default; }
+.btn.small { padding: 7px 14px; font-size: 0.85rem; }
+.btn.danger {
+  background: transparent; color: var(--text-dim);
+  border: 1px solid var(--card-border); font-weight: 500;
+}
+.btn.danger:hover { color: var(--missing); border-color: var(--missing); filter: none; }
+.page-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
 .collection-status { font-size: 0.85rem; color: var(--text-dim); margin-bottom: 12px; }
 .collection-status b { color: var(--owned); }
 .project-list { list-style: none; padding: 0; margin: 0; }
@@ -195,8 +202,13 @@ def render_home_page(error: str | None = None, prefill_url: str = "") -> str:
 </head>
 <body>
 <main>
-  <h1>Moxfield vs. ManaBox</h1>
-  <p class="subtitle">Compare a decklist against your collection, with live pricing.</p>
+  <div class="page-header">
+    <div>
+      <h1>Moxfield vs. ManaBox</h1>
+      <p class="subtitle">Compare a decklist against your collection, with live pricing.</p>
+    </div>
+    <button type="button" class="btn small danger" id="shutdown-btn" title="Stops the local server">&#9209; Shut Down</button>
+  </div>
   {error_html}
   {projects_html}
   <form class="card" method="post" action="/compare" enctype="multipart/form-data" id="compare-form">
@@ -221,6 +233,13 @@ document.getElementById('compare-form').addEventListener('submit', () => {{
   document.getElementById('submit-btn').disabled = true;
   document.getElementById('submit-btn').textContent = 'Working...';
   document.getElementById('processing').style.display = 'block';
+}});
+
+document.getElementById('shutdown-btn').addEventListener('click', () => {{
+  if (!confirm('Shut down the server? You will need to relaunch it to use this again.')) return;
+  fetch('/shutdown', {{ method: 'POST' }}).catch(() => {{}});
+  document.body.innerHTML =
+    '<main><p style="color:var(--text-dim);padding-top:40px;">Server stopped. You can close this tab.</p></main>';
 }});
 </script>
 </body>
@@ -341,6 +360,23 @@ def save_overrides(deck_id):
     return {"ok": True, "reserved_count": len(clean)}
 
 
+@app.route("/shutdown", methods=["POST"])
+def shutdown():
+    # os._exit() rather than a graceful stop: this is a personal local dev
+    # server, not something with in-flight work worth waiting on, and it
+    # guarantees the process actually dies instead of lingering.
+    import threading
+
+    def _die():
+        os._exit(0)
+
+    threading.Timer(0.2, _die).start()
+    return {"ok": True}
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    app.run(debug=True, port=port)
+    # use_reloader=False: the reloader runs the app in a child process and
+    # respawns it on exit, which would silently undo the /shutdown route above.
+    # debug=True is kept for friendly in-browser tracebacks if something breaks.
+    app.run(debug=True, use_reloader=False, port=port)

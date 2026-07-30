@@ -730,9 +730,13 @@ header {{
   align-items: center;
   gap: 14px;
 }}
-.home-link {{
+.header-actions {{
   margin-left: auto;
   flex-shrink: 0;
+  display: flex;
+  gap: 8px;
+}}
+.home-link, .shutdown-btn {{
   color: var(--text-dim);
   font-size: 0.85rem;
   text-decoration: none;
@@ -740,8 +744,12 @@ header {{
   padding: 7px 14px;
   border: 1px solid var(--card-border);
   border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
 }}
 .home-link:hover {{ color: var(--accent); border-color: var(--accent); }}
+.shutdown-btn:hover {{ color: var(--missing); border-color: var(--missing); }}
 .card-thumb.commander-thumb {{
   width: 60px;
   height: 84px;
@@ -1077,7 +1085,7 @@ footer {{
       <h1>{title}</h1>
       <div class="source"><a href="{deck_url}" target="_blank" rel="noopener noreferrer">{deck_url}</a></div>
     </div>
-    {home_link_html}
+    {header_actions_html}
   </div>
   <div class="stats">
     <div class="stat owned">Owned <b id="stat-owned">{owned}</b></div>
@@ -1426,6 +1434,17 @@ if (saveOverridesBtn) {{
         setTimeout(() => {{ saveOverridesBtn.textContent = original; }}, 1600);
       }});
   }});
+}}
+
+const shutdownBtn = document.getElementById('shutdown-btn');
+if (shutdownBtn) {{
+  shutdownBtn.addEventListener('click', () => {{
+    if (!confirm('Shut down the server? You will need to relaunch it to use this again.')) return;
+    fetch('/shutdown', {{ method: 'POST' }}).catch(() => {{}});
+    document.body.innerHTML =
+      '<main style="max-width:640px;margin:0 auto;padding:40px 24px;">'
+      + '<p style="color:var(--text-dim);">Server stopped. You can close this tab.</p></main>';
+  }});
 }}"""
 
 
@@ -1601,14 +1620,19 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
     if overrides_endpoint:
         save_overrides_js = _post_overrides_js(overrides_endpoint)
         save_overrides_title = "Save which owned cards are reserved for other decks -- remembered automatically for this deck"
-        home_link_html = '<a class="home-link" href="/">&larr; New comparison</a>'
+        header_actions_html = (
+            '<div class="header-actions">'
+            '<a class="home-link" href="/">&larr; New comparison</a>'
+            '<button type="button" class="shutdown-btn" id="shutdown-btn" title="Stops the local server">&#9209; Shut Down</button>'
+            '</div>'
+        )
     else:
         save_overrides_js = _download_overrides_js()
         save_overrides_title = (
             "Download a JSON file remembering which owned cards are reserved for other decks -- "
             "drop it in your ManaBox export folder and future runs will account for it automatically"
         )
-        home_link_html = ""
+        header_actions_html = ""
 
     return HTML_TEMPLATE.format(
         title=html.escape(deck_name),
@@ -1633,5 +1657,5 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
         deck_name_json=deck_name_json,
         save_overrides_js=save_overrides_js,
         save_overrides_title=save_overrides_title,
-        home_link_html=home_link_html,
+        header_actions_html=header_actions_html,
     )
