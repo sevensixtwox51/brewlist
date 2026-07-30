@@ -70,6 +70,15 @@ def scryfall_image_url(scryfall_id: str | None, size: str = "normal") -> str | N
     return f"{SCRYFALL_IMAGE_BASE}/{size}/front/{scryfall_id[0]}/{scryfall_id[1]}/{scryfall_id}.jpg"
 
 
+SCRYFALL_SYMBOL_BASE = "https://svgs.scryfall.io/card-symbols"
+
+
+def mana_symbol_url(color: str) -> str:
+    """Direct Scryfall CDN hotlink to the official mana symbol SVG for a single
+    WUBRG letter (or 'C' for colorless) -- same no-API-call approach as card art."""
+    return f"{SCRYFALL_SYMBOL_BASE}/{color}.svg"
+
+
 @dataclass
 class CardEntry:
     name: str
@@ -946,6 +955,17 @@ details.bucket[open] > summary::before {{ transform: rotate(90deg); }}
   gap: 6px;
   flex-wrap: wrap;
 }}
+.color-icons {{
+  display: inline-flex;
+  gap: 2px;
+  align-items: center;
+  flex-shrink: 0;
+}}
+.mana-icon {{
+  width: 14px;
+  height: 14px;
+  display: block;
+}}
 .icon {{ font-size: 0.85rem; }}
 .card.owned .icon {{ color: var(--owned); }}
 .card.missing .icon {{ color: var(--missing); }}
@@ -1515,6 +1535,14 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
             if e.is_foil:
                 badges += '<span class="badge">Foil</span>'
 
+            card_colors = [c for c in WUBRG if c in e.color_identity]
+            color_icons_html = ""
+            if card_colors:
+                color_icons_html = '<span class="color-icons">' + "".join(
+                    f'<img class="mana-icon" src="{html.escape(mana_symbol_url(c))}" alt="{c}" loading="lazy">'
+                    for c in card_colors
+                ) + '</span>'
+
             thumb_html = _thumb_html(_display_scryfall_id(r))
 
             best_nonfoil, nonfoil_used_foil = priced_for_finish(e, want_foil=False)
@@ -1564,7 +1592,7 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
       <div class="card-info">
         <div class="card-name">
           <span class="icon icon-owned">&#10003;</span><span class="icon icon-missing">&#10007;</span>
-          {name_esc}{badges}
+          {name_esc}{color_icons_html}{badges}
         </div>
         <div class="qty qty-owned">need {e.quantity} &middot; have {r.have}{reserved_note}</div>
         <div class="qty qty-missing">need {e.quantity} more &middot; marked as used in another deck</div>
@@ -1584,7 +1612,7 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
     {thumb_html}
     <div class="card-body">
       <div class="card-info">
-        <div class="card-name"><span class="icon">&#10007;</span>{name_esc}{badges}</div>
+        <div class="card-name"><span class="icon">&#10007;</span>{name_esc}{color_icons_html}{badges}</div>
         <div class="qty">need {r.shortfall} more &middot; deck wants {e.quantity}{have_str}</div>
       </div>
       <div class="card-prices">
