@@ -12,6 +12,10 @@ __pycache__/
 venv/
 *.egg-info/
 
+# Flask app runtime data -- your ManaBox collection + saved project state,
+# not source and not meant to be shared/committed
+data/
+
 # OS / editor cruft
 .DS_Store
 
