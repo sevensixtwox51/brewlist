@@ -1,0 +1,19 @@
+# Generated reports (script output, not source)
+*_comparison.html
+*_comparison.md
+*_missing.csv
+*_overrides.json
+*_shopping_list.csv
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# OS / editor cruft
+.DS_Store
+
+# Local harness config (not meant to be shared)
+.claude/
