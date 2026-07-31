@@ -19,6 +19,7 @@ import re
 import time
 import unicodedata
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 
@@ -26,7 +27,7 @@ __all__ = [
     "CardEntry", "CardResult", "OwnedPrinting", "OwnedCard",
     "parse_deck_id", "fetch_deck", "extract_entries",
     "normalize_name", "find_collection_candidates", "load_collection", "load_overrides",
-    "fetch_scryfall_prices_by_id", "price_for_printing", "select_used_printings",
+    "fetch_scryfall_prices_by_id", "fetch_cheapest_printings", "price_for_printing", "select_used_printings",
     "categorize", "shopping_group", "shopping_group_rank",
     "best_prices", "priced_for_finish", "build_comparison",
     "render_markdown", "write_missing_csv", "render_html",
@@ -93,6 +94,11 @@ class CardEntry:
     set_name: str = ""
     set_code: str = ""
     collector_number: str = ""
+    # Cheapest (price, url) found across every paper printing of this card via
+    # Scryfall search (see fetch_cheapest_printings) -- filled in by
+    # build_comparison before pricing happens, None until then / on lookup failure.
+    cheapest_nonfoil: tuple | None = None
+    cheapest_foil: tuple | None = None
 
 
 @dataclass
@@ -351,6 +357,91 @@ def fetch_scryfall_prices_by_id(scryfall_ids: set[str], on_progress=None) -> dic
     return cache
 
 
+SCRYFALL_SEARCH_API = "https://api.scryfall.com/cards/search"
+
+
+def fetch_cheapest_printings(card_names: set[str], on_progress=None) -> dict[str, dict]:
+    """For each unique card name, search every paper printing on Scryfall and
+    keep the cheapest nonfoil/foil price found -- a true baseline price,
+    instead of whichever single printing a Moxfield decklist entry happens to
+    reference (which can be a rare, dramatically more expensive alt-art).
+    Returns {card_name: {"nonfoil": (price, url) | None, "foil": (price, url) | None}}.
+    A name that can't be resolved simply maps to {"nonfoil": None, "foil": None}
+    so callers can fall back to other price data.
+
+    `on_progress`, if given, is called as on_progress(done, total) once per
+    card name (each of which may itself take several paginated requests)."""
+    cache: dict[str, dict] = {}
+    names = sorted(card_names)
+    if not names:
+        return cache
+
+    max_pages = 10  # safety cap (1750 printings) -- staple lands can have hundreds
+    max_attempts = 3  # transient network hiccups shouldn't silently fall back to worse pricing
+    for i, name in enumerate(names, 1):
+        best_nonfoil: tuple | None = None
+        best_foil: tuple | None = None
+        query = f'!"{name}" game:paper'
+        url = f"{SCRYFALL_SEARCH_API}?q={urllib.parse.quote(query)}&unique=prints"
+        try:
+            for _ in range(max_pages):
+                if not url:
+                    break
+                req = urllib.request.Request(
+                    url,
+                    headers={
+                        "User-Agent": "moxfield-vs-collection-script/1.0 (personal use)",
+                        "Accept": "application/json",
+                    },
+                )
+                for attempt in range(max_attempts):
+                    try:
+                        with urllib.request.urlopen(req, timeout=10) as resp:
+                            data = json.loads(resp.read().decode("utf-8"))
+                        break
+                    except urllib.error.HTTPError as e:
+                        if attempt == max_attempts - 1:
+                            raise
+                        if e.code == 429:
+                            # Rate-limited -- back off longer than a plain
+                            # network hiccup, honoring Retry-After if sent.
+                            retry_after = e.headers.get("Retry-After") if e.headers else None
+                            try:
+                                delay = float(retry_after) if retry_after else 1.5 * (attempt + 1)
+                            except ValueError:
+                                delay = 1.5 * (attempt + 1)
+                            time.sleep(delay)
+                        else:
+                            time.sleep(0.3 * (attempt + 1))
+                    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+                        if attempt == max_attempts - 1:
+                            raise
+                        time.sleep(0.3 * (attempt + 1))
+                for card in data.get("data", []):
+                    purchase_url = (card.get("purchase_uris") or {}).get("tcgplayer")
+                    if not purchase_url:
+                        continue
+                    prices = card.get("prices") or {}
+                    nonfoil_price = prices.get("usd")
+                    if nonfoil_price:
+                        p = float(nonfoil_price)
+                        if best_nonfoil is None or p < best_nonfoil[0]:
+                            best_nonfoil = (p, purchase_url)
+                    foil_price = prices.get("usd_foil")
+                    if foil_price:
+                        p = float(foil_price)
+                        if best_foil is None or p < best_foil[0]:
+                            best_foil = (p, purchase_url)
+                url = data.get("next_page") if data.get("has_more") else None
+                time.sleep(0.075)
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError):
+            pass
+        cache[name] = {"nonfoil": best_nonfoil, "foil": best_foil}
+        if on_progress:
+            on_progress(i, len(names))
+    return cache
+
+
 def price_for_printing(scryfall_prices: dict, printing: OwnedPrinting) -> float | None:
     """Pick the right price field for a specific owned printing/finish, falling
     back to whatever finish that printing *does* have priced rather than nothing."""
@@ -442,15 +533,30 @@ def best_prices(entry: CardEntry, foil: bool | None = None, max_results: int = 3
 
     `foil` picks which finish to price -- defaults to the finish the decklist entry
     itself specifies (entry.is_foil). Foil and nonfoil prices come from separate
-    Moxfield fields and can differ a lot, so pass foil=True/False explicitly to
-    price the other finish.
+    fields and can differ a lot, so pass foil=True/False explicitly to price the
+    other finish.
 
-    By default, if the requested finish has no listed price at a store, we fall
-    back to whatever finish *is* priced there (better than showing nothing). Pass
+    Prefers the cheapest price found across *every* printing of the card (see
+    fetch_cheapest_printings / entry.cheapest_nonfoil/foil) -- a true baseline,
+    since whichever single printing a Moxfield decklist entry happens to
+    reference can be a rare, dramatically more expensive alt-art. Falls back to
+    Moxfield's own referenced-printing price/link data if no Scryfall-search
+    price was found for this finish (e.g. the search failed or the card
+    couldn't be resolved).
+
+    By default, if the requested finish has no listed price, we fall back to
+    whatever finish *is* priced (better than showing nothing). Pass
     strict=True to disable that fallback -- used when a caller wants to know
     specifically whether that finish is priced (e.g. the HTML foil/nonfoil toggle).
     """
     want_foil = entry.is_foil if foil is None else foil
+
+    cheapest = entry.cheapest_foil if want_foil else entry.cheapest_nonfoil
+    if cheapest is None and not strict:
+        cheapest = entry.cheapest_nonfoil if want_foil else entry.cheapest_foil
+    if cheapest:
+        return [("TCGP", cheapest[0], cheapest[1])]
+
     results = []
     for label, nonfoil_key, foil_key, nonfoil_url_key, foil_url_key in STORES:
         key = foil_key if want_foil else nonfoil_key
@@ -516,8 +622,28 @@ def build_comparison(
     # Pass 2: one Scryfall lookup per unique owned printing that's actually in
     # this deck (not your whole collection), so owned cards are valued by the
     # exact treatment you hold rather than whichever printing Moxfield's
-    # decklist happens to reference.
-    price_cache = fetch_scryfall_prices_by_id(needed_ids, on_progress=on_progress)
+    # decklist happens to reference. Also look up the cheapest printing of
+    # every card by name (owned and missing alike -- owned cards' hidden "need
+    # another copy" panel uses it too), so shortfall/replacement costs reflect
+    # a true baseline instead of whichever printing the decklist references.
+    all_names = {e.name for e in entries}
+    total_work = len(needed_ids) + len(all_names)
+
+    def _scaled_progress(offset):
+        if not on_progress or not total_work:
+            return None
+
+        def _p(done, _total):
+            on_progress(offset + done, total_work)
+
+        return _p
+
+    price_cache = fetch_scryfall_prices_by_id(needed_ids, on_progress=_scaled_progress(0))
+    cheapest_cache = fetch_cheapest_printings(all_names, on_progress=_scaled_progress(len(needed_ids)))
+    for e in entries:
+        hit = cheapest_cache.get(e.name) or {}
+        e.cheapest_nonfoil = hit.get("nonfoil")
+        e.cheapest_foil = hit.get("foil")
 
     buckets: dict[str, list[CardResult]] = {}
     totals = {
