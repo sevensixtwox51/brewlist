@@ -15,9 +15,11 @@ from __future__ import annotations
 
 import json
 import os
+import threading
+import uuid
 from datetime import datetime, timezone
 
-from flask import Flask, Response, abort, request
+from flask import Flask, Response, abort, jsonify, request
 
 from mtg_core import (
     build_comparison,
@@ -98,6 +100,49 @@ def collection_meta() -> dict | None:
 
 
 # --------------------------------------------------------------------------
+# Comparison jobs -- pricing owned cards via Scryfall is a series of
+# rate-limited network calls that can take several seconds for a full deck,
+# so it runs in a background thread while the page polls for live progress
+# instead of blocking on one long request with no feedback.
+# --------------------------------------------------------------------------
+
+_JOBS_LOCK = threading.Lock()
+JOBS: dict[str, dict] = {}
+
+
+def _run_compare_job(job_id, entries, owned, break_out_basics, reserved,
+                      deck_id, deck_name, deck_url, options):
+    def _on_progress(done, total):
+        with _JOBS_LOCK:
+            job = JOBS.get(job_id)
+            if job:
+                job["done"] = done
+                job["total"] = total
+
+    try:
+        bucket_names, buckets, totals = build_comparison(
+            entries, owned, ignore_basics=not break_out_basics, overrides=reserved,
+            on_progress=_on_progress,
+        )
+        save_project(deck_id, deck_name=deck_name, deck_url=deck_url, options=options, reserved=reserved)
+        html_report = render_html(
+            deck_name, deck_url, deck_id, bucket_names, buckets, totals,
+            overrides_endpoint=f"/api/overrides/{deck_id}",
+        )
+        with _JOBS_LOCK:
+            job = JOBS.get(job_id)
+            if job:
+                job["status"] = "done"
+                job["html"] = html_report
+    except Exception as e:  # noqa: BLE001 -- surface any failure to the polling client
+        with _JOBS_LOCK:
+            job = JOBS.get(job_id)
+            if job:
+                job["status"] = "error"
+                job["error"] = str(e)
+
+
+# --------------------------------------------------------------------------
 # Home page
 # --------------------------------------------------------------------------
 
@@ -162,7 +207,10 @@ input[type="text"], input[type="url"], input[type="file"] {
 .project-list .when { color: var(--text-dim); font-size: 0.8rem; white-space: nowrap; }
 .error { color: var(--missing); background: color-mix(in srgb, var(--missing) 12%, var(--bg-elevated));
   border: 1px solid var(--missing); border-radius: 8px; padding: 12px 16px; margin-bottom: 20px; }
-#processing { display: none; color: var(--text-dim); font-size: 0.9rem; margin-top: 10px; }
+#progress-wrap { display: none; margin-top: 14px; }
+.progress-track { height: 8px; background: var(--card-border); border-radius: 4px; overflow: hidden; }
+.progress-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--owned), var(--accent)); transition: width 0.2s ease; }
+#progress-label { color: var(--text-dim); font-size: 0.85rem; margin-top: 8px; }
 """
 
 
@@ -209,9 +257,9 @@ def render_home_page(error: str | None = None, prefill_url: str = "") -> str:
     </div>
     <button type="button" class="btn small danger" id="shutdown-btn" title="Stops the local server">&#9209; Shut Down</button>
   </div>
-  {error_html}
+  <div id="error-box" class="error" style="display:{"block" if error else "none"};">{_esc(error) if error else ""}</div>
   {projects_html}
-  <form class="card" method="post" action="/compare" enctype="multipart/form-data" id="compare-form">
+  <form class="card" id="compare-form">
     <label for="moxfield_url">Moxfield deck URL</label>
     <input type="url" id="moxfield_url" name="moxfield_url" placeholder="https://moxfield.com/decks/..." value="{_esc(prefill_url)}" required>
 
@@ -225,14 +273,82 @@ def render_home_page(error: str | None = None, prefill_url: str = "") -> str:
     <div class="checkbox-row"><input type="checkbox" id="break_out_basics" name="break_out_basics" checked><label for="break_out_basics" style="margin:0;font-weight:400;">Break out basic lands separately</label></div>
 
     <button type="submit" class="btn" id="submit-btn">Compare</button>
-    <div id="processing">Fetching the deck and pricing your collection&hellip; this can take up to 20 seconds for a full deck.</div>
+    <div id="progress-wrap">
+      <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
+      <div id="progress-label">Fetching deck from Moxfield&hellip;</div>
+    </div>
   </form>
 </main>
 <script>
-document.getElementById('compare-form').addEventListener('submit', () => {{
-  document.getElementById('submit-btn').disabled = true;
-  document.getElementById('submit-btn').textContent = 'Working...';
-  document.getElementById('processing').style.display = 'block';
+const form = document.getElementById('compare-form');
+const submitBtn = document.getElementById('submit-btn');
+const progressWrap = document.getElementById('progress-wrap');
+const progressFill = document.getElementById('progress-fill');
+const progressLabel = document.getElementById('progress-label');
+const errorBox = document.getElementById('error-box');
+
+function showError(message) {{
+  errorBox.textContent = message;
+  errorBox.style.display = 'block';
+}}
+
+function resetForm() {{
+  submitBtn.disabled = false;
+  submitBtn.textContent = 'Compare';
+  progressWrap.style.display = 'none';
+  progressFill.style.width = '0%';
+}}
+
+function pollProgress(jobId) {{
+  fetch('/compare/progress/' + jobId)
+    .then(r => r.json())
+    .then(data => {{
+      if (data.status === 'running') {{
+        if (data.total > 0) {{
+          const pct = Math.round((data.done / data.total) * 100);
+          progressFill.style.width = pct + '%';
+          progressLabel.textContent = 'Pricing owned cards via Scryfall... (' + data.done + '/' + data.total + ')';
+        }} else {{
+          progressLabel.textContent = 'Fetching deck and preparing comparison\\u2026';
+        }}
+        setTimeout(() => pollProgress(jobId), 400);
+      }} else if (data.status === 'done') {{
+        progressFill.style.width = '100%';
+        progressLabel.textContent = 'Done!';
+        window.location.href = '/compare/result/' + jobId;
+      }} else if (data.status === 'error') {{
+        showError(data.error || 'Something went wrong.');
+        resetForm();
+      }} else {{
+        showError('That comparison could not be found -- try again.');
+        resetForm();
+      }}
+    }})
+    .catch(() => {{
+      showError('Lost contact with the server while checking progress.');
+      resetForm();
+    }});
+}}
+
+form.addEventListener('submit', (e) => {{
+  e.preventDefault();
+  errorBox.style.display = 'none';
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Working...';
+  progressWrap.style.display = 'block';
+  progressFill.style.width = '0%';
+  progressLabel.textContent = 'Fetching deck from Moxfield\\u2026';
+
+  fetch('/compare/start', {{ method: 'POST', body: new FormData(form) }})
+    .then(r => r.json())
+    .then(data => {{
+      if (data.error) {{ showError(data.error); resetForm(); return; }}
+      pollProgress(data.job_id);
+    }})
+    .catch(() => {{
+      showError('Could not reach the server.');
+      resetForm();
+    }});
 }});
 
 document.getElementById('shutdown-btn').addEventListener('click', () => {{
@@ -262,15 +378,15 @@ def home():
     return render_home_page(prefill_url=prefill)
 
 
-@app.route("/compare", methods=["POST"])
-def compare():
+@app.route("/compare/start", methods=["POST"])
+def compare_start():
     moxfield_url = (request.form.get("moxfield_url") or "").strip()
     if not moxfield_url:
-        return render_home_page(error="A Moxfield deck URL is required.")
+        return jsonify(error="A Moxfield deck URL is required."), 400
 
     deck_id = parse_deck_id(moxfield_url)
     if not deck_id:
-        return render_home_page(error=f"Couldn't figure out a deck ID from '{moxfield_url}'.", prefill_url=moxfield_url)
+        return jsonify(error=f"Couldn't figure out a deck ID from '{moxfield_url}'."), 400
 
     include_sideboard = "include_sideboard" in request.form
     include_maybeboard = "include_maybeboard" in request.form
@@ -285,15 +401,12 @@ def compare():
                 "uploaded": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
             }, f)
     elif not os.path.isfile(COLLECTION_PATH):
-        return render_home_page(
-            error="No ManaBox collection on file yet -- upload your export first.",
-            prefill_url=moxfield_url,
-        )
+        return jsonify(error="No ManaBox collection on file yet -- upload your export first."), 400
 
     try:
         deck = fetch_deck(deck_id)
     except ValueError as e:
-        return render_home_page(error=str(e), prefill_url=moxfield_url)
+        return jsonify(error=str(e)), 400
 
     deck_name = deck.get("name", deck_id)
     deck_url = deck.get("publicUrl", f"https://moxfield.com/decks/{deck_id}")
@@ -302,36 +415,49 @@ def compare():
     try:
         owned = load_collection(COLLECTION_PATH)
     except ValueError as e:
-        return render_home_page(error=str(e), prefill_url=moxfield_url)
+        return jsonify(error=str(e)), 400
 
     project = load_project(deck_id)
     reserved = project.get("reserved") or {}
+    options = {
+        "include_sideboard": include_sideboard,
+        "include_maybeboard": include_maybeboard,
+        "break_out_basics": break_out_basics,
+    }
 
-    def _log_progress(done, total):
-        print(f"Pricing owned cards via Scryfall... ({done}/{total})", flush=True)
+    job_id = uuid.uuid4().hex
+    with _JOBS_LOCK:
+        JOBS[job_id] = {"status": "running", "done": 0, "total": 0, "html": None, "error": None}
 
-    bucket_names, buckets, totals = build_comparison(
-        entries, owned, ignore_basics=not break_out_basics, overrides=reserved,
-        on_progress=_log_progress,
-    )
+    threading.Thread(
+        target=_run_compare_job,
+        args=(job_id, entries, owned, break_out_basics, reserved, deck_id, deck_name, deck_url, options),
+        daemon=True,
+    ).start()
 
-    save_project(
-        deck_id,
-        deck_name=deck_name,
-        deck_url=deck_url,
-        options={
-            "include_sideboard": include_sideboard,
-            "include_maybeboard": include_maybeboard,
-            "break_out_basics": break_out_basics,
-        },
-        reserved=reserved,
-    )
+    return jsonify(job_id=job_id)
 
-    html_report = render_html(
-        deck_name, deck_url, deck_id, bucket_names, buckets, totals,
-        overrides_endpoint=f"/api/overrides/{deck_id}",
-    )
-    return Response(html_report, mimetype="text/html")
+
+@app.route("/compare/progress/<job_id>", methods=["GET"])
+def compare_progress(job_id):
+    with _JOBS_LOCK:
+        job = JOBS.get(job_id)
+        if not job:
+            return jsonify(status="not_found"), 404
+        return jsonify(status=job["status"], done=job["done"], total=job["total"], error=job["error"])
+
+
+@app.route("/compare/result/<job_id>", methods=["GET"])
+def compare_result(job_id):
+    with _JOBS_LOCK:
+        job = JOBS.get(job_id)
+        if job and job["status"] == "done":
+            del JOBS[job_id]  # single-use: the report is now fully in the client's hands
+    if not job:
+        return render_home_page(error="That comparison has expired or wasn't found -- try again.")
+    if job["status"] != "done":
+        return render_home_page(error=job.get("error") or "That comparison hasn't finished yet -- try again.")
+    return Response(job["html"], mimetype="text/html")
 
 
 @app.route("/api/overrides/<deck_id>", methods=["POST"])
@@ -379,4 +505,6 @@ if __name__ == "__main__":
     # use_reloader=False: the reloader runs the app in a child process and
     # respawns it on exit, which would silently undo the /shutdown route above.
     # debug=True is kept for friendly in-browser tracebacks if something breaks.
-    app.run(debug=True, use_reloader=False, port=port)
+    # threaded=True: the progress-polling requests need to be served while a
+    # background thread is doing the actual (slow) Scryfall pricing work.
+    app.run(debug=True, use_reloader=False, threaded=True, port=port)

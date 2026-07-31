@@ -90,6 +90,7 @@ _preflight_rich()
 try:
     from rich.console import Console
     from rich.panel import Panel
+    from rich.progress import BarColumn, Progress, TaskProgressColumn, TextColumn, TimeElapsedColumn
     from rich.prompt import Confirm, IntPrompt, Prompt
     from rich.table import Table
 except ImportError:
@@ -380,9 +381,19 @@ def run(deck_input, collection_path, collection_dir, include_sideboard,
             f"(from {overrides_path})[/dim]"
         )
 
-    with console.status("Pricing owned cards via Scryfall...") as status:
+    progress = Progress(
+        TextColumn("[dim]Pricing owned cards via Scryfall...[/dim]"),
+        BarColumn(),
+        TaskProgressColumn(),
+        TimeElapsedColumn(),
+        console=console,
+        transient=True,
+    )
+    with progress:
+        task_id = progress.add_task("pricing", total=None)
+
         def _on_progress(done, total):
-            status.update(f"Pricing owned cards via Scryfall... ({done}/{total})")
+            progress.update(task_id, total=total, completed=done)
 
         bucket_names, buckets, totals = build_comparison(
             entries, owned, ignore_basics=not include_basics, overrides=overrides,
