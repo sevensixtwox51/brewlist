@@ -111,7 +111,7 @@ JOBS: dict[str, dict] = {}
 
 
 def _run_compare_job(job_id, entries, owned, break_out_basics, reserved,
-                      deck_id, deck_name, deck_url, options):
+                      deck_id, deck_name, deck_url, options, fetch_cheapest=False):
     def _on_progress(done, total):
         with _JOBS_LOCK:
             job = JOBS.get(job_id)
@@ -122,12 +122,14 @@ def _run_compare_job(job_id, entries, owned, break_out_basics, reserved,
     try:
         bucket_names, buckets, totals = build_comparison(
             entries, owned, ignore_basics=not break_out_basics, overrides=reserved,
-            on_progress=_on_progress,
+            on_progress=_on_progress, fetch_cheapest=fetch_cheapest,
         )
         save_project(deck_id, deck_name=deck_name, deck_url=deck_url, options=options, reserved=reserved)
         html_report = render_html(
             deck_name, deck_url, deck_id, bucket_names, buckets, totals,
             overrides_endpoint=f"/api/overrides/{deck_id}",
+            refresh_endpoint=f"/compare/refresh-prices/{deck_id}",
+            prices_are_baseline=fetch_cheapest,
         )
         with _JOBS_LOCK:
             job = JOBS.get(job_id)
@@ -432,6 +434,54 @@ def compare_start():
     threading.Thread(
         target=_run_compare_job,
         args=(job_id, entries, owned, break_out_basics, reserved, deck_id, deck_name, deck_url, options),
+        daemon=True,
+    ).start()
+
+    return jsonify(job_id=job_id)
+
+
+@app.route("/compare/refresh-prices/<deck_id>", methods=["POST"])
+def compare_refresh_prices(deck_id):
+    """Re-runs a comparison that's already on file, this time with
+    fetch_cheapest=True -- the initial /compare/start is fast (skips the
+    per-card Scryfall cheapest-printing search), and this is what the report's
+    "Get Accurate Prices" button calls to fill that in on demand."""
+    project = load_project(deck_id)
+    if not project:
+        return jsonify(error="That deck hasn't been compared yet -- start from the home page."), 404
+
+    deck_url = project.get("deck_url", f"https://moxfield.com/decks/{deck_id}")
+    options = project.get("options") or {}
+    include_sideboard = bool(options.get("include_sideboard"))
+    include_maybeboard = bool(options.get("include_maybeboard"))
+    break_out_basics = bool(options.get("break_out_basics"))
+    reserved = project.get("reserved") or {}
+
+    if not os.path.isfile(COLLECTION_PATH):
+        return jsonify(error="No ManaBox collection on file -- upload your export first."), 400
+
+    try:
+        deck = fetch_deck(deck_id)
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+
+    deck_name = deck.get("name", project.get("deck_name", deck_id))
+    deck_url = deck.get("publicUrl", deck_url)
+    entries = extract_entries(deck, include_sideboard, include_maybeboard)
+
+    try:
+        owned = load_collection(COLLECTION_PATH)
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+
+    job_id = uuid.uuid4().hex
+    with _JOBS_LOCK:
+        JOBS[job_id] = {"status": "running", "done": 0, "total": 0, "html": None, "error": None}
+
+    threading.Thread(
+        target=_run_compare_job,
+        args=(job_id, entries, owned, break_out_basics, reserved, deck_id, deck_name, deck_url, options),
+        kwargs={"fetch_cheapest": True},
         daemon=True,
     ).start()
 

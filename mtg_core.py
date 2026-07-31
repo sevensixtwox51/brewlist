@@ -594,7 +594,7 @@ def priced_for_finish(entry: CardEntry, want_foil: bool, max_results: int = 3):
 
 def build_comparison(
     entries: list[CardEntry], owned_collection: dict[str, OwnedCard], ignore_basics: bool,
-    overrides: dict[str, int] | None = None, on_progress=None,
+    overrides: dict[str, int] | None = None, on_progress=None, fetch_cheapest: bool = True,
 ) -> tuple[list[str], dict[str, list[CardResult]], dict]:
     # Pass 1: figure out have/shortfall per entry, and which exact owned
     # printings (by Scryfall ID) cover the copies that go into this deck.
@@ -622,11 +622,16 @@ def build_comparison(
     # Pass 2: one Scryfall lookup per unique owned printing that's actually in
     # this deck (not your whole collection), so owned cards are valued by the
     # exact treatment you hold rather than whichever printing Moxfield's
-    # decklist happens to reference. Also look up the cheapest printing of
-    # every card by name (owned and missing alike -- owned cards' hidden "need
-    # another copy" panel uses it too), so shortfall/replacement costs reflect
-    # a true baseline instead of whichever printing the decklist references.
-    all_names = {e.name for e in entries}
+    # decklist happens to reference. If fetch_cheapest is set, also look up the
+    # cheapest printing of every card by name (owned and missing alike -- owned
+    # cards' hidden "need another copy" panel uses it too), so shortfall/
+    # replacement costs reflect a true baseline instead of whichever printing
+    # the decklist references. That search is one request per unique card name
+    # and can take a while on a big deck, so callers that want a fast first
+    # pass (e.g. the web app's initial comparison) can skip it and trigger it
+    # later on demand -- best_prices() already falls back to Moxfield's own
+    # referenced-printing data whenever cheapest_nonfoil/foil is None.
+    all_names = {e.name for e in entries} if fetch_cheapest else set()
     total_work = len(needed_ids) + len(all_names)
 
     def _scaled_progress(offset):
@@ -639,11 +644,12 @@ def build_comparison(
         return _p
 
     price_cache = fetch_scryfall_prices_by_id(needed_ids, on_progress=_scaled_progress(0))
-    cheapest_cache = fetch_cheapest_printings(all_names, on_progress=_scaled_progress(len(needed_ids)))
-    for e in entries:
-        hit = cheapest_cache.get(e.name) or {}
-        e.cheapest_nonfoil = hit.get("nonfoil")
-        e.cheapest_foil = hit.get("foil")
+    if fetch_cheapest:
+        cheapest_cache = fetch_cheapest_printings(all_names, on_progress=_scaled_progress(len(needed_ids)))
+        for e in entries:
+            hit = cheapest_cache.get(e.name) or {}
+            e.cheapest_nonfoil = hit.get("nonfoil")
+            e.cheapest_foil = hit.get("foil")
 
     buckets: dict[str, list[CardResult]] = {}
     totals = {
@@ -913,6 +919,7 @@ header .source a:hover {{ color: var(--accent); }}
 .stat.cost b {{ color: var(--gold); }}
 .stat.value b {{ color: var(--accent); }}
 .stat-sub {{ color: var(--text-dim); font-size: 0.8rem; }}
+.price-basis-note {{ color: var(--text-dim); font-size: 0.8rem; }}
 .progress {{
   flex: 1 1 200px;
   min-width: 160px;
@@ -1254,6 +1261,7 @@ footer {{
     {shopping_button}
     {instore_button}
     <button class="btn ghost" id="save-overrides-btn" title="{save_overrides_title}">&#128190; Save Overrides</button>
+    {cheapest_pricing_html}
   </div>
 </header>
 <main>
@@ -1519,6 +1527,8 @@ if (instoreBtn) instoreBtn.addEventListener('click', downloadInStoreCsv);
 
 {save_overrides_js}
 
+{refresh_prices_js}
+
 applyFilter();
 </script>
 </body>
@@ -1594,15 +1604,70 @@ if (shutdownBtn) {{
 }}"""
 
 
+def _refresh_prices_js(refresh_endpoint: str) -> str:
+    endpoint_json = json.dumps(refresh_endpoint)
+    return f"""const refreshPricesBtn = document.getElementById('refresh-prices-btn');
+if (refreshPricesBtn) {{
+  const refreshPricesLabel = document.getElementById('refresh-prices-label');
+  function pollRefreshPrices(jobId) {{
+    fetch('/compare/progress/' + jobId)
+      .then(r => r.json())
+      .then(data => {{
+        if (data.status === 'running') {{
+          refreshPricesLabel.textContent = data.total > 0
+            ? 'Fetching accurate prices\\u2026 (' + data.done + '/' + data.total + ')'
+            : 'Fetching accurate prices\\u2026';
+          setTimeout(() => pollRefreshPrices(jobId), 400);
+        }} else if (data.status === 'done') {{
+          refreshPricesLabel.textContent = 'Done! Reloading\\u2026';
+          window.location.href = '/compare/result/' + jobId;
+        }} else {{
+          refreshPricesLabel.textContent = data.error || 'Something went wrong.';
+          refreshPricesBtn.disabled = false;
+        }}
+      }})
+      .catch(() => {{
+        refreshPricesLabel.textContent = 'Lost contact with the server.';
+        refreshPricesBtn.disabled = false;
+      }});
+  }}
+  refreshPricesBtn.addEventListener('click', () => {{
+    refreshPricesBtn.disabled = true;
+    refreshPricesLabel.style.display = 'inline';
+    refreshPricesLabel.textContent = 'Starting\\u2026';
+    fetch({endpoint_json}, {{ method: 'POST' }})
+      .then(r => r.json())
+      .then(data => {{
+        if (data.error) {{ refreshPricesLabel.textContent = data.error; refreshPricesBtn.disabled = false; return; }}
+        pollRefreshPrices(data.job_id);
+      }})
+      .catch(() => {{
+        refreshPricesLabel.textContent = 'Could not reach the server.';
+        refreshPricesBtn.disabled = false;
+      }});
+  }});
+}}"""
+
+
 def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[str],
                  buckets: dict[str, list[CardResult]], totals: dict,
-                 overrides_endpoint: str | None = None) -> str:
+                 overrides_endpoint: str | None = None, refresh_endpoint: str | None = None,
+                 prices_are_baseline: bool = True) -> str:
     """Renders the full standalone HTML report.
 
     `overrides_endpoint`, if given (e.g. "/api/overrides/abc123" for the Flask
     app), makes the "Save Overrides" button POST there via fetch() instead of
     the CLI's default behavior of downloading a `{deck_id}_overrides.json`
     file for you to drop into your ManaBox export folder.
+
+    `prices_are_baseline` should reflect whether `totals`/`buckets` were built
+    with build_comparison(fetch_cheapest=True) -- i.e. whether prices already
+    reflect the cheapest printing found for each card, or Moxfield's own
+    (possibly much pricier) referenced printing. `refresh_endpoint`, if given
+    (e.g. "/compare/refresh-prices/abc123" for the Flask app) and
+    prices_are_baseline is False, shows a "Get Accurate Prices" button that
+    kicks off that slower search on demand instead of blocking the initial
+    comparison on it.
     """
     total_cards = totals["owned"] + totals["missing"]
     pct = (totals["owned"] / total_cards * 100) if total_cards else 100.0
@@ -1788,6 +1853,28 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
         )
         header_actions_html = ""
 
+    if prices_are_baseline:
+        cheapest_pricing_html = (
+            '<span class="price-basis-note" title="Every price reflects the cheapest paper printing found for that card">'
+            '&#10003; Accurate pricing</span>'
+        )
+        refresh_prices_js = ""
+    elif refresh_endpoint:
+        cheapest_pricing_html = (
+            '<button class="btn ghost" id="refresh-prices-btn" '
+            'title="Searches every printing of each card on Scryfall for the true cheapest price -- '
+            'slower (about a minute) but accurate">&#127919; Get Accurate Prices</button>'
+            '<span id="refresh-prices-label" class="price-basis-note" style="display:none;"></span>'
+        )
+        refresh_prices_js = _refresh_prices_js(refresh_endpoint)
+    else:
+        cheapest_pricing_html = (
+            '<span class="price-basis-note" title="Prices are whichever printing the Moxfield decklist references, '
+            'not necessarily the cheapest -- rerun with --cheapest-pricing for an accurate baseline">'
+            '&#9888; Prices not verified as cheapest</span>'
+        )
+        refresh_prices_js = ""
+
     return HTML_TEMPLATE.format(
         title=html.escape(deck_name),
         deck_name=html.escape(deck_name),
@@ -1812,4 +1899,6 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
         save_overrides_js=save_overrides_js,
         save_overrides_title=save_overrides_title,
         header_actions_html=header_actions_html,
+        cheapest_pricing_html=cheapest_pricing_html,
+        refresh_prices_js=refresh_prices_js,
     )

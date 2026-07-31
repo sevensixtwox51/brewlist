@@ -19,6 +19,10 @@ Markdown/HTML/CSV reports on disk).
   the Moxfield decklist happens to reference
 - Prices **missing** cards from Moxfield's TCGPlayer / Card Kingdom / ManaPool
   data, cheapest store first, foil and non-foil toggle
+- The initial comparison loads fast using that data as-is; a one-click
+  "Get Accurate Prices" step then searches every printing of each card on
+  Scryfall for the true cheapest baseline (Moxfield sometimes references a
+  rare, much pricier alt-art printing by default)
 - Total deck value at today's market price, plus the owned portion
 - Groups missing cards the way a physical store organizes its binders
   (Lands, Artifacts, then Colors split into mono-color / Multicolor /
@@ -76,6 +80,12 @@ From there:
    collection changes
 3. Hit **Compare**
 
+That first comparison loads in a few seconds. If you want accurate
+cheapest-printing prices instead of Moxfield's referenced printing, click
+**Get Accurate Prices** on the results page — it's slower (searches every
+printing of every card, roughly a minute for a full deck) but only needs to
+run when you actually want it.
+
 The app remembers each deck you've looked at as a "project": any
 "reserved for another deck" overrides you save, plus your last-used
 options, are recalled automatically the next time you paste that same URL
@@ -96,6 +106,15 @@ it in your browser:
 
 ```bash
 python3 moxfield_vs_collection.py https://moxfield.com/decks/... --open
+```
+
+By default prices reflect whichever printing Moxfield's decklist references
+(fast). Add `--cheapest-pricing` to search every printing of each card on
+Scryfall for the true cheapest baseline instead (slower — one extra request
+per unique card name):
+
+```bash
+python3 moxfield_vs_collection.py https://moxfield.com/decks/... --open --cheapest-pricing
 ```
 
 Run `python3 moxfield_vs_collection.py --help` for the full flag list.

@@ -316,6 +316,11 @@ def run_interactive():
     include_sideboard = Confirm.ask("Include sideboard cards?", default=False)
     include_maybeboard = Confirm.ask("Include maybeboard cards?", default=False)
     include_basics = not Confirm.ask("Break out basic lands separately?", default=True)
+    cheapest_pricing = Confirm.ask(
+        "Fetch accurate cheapest-printing prices? (slower -- searches every printing of "
+        "each card on Scryfall; otherwise prices reflect Moxfield's referenced printing)",
+        default=False,
+    )
 
     run(
         deck_input=deck_input,
@@ -332,6 +337,7 @@ def run_interactive():
         want_markdown=want_markdown,
         want_csv=want_csv,
         want_html=want_html,
+        cheapest_pricing=cheapest_pricing,
     )
 
 
@@ -341,7 +347,8 @@ def run_interactive():
 
 def run(deck_input, collection_path, collection_dir, include_sideboard,
         include_maybeboard, include_basics, output, missing_csv, html_output,
-        open_html, interactive, want_markdown=False, want_csv=False, want_html=False):
+        open_html, interactive, want_markdown=False, want_csv=False, want_html=False,
+        cheapest_pricing=False):
     if not deck_input or not deck_input.strip():
         raise SystemExit("A Moxfield deck URL or ID is required.")
 
@@ -381,8 +388,12 @@ def run(deck_input, collection_path, collection_dir, include_sideboard,
             f"(from {overrides_path})[/dim]"
         )
 
+    pricing_label = (
+        "Pricing cards via Scryfall (cheapest printing)..." if cheapest_pricing
+        else "Pricing owned cards via Scryfall..."
+    )
     progress = Progress(
-        TextColumn("[dim]Pricing owned cards via Scryfall...[/dim]"),
+        TextColumn(f"[dim]{pricing_label}[/dim]"),
         BarColumn(),
         TaskProgressColumn(),
         TimeElapsedColumn(),
@@ -397,7 +408,7 @@ def run(deck_input, collection_path, collection_dir, include_sideboard,
 
         bucket_names, buckets, totals = build_comparison(
             entries, owned, ignore_basics=not include_basics, overrides=overrides,
-            on_progress=_on_progress,
+            on_progress=_on_progress, fetch_cheapest=cheapest_pricing,
         )
     render_console(deck_name, deck_url, bucket_names, buckets, totals)
 
@@ -426,7 +437,10 @@ def run(deck_input, collection_path, collection_dir, include_sideboard,
         console.print(f"[green]Report written to {output}[/green]")
 
     if html_output:
-        html_report = render_html(deck_name, deck_url, deck_id, bucket_names, buckets, totals)
+        html_report = render_html(
+            deck_name, deck_url, deck_id, bucket_names, buckets, totals,
+            prices_are_baseline=cheapest_pricing,
+        )
         with open(html_output, "w", encoding="utf-8") as f:
             f.write(html_report)
         console.print(f"[green]HTML report written to {html_output}[/green]")
@@ -465,6 +479,10 @@ def main():
                               "using the default path)")
     parser.add_argument("--missing-csv", default=None,
                          help="Optional CSV path to dump just the missing cards with buy links")
+    parser.add_argument("--cheapest-pricing", action="store_true",
+                         help="Search every printing of each card on Scryfall for the true cheapest price "
+                              "(slower -- one extra request per unique card name). Without this, prices "
+                              "reflect whichever printing the Moxfield decklist happens to reference.")
     args = parser.parse_args()
 
     if args.deck is None:
@@ -483,6 +501,7 @@ def main():
         html_output=args.html_output,
         open_html=args.open,
         interactive=False,
+        cheapest_pricing=args.cheapest_pricing,
     )
 
 
