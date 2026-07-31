@@ -1,6 +1,6 @@
 # Web app (app.py)
 flask
 
-# CLI (moxfield_vs_collection.py) -- optional if you only use the web app
+# CLI (brewlist_cli.py) -- optional if you only use the web app
 rich
 pyfiglet

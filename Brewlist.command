@@ -1,5 +1,5 @@
 #!/bin/bash
-# Double-click this file in Finder to launch the web app and open it in your browser.
+# Double-click this file in Finder to launch Brewlist and open it in your browser.
 cd "$(dirname "$0")"
 
 # Find a free port, starting at 5050 (macOS's AirPlay Receiver often occupies 5000).
@@ -8,7 +8,7 @@ while lsof -i ":$PORT" >/dev/null 2>&1; do
   PORT=$((PORT + 1))
 done
 
-echo "Starting the app on port $PORT..."
+echo "Starting Brewlist on port $PORT..."
 PORT=$PORT python3 app.py &
 APP_PID=$!
 

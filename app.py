@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 
 from flask import Flask, Response, abort, jsonify, request
 
-from mtg_core import (
+from brewlist_core import (
     build_comparison,
     deck_key,
     extract_entries,
@@ -45,7 +45,7 @@ app = Flask(__name__)
 
 
 # --------------------------------------------------------------------------
-# Project persistence -- one JSON file per Moxfield deck, remembering the
+# Project persistence -- one JSON file per deck, remembering the
 # reserved-card overrides and last-used options so you never have to redo
 # either after the first visit.
 # --------------------------------------------------------------------------
@@ -249,14 +249,14 @@ def render_home_page(error: str | None = None, prefill_url: str = "") -> str:
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Moxfield vs. ManaBox</title>
+<title>Brewlist</title>
 <style>{PAGE_STYLE}</style>
 </head>
 <body>
 <main>
   <div class="page-header">
     <div>
-      <h1>Moxfield vs. ManaBox</h1>
+      <h1>Brewlist</h1>
       <p class="subtitle">Compare a decklist against your collection, with live pricing.</p>
     </div>
     <button type="button" class="btn small danger" id="shutdown-btn" title="Stops the local server">&#9209; Shut Down</button>
@@ -453,7 +453,7 @@ def compare_refresh_prices(deck_id):
     per-card Scryfall cheapest-printing search), and this is what the report's
     "Get Accurate Prices" button calls to fill that in on demand.
 
-    `deck_id` here is really the deck *key* (see mtg_core.deck_key) -- e.g. an
+    `deck_id` here is really the deck *key* (see brewlist_core.deck_key) -- e.g. an
     Archidekt deck's key is "archidekt-<id>", split back apart below to get
     the source and the raw ID the platform's own API expects."""
     project_key = deck_id

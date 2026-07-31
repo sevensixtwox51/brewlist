@@ -1,9 +1,9 @@
 """
-Shared logic for comparing a Moxfield decklist against a ManaBox collection
-export: Moxfield/Scryfall fetching, collection loading, price comparison, and
-HTML report rendering. No terminal/UI dependencies (no `rich`, no `input()`)
-so this module can be imported by both the CLI (moxfield_vs_collection.py)
-and the Flask app (app.py).
+Brewlist core: shared logic for comparing a Moxfield or Archidekt decklist
+against a ManaBox collection export -- deck/Scryfall fetching, collection
+loading, price comparison, and HTML report rendering. No terminal/UI
+dependencies (no `rich`, no `input()`) so this module can be imported by both
+the CLI (brewlist_cli.py) and the Flask app (app.py).
 """
 
 from __future__ import annotations

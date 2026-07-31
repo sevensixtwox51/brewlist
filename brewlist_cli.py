@@ -3,15 +3,15 @@
 Compare a Moxfield or Archidekt decklist against your ManaBox card collection.
 
 Interactive mode (menu-driven, no flags needed):
-    python3 moxfield_vs_collection.py
+    python3 brewlist_cli.py
 
 Direct / scriptable mode:
-    python3 moxfield_vs_collection.py <deck_url_or_id> [options]
+    python3 brewlist_cli.py <deck_url_or_id> [options]
 
 Examples:
-    python3 moxfield_vs_collection.py https://moxfield.com/decks/PoWfAXDZdHy0n9GEa47ZQw
-    python3 moxfield_vs_collection.py PoWfAXDZdHy0n9GEa47ZQw --collection-dir ~/Downloads
-    python3 moxfield_vs_collection.py PoWfAXDZdHy0n9GEa47ZQw --collection "ManaBox_Collection 2.csv"
+    python3 brewlist_cli.py https://moxfield.com/decks/PoWfAXDZdHy0n9GEa47ZQw
+    python3 brewlist_cli.py PoWfAXDZdHy0n9GEa47ZQw --collection-dir ~/Downloads
+    python3 brewlist_cli.py PoWfAXDZdHy0n9GEa47ZQw --collection "ManaBox_Collection 2.csv"
 
 By default the script looks in ~/Downloads for the most recently modified
 file whose name starts with "manabox" (case-insensitive) and ends in .csv,
@@ -137,7 +137,7 @@ def _preflight_pyfiglet() -> None:
 
 _preflight_pyfiglet()
 
-from mtg_core import (
+from brewlist_core import (
     CardResult,
     build_comparison,
     deck_key,
@@ -281,7 +281,7 @@ def choose_collection_file(candidates: list[str]) -> str:
 
 
 def run_interactive():
-    print_banner("MTG CHECK")
+    print_banner("BREWLIST")
     console.print(random.choice(MTG_FLAVOR_LINES), style="italic dim", justify="center")
     console.print()
     console.print(Panel("Moxfield/Archidekt decklist vs. ManaBox collection", border_style="cyan"))

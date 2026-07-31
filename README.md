@@ -1,9 +1,9 @@
-# Moxfield vs. ManaBox
+# Brewlist
 
-Compare a [Moxfield](https://moxfield.com) decklist against your
-[ManaBox](https://manabox.app) card collection: see what you already own,
-what's missing, and what it'll cost to finish the deck at today's market
-prices — sorted, filtered, and priced automatically.
+Compare a [Moxfield](https://moxfield.com) or [Archidekt](https://archidekt.com)
+decklist against your [ManaBox](https://manabox.app) card collection: see what
+you already own, what's missing, and what it'll cost to finish the deck at
+today's market prices — sorted, filtered, and priced automatically.
 
 Available two ways: a **web app** (paste a URL, upload a CSV, done — no
 terminal needed) and the original **CLI** (menu-driven, generates
@@ -11,17 +11,18 @@ Markdown/HTML/CSV reports on disk).
 
 ## What it does
 
-- Fetches a decklist straight from Moxfield's API given just the deck URL
+- Fetches a decklist straight from Moxfield's or Archidekt's API given just
+  the deck URL — paste either kind, it's auto-detected
 - Matches it against a ManaBox collection export (`Quantity`, `Foil`,
   `Scryfall ID`, etc.) — no manual bookkeeping
 - Prices **owned** cards by the *exact printing you actually have* (showcase,
   extended art, etched foil, ...) via Scryfall, not just whichever printing
-  the Moxfield decklist happens to reference
-- Prices **missing** cards from Moxfield's TCGPlayer / Card Kingdom / ManaPool
-  data, cheapest store first, foil and non-foil toggle
+  the decklist happens to reference
+- Prices **missing** cards from the source site's own store data first
+  (fast), foil and non-foil toggle
 - The initial comparison loads fast using that data as-is; a one-click
   "Get Accurate Prices" step then searches every printing of each card on
-  Scryfall for the true cheapest baseline (Moxfield sometimes references a
+  Scryfall for the true cheapest baseline (decklists sometimes reference a
   rare, much pricier alt-art printing by default)
 - Total deck value at today's market price, plus the owned portion
 - Groups missing cards the way a physical store organizes its binders
@@ -41,8 +42,8 @@ Markdown/HTML/CSV reports on disk).
 ## Install
 
 ```bash
-git clone https://github.com/sevensixtwox51/mtg-inventory.git
-cd mtg-inventory
+git clone https://github.com/sevensixtwox51/brewlist.git
+cd brewlist
 pip3 install -r requirements.txt
 ```
 
@@ -56,7 +57,7 @@ pip3 install --break-system-packages -r requirements.txt
 
 ## Usage: web app (recommended)
 
-**macOS:** double-click `Compare_Deck.command` in Finder. It finds a free
+**macOS:** double-click `Brewlist.command` in Finder. It finds a free
 port automatically, starts the app, and opens your browser to it. Closing
 the terminal window (or the "Shut Down" button in the page itself) stops
 the server.
@@ -74,14 +75,15 @@ port: `PORT=5050 python3 app.py`.)
 
 From there:
 
-1. Paste a Moxfield deck URL (e.g. `https://moxfield.com/decks/...`)
+1. Paste a Moxfield or Archidekt deck URL (e.g. `https://moxfield.com/decks/...`
+   or `https://archidekt.com/decks/...`)
 2. Upload your ManaBox collection export (`.csv`) the first time — after
    that, it's remembered, so you only need to re-upload when your actual
    collection changes
 3. Hit **Compare**
 
 That first comparison loads in a few seconds. If you want accurate
-cheapest-printing prices instead of Moxfield's referenced printing, click
+cheapest-printing prices instead of the decklist's referenced printing, click
 **Get Accurate Prices** on the results page — it's slower (searches every
 printing of every card, roughly a minute for a full deck) but only needs to
 run when you actually want it.
@@ -94,7 +96,7 @@ options, are recalled automatically the next time you paste that same URL
 ## Usage: CLI
 
 ```bash
-python3 moxfield_vs_collection.py
+python3 brewlist_cli.py
 ```
 
 Menu-driven — it'll ask for the deck URL, look for a ManaBox export in
@@ -105,33 +107,35 @@ Or scripted, for automation — `--open` generates the HTML report and opens
 it in your browser:
 
 ```bash
-python3 moxfield_vs_collection.py https://moxfield.com/decks/... --open
+python3 brewlist_cli.py https://moxfield.com/decks/... --open
 ```
 
-By default prices reflect whichever printing Moxfield's decklist references
+(An Archidekt URL works the same way: `https://archidekt.com/decks/... --open`.)
+
+By default prices reflect whichever printing the decklist references
 (fast). Add `--cheapest-pricing` to search every printing of each card on
 Scryfall for the true cheapest baseline instead (slower — one extra request
 per unique card name):
 
 ```bash
-python3 moxfield_vs_collection.py https://moxfield.com/decks/... --open --cheapest-pricing
+python3 brewlist_cli.py https://moxfield.com/decks/... --open --cheapest-pricing
 ```
 
-Run `python3 moxfield_vs_collection.py --help` for the full flag list.
+Run `python3 brewlist_cli.py --help` for the full flag list.
 
 ## Where your data lives
 
 Everything the web app remembers — your uploaded collection and any saved
 per-deck overrides — is stored locally under `data/`, which is excluded
 from version control (`.gitignore`). Nothing leaves your machine except
-the calls to Moxfield's and Scryfall's public APIs needed to fetch decklists
-and prices.
+the calls to Moxfield's, Archidekt's, and Scryfall's public APIs needed to
+fetch decklists and prices.
 
 ## Project layout
 
 | File | Purpose |
 | --- | --- |
-| `mtg_core.py` | Shared logic: Moxfield/Scryfall fetching, ManaBox parsing, price comparison, HTML report rendering. No UI dependencies — imported by both entry points below. |
+| `brewlist_core.py` | Shared logic: Moxfield/Archidekt/Scryfall fetching, ManaBox parsing, price comparison, HTML report rendering. No UI dependencies — imported by both entry points below. |
 | `app.py` | Flask web app. |
-| `moxfield_vs_collection.py` | Terminal CLI (interactive menu or scriptable flags). |
-| `Compare_Deck.command` | macOS double-click launcher for the web app. |
+| `brewlist_cli.py` | Terminal CLI (interactive menu or scriptable flags). |
+| `Brewlist.command` | macOS double-click launcher for the web app. |
