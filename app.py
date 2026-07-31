@@ -24,11 +24,13 @@ from flask import Flask, Response, abort, jsonify, request
 from brewlist_core import (
     build_comparison,
     deck_key,
+    ensure_price_index,
     extract_entries,
     fetch_deck,
     load_collection,
     normalize_name,
     parse_deck_ref,
+    price_index_age_days,
     render_html,
     split_deck_key,
 )
@@ -197,6 +199,11 @@ input[type="text"], input[type="url"], input[type="file"] {
   border: 1px solid var(--card-border); font-weight: 500;
 }
 .btn.danger:hover { color: var(--missing); border-color: var(--missing); filter: none; }
+.btn.ghost {
+  background: transparent; color: var(--text);
+  border: 1px solid var(--card-border); font-weight: 500;
+}
+.btn.ghost:hover { color: var(--accent); border-color: var(--accent); filter: none; }
 .page-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
 .collection-status { font-size: 0.85rem; color: var(--text-dim); margin-bottom: 12px; }
 .collection-status b { color: var(--owned); }
@@ -244,6 +251,15 @@ def render_home_page(error: str | None = None, prefill_url: str = "") -> str:
 
     error_html = f'<div class="error">{_esc(error)}</div>' if error else ""
 
+    index_age = price_index_age_days()
+    if index_age is None:
+        index_status = 'Not built yet — first use downloads it (~75MB, one-time, refreshed weekly after).'
+    elif index_age < 1:
+        index_status = 'Built today.'
+    else:
+        days = int(index_age)
+        index_status = f'Built {days} day{"s" if days != 1 else ""} ago.'
+
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -283,6 +299,12 @@ def render_home_page(error: str | None = None, prefill_url: str = "") -> str:
       <div id="progress-label">Fetching deck from Moxfield&hellip;</div>
     </div>
   </form>
+  <div class="card" id="price-index-card">
+    <label>Cheapest-price data</label>
+    <div class="collection-status" id="price-index-status">{_esc(index_status)}</div>
+    <button type="button" class="btn ghost small" id="refresh-index-btn">&#128260; Refresh Price Data</button>
+    <div id="refresh-index-label" class="hint" style="display:none;margin-top:8px;"></div>
+  </div>
 </main>
 <script>
 const form = document.getElementById('compare-form');
@@ -362,6 +384,58 @@ document.getElementById('shutdown-btn').addEventListener('click', () => {{
   document.body.innerHTML =
     '<main><p style="color:var(--text-dim);padding-top:40px;">Server stopped. You can close this tab.</p></main>';
 }});
+
+const refreshIndexBtn = document.getElementById('refresh-index-btn');
+const refreshIndexLabel = document.getElementById('refresh-index-label');
+const refreshIndexStatus = document.getElementById('price-index-status');
+
+function fmtIndexProgress(done, total) {{
+  if (total > 100000) {{
+    return (done / 1048576).toFixed(1) + ' / ' + (total / 1048576).toFixed(1) + ' MB';
+  }}
+  return done + '/' + total;
+}}
+
+function pollIndexRefresh(jobId) {{
+  fetch('/compare/progress/' + jobId)
+    .then(r => r.json())
+    .then(data => {{
+      if (data.status === 'running') {{
+        refreshIndexLabel.textContent = data.total > 0
+          ? 'Downloading\\u2026 (' + fmtIndexProgress(data.done, data.total) + ')'
+          : 'Starting\\u2026';
+        setTimeout(() => pollIndexRefresh(jobId), 400);
+      }} else if (data.status === 'done') {{
+        refreshIndexLabel.textContent = 'Done!';
+        refreshIndexStatus.textContent = 'Built just now.';
+        refreshIndexBtn.disabled = false;
+        setTimeout(() => {{ refreshIndexLabel.style.display = 'none'; }}, 2000);
+      }} else {{
+        refreshIndexLabel.textContent = data.error || 'Something went wrong.';
+        refreshIndexBtn.disabled = false;
+      }}
+    }})
+    .catch(() => {{
+      refreshIndexLabel.textContent = 'Lost contact with the server.';
+      refreshIndexBtn.disabled = false;
+    }});
+}}
+
+refreshIndexBtn.addEventListener('click', () => {{
+  refreshIndexBtn.disabled = true;
+  refreshIndexLabel.style.display = 'block';
+  refreshIndexLabel.textContent = 'Starting\\u2026';
+  fetch('/price-index/refresh', {{ method: 'POST' }})
+    .then(r => r.json())
+    .then(data => {{
+      if (data.error) {{ refreshIndexLabel.textContent = data.error; refreshIndexBtn.disabled = false; return; }}
+      pollIndexRefresh(data.job_id);
+    }})
+    .catch(() => {{
+      refreshIndexLabel.textContent = 'Could not reach the server.';
+      refreshIndexBtn.disabled = false;
+    }});
+}});
 </script>
 </body>
 </html>
@@ -381,6 +455,41 @@ def _esc(s) -> str:
 def home():
     prefill = request.args.get("deck", "")
     return render_home_page(prefill_url=prefill)
+
+
+@app.route("/price-index/refresh", methods=["POST"])
+def refresh_price_index():
+    """Force-rebuilds the local cheapest-price index (see ensure_price_index
+    in brewlist_core.py) regardless of how fresh it already is -- the home
+    page's "Refresh Price Data" button. Runs in the same background-job +
+    polling machinery as a deck comparison, but has no follow-up /compare/result
+    step (see compare_progress's self-cleanup for jobs with no "html")."""
+    job_id = uuid.uuid4().hex
+    with _JOBS_LOCK:
+        JOBS[job_id] = {"status": "running", "done": 0, "total": 0, "html": None, "error": None}
+
+    def _run():
+        def _on_progress(done, total):
+            with _JOBS_LOCK:
+                job = JOBS.get(job_id)
+                if job:
+                    job["done"] = done
+                    job["total"] = total
+        try:
+            ensure_price_index(on_progress=_on_progress, force_refresh=True)
+            with _JOBS_LOCK:
+                job = JOBS.get(job_id)
+                if job:
+                    job["status"] = "done"
+        except Exception as e:  # noqa: BLE001 -- surface any failure to the polling client
+            with _JOBS_LOCK:
+                job = JOBS.get(job_id)
+                if job:
+                    job["status"] = "error"
+                    job["error"] = str(e)
+
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify(job_id=job_id)
 
 
 @app.route("/compare/start", methods=["POST"])
@@ -511,7 +620,14 @@ def compare_progress(job_id):
         job = JOBS.get(job_id)
         if not job:
             return jsonify(status="not_found"), 404
-        return jsonify(status=job["status"], done=job["done"], total=job["total"], error=job["error"])
+        status, done, total, error = job["status"], job["done"], job["total"], job["error"]
+        # Deck-comparison jobs keep their finished HTML around for the
+        # follow-up GET /compare/result/<job_id> to serve and clean up. Jobs
+        # with no such follow-up (e.g. a bare price-index refresh) have
+        # nothing to fetch afterward, so they're self-cleaning here instead.
+        if status in ("done", "error") and not job.get("html"):
+            del JOBS[job_id]
+    return jsonify(status=status, done=done, total=total, error=error)
 
 
 @app.route("/compare/result/<job_id>", methods=["GET"])

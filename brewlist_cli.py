@@ -141,6 +141,7 @@ from brewlist_core import (
     CardResult,
     build_comparison,
     deck_key,
+    ensure_price_index,
     extract_entries,
     fetch_deck,
     find_collection_candidates,
@@ -342,6 +343,31 @@ def run_interactive():
     )
 
 
+def refresh_price_index_cli() -> None:
+    """Force-downloads a fresh cheapest-price index and exits -- the
+    --refresh-price-index flag. Same index build_comparison(fetch_cheapest=True)
+    reuses automatically once it's less than a week old."""
+    progress = Progress(
+        TextColumn("[dim]Downloading price data from Scryfall...[/dim]"),
+        BarColumn(),
+        TaskProgressColumn(),
+        TimeElapsedColumn(),
+        console=console,
+        transient=True,
+    )
+    with progress:
+        task_id = progress.add_task("downloading", total=None)
+
+        def _on_progress(done, total):
+            progress.update(task_id, total=total, completed=done)
+
+        try:
+            index = ensure_price_index(on_progress=_on_progress, force_refresh=True)
+        except ValueError as e:
+            raise SystemExit(str(e))
+    console.print(f"[green]Price index refreshed -- {len(index)} unique card names.[/green]")
+
+
 # --------------------------------------------------------------------------
 # Core run
 # --------------------------------------------------------------------------
@@ -412,10 +438,13 @@ def run(deck_input, collection_path, collection_dir, include_sideboard,
         def _on_progress(done, total):
             progress.update(task_id, total=total, completed=done)
 
-        bucket_names, buckets, totals = build_comparison(
-            entries, owned, ignore_basics=not include_basics, overrides=overrides,
-            on_progress=_on_progress, fetch_cheapest=cheapest_pricing,
-        )
+        try:
+            bucket_names, buckets, totals = build_comparison(
+                entries, owned, ignore_basics=not include_basics, overrides=overrides,
+                on_progress=_on_progress, fetch_cheapest=cheapest_pricing,
+            )
+        except ValueError as e:
+            raise SystemExit(str(e))
     render_console(deck_name, deck_url, bucket_names, buckets, totals)
 
     if totals["missing"] == 0:
@@ -486,10 +515,18 @@ def main():
     parser.add_argument("--missing-csv", default=None,
                          help="Optional CSV path to dump just the missing cards with buy links")
     parser.add_argument("--cheapest-pricing", action="store_true",
-                         help="Search every printing of each card on Scryfall for the true cheapest price "
-                              "(slower -- one extra request per unique card name). Without this, prices "
-                              "reflect whichever printing the source decklist happens to reference.")
+                         help="Price every card from the cheapest printing available, using a local price index "
+                              "(downloaded from Scryfall the first time, then reused for a week). Without this, "
+                              "prices reflect whichever printing the source decklist happens to reference.")
+    parser.add_argument("--refresh-price-index", action="store_true",
+                         help="Force-download a fresh copy of the local cheapest-price index (see "
+                              "--cheapest-pricing) and exit. Normally this refreshes itself automatically once "
+                              "a week -- use this to update it sooner.")
     args = parser.parse_args()
+
+    if args.refresh_price_index:
+        refresh_price_index_cli()
+        return
 
     if args.deck is None:
         run_interactive()

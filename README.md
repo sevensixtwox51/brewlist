@@ -21,9 +21,12 @@ Markdown/HTML/CSV reports on disk).
 - Prices **missing** cards from the source site's own store data first
   (fast), foil and non-foil toggle
 - The initial comparison loads fast using that data as-is; a one-click
-  "Get Accurate Prices" step then searches every printing of each card on
-  Scryfall for the true cheapest baseline (decklists sometimes reference a
-  rare, much pricier alt-art printing by default)
+  "Get Accurate Prices" step then looks up the true cheapest printing of
+  every card (decklists sometimes reference a rare, much pricier alt-art
+  printing by default) via a local price index built from Scryfall's public
+  bulk data — a one-time ~75MB download, refreshed automatically once a
+  week (or on demand), so this step is instant afterward instead of hitting
+  Scryfall's API once per card
 - Total deck value at today's market price, plus the owned portion
 - Groups missing cards the way a physical store organizes its binders
   (Lands, Artifacts, then Colors split into mono-color / Multicolor /
@@ -84,9 +87,10 @@ From there:
 
 That first comparison loads in a few seconds. If you want accurate
 cheapest-printing prices instead of the decklist's referenced printing, click
-**Get Accurate Prices** on the results page — it's slower (searches every
-printing of every card, roughly a minute for a full deck) but only needs to
-run when you actually want it.
+**Get Accurate Prices** on the results page. The first time you do this (or
+after the weekly auto-refresh), it downloads a ~75MB price index from
+Scryfall — after that it's instant. You can also refresh that index on
+demand from the home page's **Refresh Price Data** button.
 
 The app remembers each deck you've looked at as a "project": any
 "reserved for another deck" overrides you save, plus your last-used
@@ -113,23 +117,27 @@ python3 brewlist_cli.py https://moxfield.com/decks/... --open
 (An Archidekt URL works the same way: `https://archidekt.com/decks/... --open`.)
 
 By default prices reflect whichever printing the decklist references
-(fast). Add `--cheapest-pricing` to search every printing of each card on
-Scryfall for the true cheapest baseline instead (slower — one extra request
-per unique card name):
+(fast). Add `--cheapest-pricing` to price every card from its cheapest
+printing instead, using the local price index described above (downloads
+automatically the first time, then instant):
 
 ```bash
 python3 brewlist_cli.py https://moxfield.com/decks/... --open --cheapest-pricing
 ```
 
+Use `--refresh-price-index` on its own to force-update that index sooner
+than its automatic weekly refresh.
+
 Run `python3 brewlist_cli.py --help` for the full flag list.
 
 ## Where your data lives
 
-Everything the web app remembers — your uploaded collection and any saved
-per-deck overrides — is stored locally under `data/`, which is excluded
-from version control (`.gitignore`). Nothing leaves your machine except
-the calls to Moxfield's, Archidekt's, and Scryfall's public APIs needed to
-fetch decklists and prices.
+Everything the app remembers — your uploaded collection, any saved
+per-deck overrides, and the local cheapest-price index (see above) — is
+stored locally under `data/`, which is excluded from version control
+(`.gitignore`). Nothing leaves your machine except the calls to Moxfield's,
+Archidekt's, and Scryfall's public APIs needed to fetch decklists and
+prices.
 
 ## Project layout
 

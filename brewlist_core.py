@@ -11,6 +11,7 @@ from __future__ import annotations
 import csv
 import datetime
 import glob
+import gzip
 import html
 import json
 import math
@@ -19,7 +20,6 @@ import re
 import time
 import unicodedata
 import urllib.error
-import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 
@@ -27,7 +27,9 @@ __all__ = [
     "CardEntry", "CardResult", "OwnedPrinting", "OwnedCard",
     "parse_deck_ref", "deck_key", "split_deck_key", "fetch_deck", "extract_entries",
     "normalize_name", "find_collection_candidates", "load_collection", "load_overrides",
-    "fetch_scryfall_prices_by_id", "fetch_cheapest_printings", "price_for_printing", "select_used_printings",
+    "fetch_scryfall_prices_by_id", "price_for_printing", "select_used_printings",
+    "price_index_age_days", "rebuild_price_index", "ensure_price_index",
+    "PRICE_INDEX_PATH", "PRICE_INDEX_MAX_AGE_DAYS",
     "categorize", "shopping_group", "shopping_group_rank",
     "best_prices", "priced_for_finish", "build_comparison",
     "render_markdown", "write_missing_csv", "render_html",
@@ -480,89 +482,154 @@ def fetch_scryfall_prices_by_id(scryfall_ids: set[str], on_progress=None) -> dic
     return cache
 
 
-SCRYFALL_SEARCH_API = "https://api.scryfall.com/cards/search"
+# --------------------------------------------------------------------------
+# Cheapest-printing baseline pricing -- a local index built from Scryfall's
+# public bulk data dump (one JSON object per unique printing, same schema as
+# their live API), reduced to the cheapest paper nonfoil/foil TCGPlayer price
+# per unique card name. This replaced an earlier per-card live-search
+# implementation: with ~90 unique names in a typical deck, live searches
+# routinely tripped Scryfall's rate limiter. A single ~75MB download refreshed
+# on a schedule (see PRICE_INDEX_MAX_AGE_DAYS) has no such risk and, once
+# warm, resolves every card in a deck instantly with zero network calls.
+# --------------------------------------------------------------------------
+
+SCRYFALL_BULK_DATA_TYPE_API = "https://api.scryfall.com/bulk-data/default_cards"
+
+_CORE_DIR = os.path.dirname(os.path.abspath(__file__))
+PRICE_INDEX_PATH = os.path.join(_CORE_DIR, "data", "price_index.json")
+PRICE_INDEX_MAX_AGE_DAYS = 7
 
 
-def fetch_cheapest_printings(card_names: set[str], on_progress=None) -> dict[str, dict]:
-    """For each unique card name, search every paper printing on Scryfall and
-    keep the cheapest nonfoil/foil price found -- a true baseline price,
-    instead of whichever single printing a Moxfield decklist entry happens to
-    reference (which can be a rare, dramatically more expensive alt-art).
-    Returns {card_name: {"nonfoil": (price, url) | None, "foil": (price, url) | None}}.
-    A name that can't be resolved simply maps to {"nonfoil": None, "foil": None}
-    so callers can fall back to other price data.
+def price_index_age_days(path: str = PRICE_INDEX_PATH) -> float | None:
+    """Age of the local price index in days, or None if it doesn't exist or
+    can't be read (treated the same as "needs a rebuild" by callers)."""
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            built_at = json.load(f).get("built_at")
+        built = datetime.datetime.fromisoformat(built_at)
+    except (OSError, ValueError, TypeError):
+        return None
+    return (datetime.datetime.now(datetime.timezone.utc) - built).total_seconds() / 86400
 
-    `on_progress`, if given, is called as on_progress(done, total) once per
-    card name (each of which may itself take several paginated requests)."""
-    cache: dict[str, dict] = {}
-    names = sorted(card_names)
-    if not names:
-        return cache
 
-    max_pages = 10  # safety cap (1750 printings) -- staple lands can have hundreds
-    max_attempts = 3  # transient network hiccups shouldn't silently fall back to worse pricing
-    for i, name in enumerate(names, 1):
-        best_nonfoil: tuple | None = None
-        best_foil: tuple | None = None
-        query = f'!"{name}" game:paper'
-        url = f"{SCRYFALL_SEARCH_API}?q={urllib.parse.quote(query)}&unique=prints"
-        try:
-            for _ in range(max_pages):
-                if not url:
+def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[str, dict]:
+    """Downloads Scryfall's "default_cards" bulk data dump and reduces it to
+    {normalized_name: {"nonfoil": [price, url] | None, "foil": [...] | None}},
+    writing the result to `path`. Double-faced/split cards are indexed under
+    both their combined name and their front-face name, since decklists
+    typically reference only the front face.
+
+    `on_progress(bytes_done, bytes_total)`, if given, reports download
+    progress -- parsing the (already-downloaded) file afterward is fast
+    enough not to need its own granular progress.
+
+    Raises ValueError on any network failure (nothing is written in that
+    case, so a prior index -- if any -- is left untouched)."""
+    req = urllib.request.Request(
+        SCRYFALL_BULK_DATA_TYPE_API,
+        headers={"User-Agent": "brewlist/1.0 (personal use)", "Accept": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            meta = json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, urllib.error.HTTPError) as e:
+        raise ValueError(f"Could not reach Scryfall's bulk data API: {e}")
+
+    download_uri = meta.get("download_uri") or meta.get("jsonl_download_uri")
+    total_bytes = meta.get("compressed_size") or 0
+    if not download_uri:
+        raise ValueError("Scryfall's bulk data API didn't return a download link.")
+
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp_path = path + ".download"
+    try:
+        req = urllib.request.Request(download_uri, headers={"User-Agent": "brewlist/1.0 (personal use)"})
+        with urllib.request.urlopen(req, timeout=120) as resp, open(tmp_path, "wb") as out:
+            downloaded = 0
+            while True:
+                chunk = resp.read(1 << 16)
+                if not chunk:
                     break
-                req = urllib.request.Request(
-                    url,
-                    headers={
-                        "User-Agent": "moxfield-vs-collection-script/1.0 (personal use)",
-                        "Accept": "application/json",
-                    },
-                )
-                for attempt in range(max_attempts):
-                    try:
-                        with urllib.request.urlopen(req, timeout=10) as resp:
-                            data = json.loads(resp.read().decode("utf-8"))
-                        break
-                    except urllib.error.HTTPError as e:
-                        if attempt == max_attempts - 1:
-                            raise
-                        if e.code == 429:
-                            # Rate-limited -- back off longer than a plain
-                            # network hiccup, honoring Retry-After if sent.
-                            retry_after = e.headers.get("Retry-After") if e.headers else None
-                            try:
-                                delay = float(retry_after) if retry_after else 1.5 * (attempt + 1)
-                            except ValueError:
-                                delay = 1.5 * (attempt + 1)
-                            time.sleep(delay)
-                        else:
-                            time.sleep(0.3 * (attempt + 1))
-                    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
-                        if attempt == max_attempts - 1:
-                            raise
-                        time.sleep(0.3 * (attempt + 1))
-                for card in data.get("data", []):
-                    purchase_url = (card.get("purchase_uris") or {}).get("tcgplayer")
-                    if not purchase_url:
-                        continue
-                    prices = card.get("prices") or {}
-                    nonfoil_price = prices.get("usd")
+                out.write(chunk)
+                downloaded += len(chunk)
+                if on_progress:
+                    on_progress(downloaded, total_bytes or downloaded)
+    except (urllib.error.URLError, urllib.error.HTTPError) as e:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        raise ValueError(f"Could not download Scryfall's price data: {e}")
+
+    index: dict[str, dict] = {}
+    try:
+        with gzip.open(tmp_path, "rt", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    card = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if "paper" not in (card.get("games") or []):
+                    continue
+                purchase_url = (card.get("purchase_uris") or {}).get("tcgplayer")
+                if not purchase_url:
+                    continue
+                prices = card.get("prices") or {}
+                nonfoil_price = prices.get("usd")
+                foil_price = prices.get("usd_foil")
+                if not nonfoil_price and not foil_price:
+                    continue
+
+                names = {normalize_name(card.get("name") or "")}
+                faces = card.get("card_faces") or []
+                if faces and faces[0].get("name"):
+                    names.add(normalize_name(faces[0]["name"]))
+                names.discard("")
+
+                for nm in names:
+                    entry = index.setdefault(nm, {"nonfoil": None, "foil": None})
                     if nonfoil_price:
                         p = float(nonfoil_price)
-                        if best_nonfoil is None or p < best_nonfoil[0]:
-                            best_nonfoil = (p, purchase_url)
-                    foil_price = prices.get("usd_foil")
+                        if entry["nonfoil"] is None or p < entry["nonfoil"][0]:
+                            entry["nonfoil"] = [p, purchase_url]
                     if foil_price:
                         p = float(foil_price)
-                        if best_foil is None or p < best_foil[0]:
-                            best_foil = (p, purchase_url)
-                url = data.get("next_page") if data.get("has_more") else None
-                time.sleep(0.075)
-        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError):
-            pass
-        cache[name] = {"nonfoil": best_nonfoil, "foil": best_foil}
-        if on_progress:
-            on_progress(i, len(names))
-    return cache
+                        if entry["foil"] is None or p < entry["foil"][0]:
+                            entry["foil"] = [p, purchase_url]
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+    payload = {
+        "built_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "card_count": len(index),
+        "prices": index,
+    }
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f)
+    return index
+
+
+def ensure_price_index(path: str = PRICE_INDEX_PATH, on_progress=None, force_refresh: bool = False) -> dict[str, dict]:
+    """Returns the local {name: {"nonfoil":..., "foil":...}} price index,
+    rebuilding it (a real download) only if it's missing, older than
+    PRICE_INDEX_MAX_AGE_DAYS, or force_refresh is set. A warm index returns
+    instantly with no network calls."""
+    if not force_refresh:
+        age = price_index_age_days(path)
+        if age is not None and age < PRICE_INDEX_MAX_AGE_DAYS:
+            try:
+                with open(path, encoding="utf-8") as f:
+                    prices = json.load(f).get("prices") or {}
+                if on_progress:
+                    on_progress(1, 1)
+                return prices
+            except (OSError, ValueError):
+                pass  # corrupt cache file -- fall through and rebuild
+    return rebuild_price_index(path, on_progress=on_progress)
 
 
 def price_for_printing(scryfall_prices: dict, printing: OwnedPrinting) -> float | None:
@@ -744,35 +811,25 @@ def build_comparison(
 
     # Pass 2: one Scryfall lookup per unique owned printing that's actually in
     # this deck (not your whole collection), so owned cards are valued by the
-    # exact treatment you hold rather than whichever printing Moxfield's
-    # decklist happens to reference. If fetch_cheapest is set, also look up the
+    # exact treatment you hold rather than whichever printing the decklist
+    # happens to reference. If fetch_cheapest is set, also look up the
     # cheapest printing of every card by name (owned and missing alike -- owned
     # cards' hidden "need another copy" panel uses it too), so shortfall/
     # replacement costs reflect a true baseline instead of whichever printing
-    # the decklist references. That search is one request per unique card name
-    # and can take a while on a big deck, so callers that want a fast first
-    # pass (e.g. the web app's initial comparison) can skip it and trigger it
-    # later on demand -- best_prices() already falls back to Moxfield's own
-    # referenced-printing data whenever cheapest_nonfoil/foil is None.
-    all_names = {e.name for e in entries} if fetch_cheapest else set()
-    total_work = len(needed_ids) + len(all_names)
-
-    def _scaled_progress(offset):
-        if not on_progress or not total_work:
-            return None
-
-        def _p(done, _total):
-            on_progress(offset + done, total_work)
-
-        return _p
-
-    price_cache = fetch_scryfall_prices_by_id(needed_ids, on_progress=_scaled_progress(0))
+    # the decklist references -- via the local bulk price index (see
+    # ensure_price_index), which downloads only if missing/stale and is
+    # otherwise instant, unlike a live per-card search. Callers that want a
+    # fast first pass with neither of these refinements (e.g. the web app's
+    # initial comparison) can skip it and trigger it later on demand --
+    # best_prices() already falls back to the decklist's own referenced-
+    # printing data whenever cheapest_nonfoil/foil is None.
+    price_cache = fetch_scryfall_prices_by_id(needed_ids, on_progress=on_progress)
     if fetch_cheapest:
-        cheapest_cache = fetch_cheapest_printings(all_names, on_progress=_scaled_progress(len(needed_ids)))
+        by_name = ensure_price_index(on_progress=on_progress)
         for e in entries:
-            hit = cheapest_cache.get(e.name) or {}
-            e.cheapest_nonfoil = hit.get("nonfoil")
-            e.cheapest_foil = hit.get("foil")
+            hit = by_name.get(normalize_name(e.name)) or {}
+            e.cheapest_nonfoil = tuple(hit["nonfoil"]) if hit.get("nonfoil") else None
+            e.cheapest_foil = tuple(hit["foil"]) if hit.get("foil") else None
 
     buckets: dict[str, list[CardResult]] = {}
     totals = {
@@ -1733,13 +1790,21 @@ def _refresh_prices_js(refresh_endpoint: str) -> str:
     return f"""const refreshPricesBtn = document.getElementById('refresh-prices-btn');
 if (refreshPricesBtn) {{
   const refreshPricesLabel = document.getElementById('refresh-prices-label');
+  function fmtProgress(done, total) {{
+    // Large totals mean bytes (downloading the price index); small ones
+    // mean a plain card count (pricing owned printings).
+    if (total > 100000) {{
+      return (done / 1048576).toFixed(1) + ' / ' + (total / 1048576).toFixed(1) + ' MB';
+    }}
+    return done + '/' + total;
+  }}
   function pollRefreshPrices(jobId) {{
     fetch('/compare/progress/' + jobId)
       .then(r => r.json())
       .then(data => {{
         if (data.status === 'running') {{
           refreshPricesLabel.textContent = data.total > 0
-            ? 'Fetching accurate prices\\u2026 (' + data.done + '/' + data.total + ')'
+            ? 'Fetching accurate prices\\u2026 (' + fmtProgress(data.done, data.total) + ')'
             : 'Fetching accurate prices\\u2026';
           setTimeout(() => pollRefreshPrices(jobId), 400);
         }} else if (data.status === 'done') {{
