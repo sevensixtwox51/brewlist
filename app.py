@@ -249,6 +249,7 @@ def render_home_page(error: str | None = None, prefill_url: str = "") -> str:
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/svg+xml" href="https://svgs.scryfall.io/card-symbols/PW.svg">
 <title>Brewlist</title>
 <style>{PAGE_STYLE}</style>
 </head>
