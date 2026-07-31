@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Compare a Moxfield decklist against your ManaBox card collection.
+Compare a Moxfield or Archidekt decklist against your ManaBox card collection.
 
 Interactive mode (menu-driven, no flags needed):
     python3 moxfield_vs_collection.py
 
 Direct / scriptable mode:
-    python3 moxfield_vs_collection.py <moxfield_url_or_id> [options]
+    python3 moxfield_vs_collection.py <deck_url_or_id> [options]
 
 Examples:
     python3 moxfield_vs_collection.py https://moxfield.com/decks/PoWfAXDZdHy0n9GEa47ZQw
@@ -140,12 +140,13 @@ _preflight_pyfiglet()
 from mtg_core import (
     CardResult,
     build_comparison,
+    deck_key,
     extract_entries,
     fetch_deck,
     find_collection_candidates,
     load_collection,
     load_overrides,
-    parse_deck_id,
+    parse_deck_ref,
     render_html,
     render_markdown,
     write_missing_csv,
@@ -283,11 +284,11 @@ def run_interactive():
     print_banner("MTG CHECK")
     console.print(random.choice(MTG_FLAVOR_LINES), style="italic dim", justify="center")
     console.print()
-    console.print(Panel("Moxfield decklist vs. ManaBox collection", border_style="cyan"))
+    console.print(Panel("Moxfield/Archidekt decklist vs. ManaBox collection", border_style="cyan"))
 
     deck_input = ""
     while not deck_input.strip():
-        deck_input = Prompt.ask("Moxfield deck URL or ID")
+        deck_input = Prompt.ask("Moxfield or Archidekt deck URL")
         if not deck_input.strip():
             console.print("[red]A deck URL or ID is required.[/red]")
 
@@ -350,20 +351,25 @@ def run(deck_input, collection_path, collection_dir, include_sideboard,
         open_html, interactive, want_markdown=False, want_csv=False, want_html=False,
         cheapest_pricing=False):
     if not deck_input or not deck_input.strip():
-        raise SystemExit("A Moxfield deck URL or ID is required.")
+        raise SystemExit("A Moxfield or Archidekt deck URL or ID is required.")
 
-    deck_id = parse_deck_id(deck_input)
+    source, deck_id = parse_deck_ref(deck_input)
     if not deck_id:
         raise SystemExit(f"Couldn't figure out a deck ID from '{deck_input}'.")
-    with console.status(f"Fetching deck '{deck_id}' from Moxfield..."):
+    project_key = deck_key(source, deck_id)
+    source_label = "Archidekt" if source == "archidekt" else "Moxfield"
+    with console.status(f"Fetching deck '{deck_id}' from {source_label}..."):
         try:
-            deck = fetch_deck(deck_id)
+            deck = fetch_deck(source, deck_id)
         except ValueError as e:
             raise SystemExit(str(e))
     deck_name = deck.get("name", deck_id)
-    deck_url = deck.get("publicUrl", f"https://moxfield.com/decks/{deck_id}")
+    if source == "archidekt":
+        deck_url = f"https://archidekt.com/decks/{deck_id}"
+    else:
+        deck_url = deck.get("publicUrl", f"https://moxfield.com/decks/{deck_id}")
 
-    entries = extract_entries(deck, include_sideboard, include_maybeboard)
+    entries = extract_entries(source, deck, include_sideboard, include_maybeboard)
     console.print(f"[dim]Deck '{deck_name}': {len(entries)} unique cards[/dim]")
 
     if not collection_path:
@@ -381,7 +387,7 @@ def run(deck_input, collection_path, collection_dir, include_sideboard,
     owned = load_collection(collection_path)
     console.print(f"[dim]Collection has {len(owned)} unique card names[/dim]")
 
-    overrides, overrides_path = load_overrides(deck_id, collection_dir)
+    overrides, overrides_path = load_overrides(project_key, collection_dir)
     if overrides:
         console.print(
             f"[dim]Reserving {len(overrides)} card(s) for other decks "
@@ -438,7 +444,7 @@ def run(deck_input, collection_path, collection_dir, include_sideboard,
 
     if html_output:
         html_report = render_html(
-            deck_name, deck_url, deck_id, bucket_names, buckets, totals,
+            deck_name, deck_url, project_key, bucket_names, buckets, totals,
             prices_are_baseline=cheapest_pricing,
         )
         with open(html_output, "w", encoding="utf-8") as f:
@@ -462,7 +468,7 @@ def run(deck_input, collection_path, collection_dir, include_sideboard,
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("deck", nargs="?", default=None, help="Moxfield deck URL or deck id")
+    parser.add_argument("deck", nargs="?", default=None, help="Moxfield or Archidekt deck URL or deck id")
     parser.add_argument("--collection", help="Path to a specific ManaBox CSV export")
     parser.add_argument("--collection-dir", default="~/Downloads",
                          help="Directory to search for the newest manabox*.csv (default: ~/Downloads)")
@@ -482,7 +488,7 @@ def main():
     parser.add_argument("--cheapest-pricing", action="store_true",
                          help="Search every printing of each card on Scryfall for the true cheapest price "
                               "(slower -- one extra request per unique card name). Without this, prices "
-                              "reflect whichever printing the Moxfield decklist happens to reference.")
+                              "reflect whichever printing the source decklist happens to reference.")
     args = parser.parse_args()
 
     if args.deck is None:

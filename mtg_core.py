@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 
 __all__ = [
     "CardEntry", "CardResult", "OwnedPrinting", "OwnedCard",
-    "parse_deck_id", "fetch_deck", "extract_entries",
+    "parse_deck_ref", "deck_key", "split_deck_key", "fetch_deck", "extract_entries",
     "normalize_name", "find_collection_candidates", "load_collection", "load_overrides",
     "fetch_scryfall_prices_by_id", "fetch_cheapest_printings", "price_for_printing", "select_used_printings",
     "categorize", "shopping_group", "shopping_group_rank",
@@ -35,6 +35,7 @@ __all__ = [
 ]
 
 MOXFIELD_API = "https://api2.moxfield.com/v2/decks/all/{deck_id}"
+ARCHIDEKT_API = "https://archidekt.com/api/decks/{deck_id}/"
 
 # Card type buckets, in the order we check them against a card's type line.
 # A card is placed in the first bucket whose keyword appears in its type line.
@@ -113,19 +114,58 @@ class CardResult:
 
 
 # --------------------------------------------------------------------------
-# Moxfield fetching
+# Deck fetching -- Moxfield and Archidekt both have plain public JSON APIs
+# (no auth needed), so a deck URL is dispatched to the matching source's
+# fetch/extract pair. Everything downstream (build_comparison, pricing, HTML
+# rendering) only ever sees the shared CardEntry shape.
 # --------------------------------------------------------------------------
 
-def parse_deck_id(url_or_id: str) -> str:
+def parse_deck_ref(url_or_id: str) -> tuple[str, str]:
+    """Returns (source, deck_id) -- source is "moxfield" or "archidekt".
+    A bare ID with no recognizable URL defaults to "moxfield" (unchanged
+    behavior from before Archidekt support existed)."""
     url_or_id = url_or_id.strip()
+    match = re.search(r"archidekt\.com/decks/(\d+)", url_or_id)
+    if match:
+        return "archidekt", match.group(1)
     match = re.search(r"moxfield\.com/decks/([A-Za-z0-9_-]+)", url_or_id)
     if match:
-        return match.group(1)
-    # Assume the user passed a bare deck id already.
-    return url_or_id.rstrip("/").split("/")[-1]
+        return "moxfield", match.group(1)
+    # Assume the user passed a bare Moxfield deck id already.
+    return "moxfield", url_or_id.rstrip("/").split("/")[-1]
 
 
-def fetch_deck(deck_id: str) -> dict:
+def deck_key(source: str, deck_id: str) -> str:
+    """Storage/URL key for a deck (project files, override lookups, etc).
+    Moxfield keeps its bare deck_id, unprefixed, so anything saved before
+    Archidekt support existed still resolves; Archidekt gets a prefix since
+    its IDs are plain numbers with no similar built-in collision avoidance."""
+    return f"archidekt-{deck_id}" if source == "archidekt" else deck_id
+
+
+def split_deck_key(key: str) -> tuple[str, str]:
+    if key.startswith("archidekt-"):
+        return "archidekt", key[len("archidekt-"):]
+    return "moxfield", key
+
+
+def fetch_deck(source: str, deck_id: str) -> dict:
+    if source == "archidekt":
+        return _fetch_archidekt_deck(deck_id)
+    return _fetch_moxfield_deck(deck_id)
+
+
+def extract_entries(source: str, deck: dict, include_sideboard: bool, include_maybeboard: bool) -> list[CardEntry]:
+    if source == "archidekt":
+        return _extract_archidekt_entries(deck, include_sideboard, include_maybeboard)
+    return _extract_moxfield_entries(deck, include_sideboard, include_maybeboard)
+
+
+# --------------------------------------------------------------------------
+# Moxfield
+# --------------------------------------------------------------------------
+
+def _fetch_moxfield_deck(deck_id: str) -> dict:
     url = MOXFIELD_API.format(deck_id=deck_id)
     req = urllib.request.Request(
         url,
@@ -151,7 +191,7 @@ def fetch_deck(deck_id: str) -> dict:
         raise ValueError(f"Could not reach Moxfield API: {e.reason}")
 
 
-def extract_entries(deck: dict, include_sideboard: bool, include_maybeboard: bool) -> list[CardEntry]:
+def _extract_moxfield_entries(deck: dict, include_sideboard: bool, include_maybeboard: bool) -> list[CardEntry]:
     sections = [
         ("mainboard", deck.get("mainboard") or {}),
         ("commander", deck.get("commanders") or {}),
@@ -196,6 +236,89 @@ def extract_entries(deck: dict, include_sideboard: bool, include_maybeboard: boo
                     collector_number=str(card.get("cn") or ""),
                 )
             )
+    return entries
+
+
+# --------------------------------------------------------------------------
+# Archidekt
+# --------------------------------------------------------------------------
+
+def _fetch_archidekt_deck(deck_id: str) -> dict:
+    url = ARCHIDEKT_API.format(deck_id=deck_id)
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "moxfield-vs-collection-script/1.0 (personal use)",
+            "Accept": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            raise ValueError(f"Archidekt deck '{deck_id}' not found (404). Check the URL.")
+        raise ValueError(f"Archidekt API returned HTTP {e.code}: {e.reason}")
+    except urllib.error.URLError as e:
+        raise ValueError(f"Could not reach Archidekt API: {e.reason}")
+
+
+_ARCHIDEKT_COLOR_LETTERS = {"White": "W", "Blue": "U", "Black": "B", "Red": "R", "Green": "G"}
+
+
+def _extract_archidekt_entries(deck: dict, include_sideboard: bool, include_maybeboard: bool) -> list[CardEntry]:
+    entries: list[CardEntry] = []
+    for c in deck.get("cards", []):
+        categories = c.get("categories") or []
+        if c.get("companion"):
+            section = "companion"
+        elif "Commander" in categories:
+            section = "commander"
+        elif "Sideboard" in categories:
+            if not include_sideboard:
+                continue
+            section = "sideboard"
+        elif "Maybeboard" in categories:
+            if not include_maybeboard:
+                continue
+            section = "maybeboard"
+        else:
+            section = "mainboard"
+
+        card = c.get("card") or {}
+        oracle = card.get("oracleCard") or {}
+        edition = card.get("edition") or {}
+        prices = card.get("prices") or {}
+        tcg_product_id = card.get("tcgProductId")
+
+        # Archidekt's own price blob covers CK/Cardmarket/ManaPool too, but
+        # only gives raw vendor product IDs for TCGPlayer (not CK/MP), so a
+        # clickable link is only reliably buildable for TCGPlayer here. This
+        # is just the fast-path fallback anyway -- "Get Accurate Prices"
+        # (Scryfall's cheapest-printing search) works identically regardless
+        # of source, since it only ever needs the card name.
+        entries.append(
+            CardEntry(
+                name=oracle.get("name", ""),
+                quantity=c.get("quantity", 1),
+                type_line=" ".join((oracle.get("superTypes") or []) + (oracle.get("types") or [])),
+                is_foil="foil" in (c.get("modifier") or "").lower(),
+                section=section,
+                prices={"usd": prices.get("tcg"), "usd_foil": prices.get("tcgfoil")},
+                urls={
+                    "tcgPlayerUrl": f"https://www.tcgplayer.com/product/{tcg_product_id}" if tcg_product_id else None,
+                },
+                scryfall_id=card.get("uid"),
+                color_identity=[
+                    _ARCHIDEKT_COLOR_LETTERS[name]
+                    for name in (oracle.get("colorIdentity") or [])
+                    if name in _ARCHIDEKT_COLOR_LETTERS
+                ],
+                set_name=edition.get("editionname") or "",
+                set_code=(edition.get("editioncode") or "").upper(),
+                collector_number=str(card.get("collectorNumber") or ""),
+            )
+        )
     return entries
 
 

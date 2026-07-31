@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Flask web app for comparing a Moxfield decklist against your ManaBox
-collection -- paste the deck URL, upload your ManaBox export once, and it
-remembers both your collection and any "reserved for another deck" overrides
-per project (deck) between visits. No terminal required.
+Flask web app for comparing a Moxfield or Archidekt decklist against your
+ManaBox collection -- paste the deck URL, upload your ManaBox export once,
+and it remembers both your collection and any "reserved for another deck"
+overrides per project (deck) between visits. No terminal required.
 
 Run it with:
     python3 app.py
@@ -23,12 +23,14 @@ from flask import Flask, Response, abort, jsonify, request
 
 from mtg_core import (
     build_comparison,
+    deck_key,
     extract_entries,
     fetch_deck,
     load_collection,
     normalize_name,
-    parse_deck_id,
+    parse_deck_ref,
     render_html,
+    split_deck_key,
 )
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -262,8 +264,8 @@ def render_home_page(error: str | None = None, prefill_url: str = "") -> str:
   <div id="error-box" class="error" style="display:{"block" if error else "none"};">{_esc(error) if error else ""}</div>
   {projects_html}
   <form class="card" id="compare-form">
-    <label for="moxfield_url">Moxfield deck URL</label>
-    <input type="url" id="moxfield_url" name="moxfield_url" placeholder="https://moxfield.com/decks/..." value="{_esc(prefill_url)}" required>
+    <label for="moxfield_url">Moxfield or Archidekt deck URL</label>
+    <input type="url" id="moxfield_url" name="moxfield_url" placeholder="https://moxfield.com/decks/... or https://archidekt.com/decks/..." value="{_esc(prefill_url)}" required>
 
     {collection_html}
     <label for="manabox_csv">ManaBox collection export (.csv)</label>
@@ -382,13 +384,14 @@ def home():
 
 @app.route("/compare/start", methods=["POST"])
 def compare_start():
-    moxfield_url = (request.form.get("moxfield_url") or "").strip()
-    if not moxfield_url:
-        return jsonify(error="A Moxfield deck URL is required."), 400
+    deck_url_input = (request.form.get("moxfield_url") or "").strip()
+    if not deck_url_input:
+        return jsonify(error="A Moxfield or Archidekt deck URL is required."), 400
 
-    deck_id = parse_deck_id(moxfield_url)
+    source, deck_id = parse_deck_ref(deck_url_input)
     if not deck_id:
-        return jsonify(error=f"Couldn't figure out a deck ID from '{moxfield_url}'."), 400
+        return jsonify(error=f"Couldn't figure out a deck ID from '{deck_url_input}'."), 400
+    project_key = deck_key(source, deck_id)
 
     include_sideboard = "include_sideboard" in request.form
     include_maybeboard = "include_maybeboard" in request.form
@@ -406,20 +409,23 @@ def compare_start():
         return jsonify(error="No ManaBox collection on file yet -- upload your export first."), 400
 
     try:
-        deck = fetch_deck(deck_id)
+        deck = fetch_deck(source, deck_id)
     except ValueError as e:
         return jsonify(error=str(e)), 400
 
     deck_name = deck.get("name", deck_id)
-    deck_url = deck.get("publicUrl", f"https://moxfield.com/decks/{deck_id}")
-    entries = extract_entries(deck, include_sideboard, include_maybeboard)
+    if source == "archidekt":
+        deck_url = f"https://archidekt.com/decks/{deck_id}"
+    else:
+        deck_url = deck.get("publicUrl", f"https://moxfield.com/decks/{deck_id}")
+    entries = extract_entries(source, deck, include_sideboard, include_maybeboard)
 
     try:
         owned = load_collection(COLLECTION_PATH)
     except ValueError as e:
         return jsonify(error=str(e)), 400
 
-    project = load_project(deck_id)
+    project = load_project(project_key)
     reserved = project.get("reserved") or {}
     options = {
         "include_sideboard": include_sideboard,
@@ -433,7 +439,7 @@ def compare_start():
 
     threading.Thread(
         target=_run_compare_job,
-        args=(job_id, entries, owned, break_out_basics, reserved, deck_id, deck_name, deck_url, options),
+        args=(job_id, entries, owned, break_out_basics, reserved, project_key, deck_name, deck_url, options),
         daemon=True,
     ).start()
 
@@ -445,12 +451,21 @@ def compare_refresh_prices(deck_id):
     """Re-runs a comparison that's already on file, this time with
     fetch_cheapest=True -- the initial /compare/start is fast (skips the
     per-card Scryfall cheapest-printing search), and this is what the report's
-    "Get Accurate Prices" button calls to fill that in on demand."""
-    project = load_project(deck_id)
+    "Get Accurate Prices" button calls to fill that in on demand.
+
+    `deck_id` here is really the deck *key* (see mtg_core.deck_key) -- e.g. an
+    Archidekt deck's key is "archidekt-<id>", split back apart below to get
+    the source and the raw ID the platform's own API expects."""
+    project_key = deck_id
+    project = load_project(project_key)
     if not project:
         return jsonify(error="That deck hasn't been compared yet -- start from the home page."), 404
 
-    deck_url = project.get("deck_url", f"https://moxfield.com/decks/{deck_id}")
+    source, raw_deck_id = split_deck_key(project_key)
+    deck_url = project.get("deck_url") or (
+        f"https://archidekt.com/decks/{raw_deck_id}" if source == "archidekt"
+        else f"https://moxfield.com/decks/{raw_deck_id}"
+    )
     options = project.get("options") or {}
     include_sideboard = bool(options.get("include_sideboard"))
     include_maybeboard = bool(options.get("include_maybeboard"))
@@ -461,13 +476,14 @@ def compare_refresh_prices(deck_id):
         return jsonify(error="No ManaBox collection on file -- upload your export first."), 400
 
     try:
-        deck = fetch_deck(deck_id)
+        deck = fetch_deck(source, raw_deck_id)
     except ValueError as e:
         return jsonify(error=str(e)), 400
 
-    deck_name = deck.get("name", project.get("deck_name", deck_id))
-    deck_url = deck.get("publicUrl", deck_url)
-    entries = extract_entries(deck, include_sideboard, include_maybeboard)
+    deck_name = deck.get("name", project.get("deck_name", project_key))
+    if source != "archidekt":
+        deck_url = deck.get("publicUrl", deck_url)
+    entries = extract_entries(source, deck, include_sideboard, include_maybeboard)
 
     try:
         owned = load_collection(COLLECTION_PATH)
@@ -480,7 +496,7 @@ def compare_refresh_prices(deck_id):
 
     threading.Thread(
         target=_run_compare_job,
-        args=(job_id, entries, owned, break_out_basics, reserved, deck_id, deck_name, deck_url, options),
+        args=(job_id, entries, owned, break_out_basics, reserved, project_key, deck_name, deck_url, options),
         kwargs={"fetch_cheapest": True},
         daemon=True,
     ).start()
