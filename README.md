@@ -16,19 +16,18 @@ Markdown/HTML/CSV reports on disk).
 - Matches it against a ManaBox collection export (`Quantity`, `Foil`,
   `Scryfall ID`, etc.) — no manual bookkeeping
 - Prices **owned** cards by the *exact printing you actually have* (showcase,
-  extended art, etched foil, ...) via Scryfall, not just whichever printing
-  the decklist happens to reference
-- Prices **missing** cards from the source site's own store data first
-  (fast), foil and non-foil toggle
-- The initial comparison loads fast using that data as-is; a one-click
-  "Get Accurate Prices" step then looks up the true cheapest printing of
-  every card across TCGPlayer, Card Kingdom, and ManaPool (decklists
-  sometimes reference a rare, much pricier alt-art printing by default) via
-  a local price index built from MTGJSON's public bulk data — a one-time
-  ~325MB download, refreshed automatically once a week (or on demand), so
-  this step is instant afterward instead of a live lookup per card
-- Each accurate price shows a ▲/▼ trend arrow when it's moved 2%+ over the
-  past week, using MTGJSON's 90-day price history
+  extended art, etched foil, ...), not just whichever printing the decklist
+  happens to reference
+- Prices **missing** cards from the true cheapest printing available across
+  TCGPlayer, Card Kingdom, and ManaPool (decklists sometimes reference a
+  rare, much pricier alt-art printing by default), foil and non-foil toggle
+- All pricing comes from a local index built from MTGJSON's public bulk
+  data, so every comparison is accurate from the first click — no separate
+  "accurate pricing" step to run. The index is a one-time ~325MB download,
+  refreshed automatically once a week (or on demand); after that, lookups
+  are instant instead of a live call per card
+- Each price shows a ▲/▼ trend arrow when it's moved 2%+ over the past
+  week, using MTGJSON's 90-day price history
 - Flags cards on WotC's official Commander "Game Changers" list with a badge
   on the card and a deck-wide count in the header — useful for checking
   your deck against its intended bracket
@@ -100,12 +99,11 @@ From there:
    collection changes
 3. Hit **Compare**
 
-That first comparison loads in a few seconds. If you want accurate
-cheapest-printing prices instead of the decklist's referenced printing, click
-**Get Accurate Prices** on the results page. The first time you do this (or
-after the weekly auto-refresh), it downloads a ~325MB price index from
-MTGJSON — after that it's instant. You can also refresh that index on
-demand from the home page's **Refresh Price Data** button.
+That comparison already uses accurate cheapest-printing prices — the first
+time you ever run one (or after the weekly auto-refresh), it downloads a
+~325MB price index from MTGJSON, which takes under a minute; after that,
+every comparison is instant. You can also refresh that index on demand from
+the home page's **Refresh Price Data** button.
 
 The app remembers each deck you've looked at as a "project": any
 "reserved for another deck" overrides you save, plus your last-used
@@ -131,17 +129,10 @@ python3 brewlist_cli.py https://moxfield.com/decks/... --open
 
 (An Archidekt URL works the same way: `https://archidekt.com/decks/... --open`.)
 
-By default prices reflect whichever printing the decklist references
-(fast). Add `--cheapest-pricing` to price every card from its cheapest
-printing instead, using the local price index described above (downloads
-automatically the first time, then instant):
-
-```bash
-python3 brewlist_cli.py https://moxfield.com/decks/... --open --cheapest-pricing
-```
-
-Use `--refresh-price-index` on its own to force-update that index sooner
-than its automatic weekly refresh.
+Every card is priced from its cheapest printing using the local price index
+described above (downloads automatically the first time, then instant). Use
+`--refresh-price-index` on its own to force-update that index sooner than
+its automatic weekly refresh.
 
 Run `python3 brewlist_cli.py --help` for the full flag list.
 

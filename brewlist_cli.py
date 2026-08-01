@@ -319,11 +319,6 @@ def run_interactive():
     include_sideboard = Confirm.ask("Include sideboard cards?", default=False)
     include_maybeboard = Confirm.ask("Include maybeboard cards?", default=False)
     include_basics = not Confirm.ask("Break out basic lands separately?", default=True)
-    cheapest_pricing = Confirm.ask(
-        "Fetch accurate cheapest-printing prices? (uses a local price index, downloaded the "
-        "first time; otherwise prices reflect the source decklist's referenced printing)",
-        default=False,
-    )
 
     run(
         deck_input=deck_input,
@@ -340,14 +335,13 @@ def run_interactive():
         want_markdown=want_markdown,
         want_csv=want_csv,
         want_html=want_html,
-        cheapest_pricing=cheapest_pricing,
     )
 
 
 def refresh_price_index_cli() -> None:
     """Force-downloads a fresh cheapest-price index and exits -- the
-    --refresh-price-index flag. Same index build_comparison(fetch_cheapest=True)
-    reuses automatically once it's less than a week old."""
+    --refresh-price-index flag. Same index build_comparison() reuses
+    automatically once it's less than a week old."""
     progress = Progress(
         TextColumn("[dim]Downloading price data from MTGJSON...[/dim]"),
         BarColumn(),
@@ -375,8 +369,7 @@ def refresh_price_index_cli() -> None:
 
 def run(deck_input, collection_path, collection_dir, include_sideboard,
         include_maybeboard, include_basics, output, missing_csv, html_output,
-        open_html, interactive, want_markdown=False, want_csv=False, want_html=False,
-        cheapest_pricing=False):
+        open_html, interactive, want_markdown=False, want_csv=False, want_html=False):
     if not deck_input or not deck_input.strip():
         raise SystemExit("A Moxfield or Archidekt deck URL or ID is required.")
 
@@ -422,12 +415,8 @@ def run(deck_input, collection_path, collection_dir, include_sideboard,
             f"(from {overrides_path})[/dim]"
         )
 
-    pricing_label = (
-        "Pricing owned cards via Scryfall, missing cards via MTGJSON..." if cheapest_pricing
-        else "Pricing owned cards via Scryfall..."
-    )
     progress = Progress(
-        TextColumn(f"[dim]{pricing_label}[/dim]"),
+        TextColumn("[dim]Pricing cards via local index...[/dim]"),
         BarColumn(),
         TaskProgressColumn(),
         TimeElapsedColumn(),
@@ -443,8 +432,7 @@ def run(deck_input, collection_path, collection_dir, include_sideboard,
         try:
             bucket_names, buckets, totals = build_comparison(
                 entries, owned, ignore_basics=not include_basics, overrides=overrides,
-                on_progress=_on_progress, fetch_cheapest=cheapest_pricing,
-                is_commander_format=is_commander_format,
+                on_progress=_on_progress, is_commander_format=is_commander_format,
             )
         except ValueError as e:
             raise SystemExit(str(e))
@@ -477,7 +465,7 @@ def run(deck_input, collection_path, collection_dir, include_sideboard,
     if html_output:
         html_report = render_html(
             deck_name, deck_url, project_key, bucket_names, buckets, totals,
-            prices_are_baseline=cheapest_pricing, is_commander_format=is_commander_format,
+            is_commander_format=is_commander_format,
         )
         with open(html_output, "w", encoding="utf-8") as f:
             f.write(html_report)
@@ -517,15 +505,11 @@ def main():
                               "using the default path)")
     parser.add_argument("--missing-csv", default=None,
                          help="Optional CSV path to dump just the missing cards with buy links")
-    parser.add_argument("--cheapest-pricing", action="store_true",
-                         help="Price every card from the cheapest printing available across TCGPlayer, Card "
-                              "Kingdom, and ManaPool, using a local price index (downloaded from MTGJSON the "
-                              "first time, then reused for a week). Without this, prices reflect whichever "
-                              "printing the source decklist happens to reference.")
     parser.add_argument("--refresh-price-index", action="store_true",
-                         help="Force-download a fresh copy of the local cheapest-price index (see "
-                              "--cheapest-pricing) and exit. Normally this refreshes itself automatically once "
-                              "a week -- use this to update it sooner.")
+                         help="Force-download a fresh copy of the local cheapest-price index (every card is "
+                              "already priced from the cheapest printing across TCGPlayer, Card Kingdom, and "
+                              "ManaPool by default). Normally this refreshes itself automatically once a week "
+                              "-- use this to update it sooner.")
     args = parser.parse_args()
 
     if args.refresh_price_index:
@@ -548,7 +532,6 @@ def main():
         html_output=args.html_output,
         open_html=args.open,
         interactive=False,
-        cheapest_pricing=args.cheapest_pricing,
     )
 
 

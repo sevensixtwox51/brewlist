@@ -30,7 +30,7 @@ __all__ = [
     "fetch_scryfall_prices_by_id", "price_for_printing", "select_used_printings",
     "price_index_age_days", "rebuild_price_index", "ensure_price_index", "game_changers_in_index",
     "commander_legality_in_index", "deck_is_commander_format",
-    "find_deck_combos", "estimate_deck_bracket", "BRACKET_TAG_LABELS",
+    "find_deck_combos", "estimate_deck_bracket", "BRACKET_TAG_LABELS", "scryfall_prices_in_index",
     "PRICE_INDEX_PATH", "PRICE_INDEX_MAX_AGE_DAYS",
     "categorize", "shopping_group", "shopping_group_rank",
     "best_prices", "priced_for_finish", "build_comparison",
@@ -112,8 +112,8 @@ class CardEntry:
     price_trend_nonfoil: dict[str, float] | None = None
     price_trend_foil: dict[str, float] | None = None
     # Whether this card is on WotC's official Commander "Game Changers" list
-    # -- see game_changers_in_index. False until build_comparison sets it
-    # (only when fetch_cheapest, since it comes from the same MTGJSON index).
+    # -- see game_changers_in_index. Only set (and only meaningful) when
+    # build_comparison was told this deck is Commander format; False otherwise.
     is_game_changer: bool = False
     # Commander legality ("Legal", "Banned", "Restricted", ...) if known --
     # see commander_legality_in_index. Only set (and only meaningful) when
@@ -492,8 +492,11 @@ SCRYFALL_CARD_API = "https://api.scryfall.com/cards/{scryfall_id}"
 
 
 def fetch_scryfall_prices_by_id(scryfall_ids: set[str], on_progress=None) -> dict[str, dict]:
-    """Fetch current USD prices for specific printings (by Scryfall card ID).
-    One request per unique ID, rate-limited per Scryfall's guidelines. Returns
+    """Fetch current USD prices for specific printings (by Scryfall card ID),
+    live from Scryfall's API, one request per unique ID. This is now only
+    the rare fallback build_comparison uses for a scryfall_id missing from
+    the local MTGJSON-derived index (see scryfall_prices_in_index) -- e.g. a
+    printing released after the index's last weekly refresh. Returns
     {scryfall_id: prices_dict}; failed lookups map to {}.
 
     `on_progress`, if given, is called as on_progress(done, total) after each
@@ -563,7 +566,7 @@ PRICE_INDEX_MAX_AGE_DAYS = 7
 # which added "nonfoil_trend"/"foil_trend") so a stale on-disk file from an
 # older version of this code is treated as needing a rebuild rather than
 # silently missing data or crashing.
-PRICE_INDEX_FORMAT_VERSION = 5
+PRICE_INDEX_FORMAT_VERSION = 6
 
 
 def price_index_age_days(path: str = PRICE_INDEX_PATH) -> float | None:
@@ -630,6 +633,13 @@ def _trend_price(date_prices: dict, lookback_days: int = PRICE_TREND_LOOKBACK_DA
     return current, reference
 
 
+def _latest_price(date_prices: dict) -> float | None:
+    """Given a {date_str: price} dict, returns just the most recent price."""
+    if not date_prices:
+        return None
+    return date_prices[max(date_prices)]
+
+
 def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[str, dict]:
     """Downloads MTGJSON's AllPrintings + AllPrices (90-day history) bulk
     data and reduces them to {normalized_name: {"nonfoil": [[store, price,
@@ -683,6 +693,12 @@ def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[
         # real cards, so whichever printing we see last for a name is fine;
         # also tracked unconditionally, same reasoning as Game Changers.
         commander_legality: dict[str, str] = {}
+        # Exact-printing USD prices keyed by Scryfall ID (TCGPlayer-sourced,
+        # same fields Scryfall's own /cards/<id> used to provide) -- this is
+        # what lets owned-card pricing (matching your ManaBox collection's
+        # recorded Scryfall ID to the exact printing you hold) be a local
+        # lookup instead of a live per-card Scryfall API call.
+        by_scryfall_id: dict[str, dict] = {}
         for set_obj in all_printings.values():
             for card in set_obj.get("cards", []):
                 if "paper" not in (card.get("availability") or []):
@@ -711,6 +727,15 @@ def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[
                     continue
                 paper = price_entry.get("paper") or {}
                 purchase_urls = card.get("purchaseUrls") or {}
+
+                scryfall_id = (card.get("identifiers") or {}).get("scryfallId")
+                if scryfall_id:
+                    tcg_retail = (paper.get("tcgplayer") or {}).get("retail") or {}
+                    by_scryfall_id[scryfall_id] = {
+                        "usd": _latest_price(tcg_retail.get("normal") or {}),
+                        "usd_foil": _latest_price(tcg_retail.get("foil") or {}),
+                        "usd_etched": _latest_price(tcg_retail.get("etched") or {}),
+                    }
 
                 set_code = (card.get("setCode") or "").lower()
                 number = card.get("number") or ""
@@ -771,10 +796,27 @@ def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[
         "prices": index,
         "game_changers": sorted(game_changers),
         "commander_legality": commander_legality,
+        "scryfall_prices": by_scryfall_id,
     }
     with open(path, "w", encoding="utf-8") as f:
         json.dump(payload, f)
     return index
+
+
+def scryfall_prices_in_index(path: str = PRICE_INDEX_PATH) -> dict[str, dict]:
+    """Returns {scryfall_id: {"usd", "usd_foil", "usd_etched"}} for exact-
+    printing pricing, read from the local price index (see
+    rebuild_price_index/ensure_price_index -- call that first to make sure
+    the index is actually present/fresh). Empty dict if the index doesn't
+    exist or predates this field. Used for owned-card pricing (matching
+    ManaBox's recorded Scryfall ID to the exact printing you hold) --
+    fetch_scryfall_prices_by_id() falls back to a live lookup only for IDs
+    missing here (e.g. a printing too new for the last index build)."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f).get("scryfall_prices") or {}
+    except (OSError, ValueError):
+        return {}
 
 
 def commander_legality_in_index(path: str = PRICE_INDEX_PATH) -> dict[str, str]:
@@ -1082,7 +1124,7 @@ def priced_for_finish(entry: CardEntry, want_foil: bool, max_results: int = 3):
 
 def build_comparison(
     entries: list[CardEntry], owned_collection: dict[str, OwnedCard], ignore_basics: bool,
-    overrides: dict[str, int] | None = None, on_progress=None, fetch_cheapest: bool = True,
+    overrides: dict[str, int] | None = None, on_progress=None,
     is_commander_format: bool = False,
 ) -> tuple[list[str], dict[str, list[CardResult]], dict]:
     # Pass 1: figure out have/shortfall per entry, and which exact owned
@@ -1108,55 +1150,60 @@ def build_comparison(
 
         per_entry.append((e, have, shortfall, owned_used, picks, remainder, reserved_qty))
 
-    # Pass 2: one Scryfall lookup per unique owned printing that's actually in
-    # this deck (not your whole collection), so owned cards are valued by the
-    # exact treatment you hold rather than whichever printing the decklist
-    # happens to reference. If fetch_cheapest is set, also look up the
-    # cheapest printing of every card by name (owned and missing alike -- owned
-    # cards' hidden "need another copy" panel uses it too), so shortfall/
-    # replacement costs reflect a true baseline instead of whichever printing
-    # the decklist references -- via the local bulk price index (see
-    # ensure_price_index), which downloads only if missing/stale and is
-    # otherwise instant, unlike a live per-card search. Callers that want a
-    # fast first pass with neither of these refinements (e.g. the web app's
-    # initial comparison) can skip it and trigger it later on demand --
-    # best_prices() already falls back to the decklist's own referenced-
-    # printing data whenever cheapest_nonfoil/foil is None.
-    price_cache = fetch_scryfall_prices_by_id(needed_ids, on_progress=on_progress)
+    # Pass 2: price everything from the local MTGJSON-derived index (see
+    # ensure_price_index) -- this covers owned-card exact-printing pricing
+    # (matched by Scryfall ID), cheapest-across-printings pricing for every
+    # card, and (for Commander decks) Game Changers/legality, all as local
+    # lookups once the index is warm. The index only triggers a real
+    # download when it's missing or older than a week (see
+    # PRICE_INDEX_MAX_AGE_DAYS) -- that's the only case this pass is
+    # genuinely slow; otherwise every card in a deck resolves instantly with
+    # zero network calls.
+    by_name = ensure_price_index(on_progress=on_progress)
+    scryfall_prices = scryfall_prices_in_index()
+    price_cache: dict[str, dict] = {}
+    live_fallback_ids = set()
+    for sid in needed_ids:
+        hit = scryfall_prices.get(sid)
+        if hit:
+            price_cache[sid] = hit
+        else:
+            live_fallback_ids.add(sid)
+    if live_fallback_ids:
+        # Rare: a printing too new for the last index build (MTGJSON's data
+        # is only as fresh as the last weekly refresh). A live per-ID lookup
+        # for just these stragglers, not the common case.
+        price_cache.update(fetch_scryfall_prices_by_id(live_fallback_ids))
+
     game_changers_count = 0
     game_changers_names: list[str] = []
     banned_count = 0
-    if fetch_cheapest:
-        by_name = ensure_price_index(on_progress=on_progress)
-        # Game Changers is a Commander-bracket concept same as legality --
-        # meaningless (and misleading) outside that format, so both are
-        # gated the same way rather than only checking legality.
-        game_changers = game_changers_in_index() if is_commander_format else set()
-        commander_legality = commander_legality_in_index() if is_commander_format else {}
-        for e in entries:
-            hit = by_name.get(normalize_name(e.name)) or {}
-            e.cheapest_nonfoil = [tuple(t) for t in hit["nonfoil"]] if hit.get("nonfoil") else None
-            e.cheapest_foil = [tuple(t) for t in hit["foil"]] if hit.get("foil") else None
-            e.price_trend_nonfoil = hit.get("nonfoil_trend")
-            e.price_trend_foil = hit.get("foil_trend")
-            if is_commander_format:
-                e.is_game_changer = normalize_name(e.name) in game_changers
-                if e.is_game_changer:
-                    game_changers_count += 1
-                    game_changers_names.append(e.name)
-                e.commander_legality = commander_legality.get(normalize_name(e.name))
-                if e.commander_legality and e.commander_legality != "Legal":
-                    banned_count += 1
+    # Game Changers/legality are Commander-bracket concepts -- meaningless
+    # (and misleading) outside that format, so both are gated on it.
+    game_changers = game_changers_in_index() if is_commander_format else set()
+    commander_legality = commander_legality_in_index() if is_commander_format else {}
+    for e in entries:
+        hit = by_name.get(normalize_name(e.name)) or {}
+        e.cheapest_nonfoil = [tuple(t) for t in hit["nonfoil"]] if hit.get("nonfoil") else None
+        e.cheapest_foil = [tuple(t) for t in hit["foil"]] if hit.get("foil") else None
+        e.price_trend_nonfoil = hit.get("nonfoil_trend")
+        e.price_trend_foil = hit.get("foil_trend")
+        if is_commander_format:
+            e.is_game_changer = normalize_name(e.name) in game_changers
+            if e.is_game_changer:
+                game_changers_count += 1
+                game_changers_names.append(e.name)
+            e.commander_legality = commander_legality.get(normalize_name(e.name))
+            if e.commander_legality and e.commander_legality != "Legal":
+                banned_count += 1
 
     # Commander Spellbook lookups -- a live request each (not a bulk index),
-    # so only worth doing alongside the same "accurate" pass as everything
-    # above, and only for Commander decks (both the combos and the bracket
-    # tag are Commander-specific concepts). Best-effort: either call can
-    # return None (network hiccup, service down) without affecting anything
-    # else in the report.
+    # only for Commander decks (both the combos and the bracket tag are
+    # Commander-specific concepts). Best-effort: either call can return None
+    # (network hiccup, service down) without affecting anything else here.
     combos = None
     bracket_estimate = None
-    if fetch_cheapest and is_commander_format:
+    if is_commander_format:
         combos = find_deck_combos(entries)
         bracket_estimate = estimate_deck_bracket(entries)
         if bracket_estimate:
@@ -1172,9 +1219,9 @@ def build_comparison(
         "cost_nonfoil": 0.0, "cost_foil": 0.0,
         "deck_value": 0.0, "owned_value": 0.0,
         "unpriced_count": 0,  # cards (owned or missing) we couldn't find any price for
-        "game_changers": game_changers_count,  # only meaningful when fetch_cheapest and is_commander_format were set
+        "game_changers": game_changers_count,  # only meaningful when is_commander_format was set
         "game_changers_names": sorted(game_changers_names),
-        "banned_count": banned_count,  # only meaningful when fetch_cheapest and is_commander_format were set
+        "banned_count": banned_count,  # only meaningful when is_commander_format was set
         "combos": combos,  # {"included": [...], "almost_included": [...], "almost_total": N} or None
         "bracket_tag": bracket_estimate["tag"] if bracket_estimate else None,
     }
@@ -1440,6 +1487,27 @@ header .source a:hover {{ color: var(--accent); }}
 .stat.cost b {{ color: var(--gold); }}
 .stat.value b {{ color: var(--accent); }}
 .stat.game-changers b {{ color: var(--gold); }}
+.has-tooltip {{ position: relative; cursor: help; }}
+.has-tooltip .tooltip-popup {{
+  display: none;
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: var(--text);
+  white-space: normal;
+  width: max-content;
+  max-width: 320px;
+  box-shadow: var(--shadow);
+  z-index: 20;
+}}
+.has-tooltip:hover .tooltip-popup {{ display: block; }}
 .stat.banned b {{ color: var(--missing); }}
 .stat-sub {{ color: var(--text-dim); font-size: 0.8rem; }}
 .price-basis-note {{ color: var(--text-dim); font-size: 0.8rem; }}
@@ -1695,6 +1763,17 @@ details.combos-panel[open] > summary::before {{ transform: rotate(90deg); }}
 .combo-missing {{ color: var(--missing); font-size: 0.85rem; margin-bottom: 6px; }}
 .combo-link {{ color: var(--accent); font-size: 0.8rem; text-decoration: none; }}
 .combo-link:hover {{ text-decoration: underline; }}
+.combo-toggle {{
+  display: block;
+  padding: 10px 16px;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+  border-top: 1px solid var(--card-border);
+}}
+.combo-toggle input {{ margin-right: 6px; cursor: pointer; }}
+#almost-combos-list {{ display: none; }}
 .qty {{
   color: var(--text-dim);
   font-size: 0.8rem;
@@ -2118,9 +2197,15 @@ function downloadInStoreCsv() {{
 const instoreBtn = document.getElementById('instore-list-btn');
 if (instoreBtn) instoreBtn.addEventListener('click', downloadInStoreCsv);
 
-{save_overrides_js}
+const showAlmostCombos = document.getElementById('show-almost-combos');
+const almostCombosList = document.getElementById('almost-combos-list');
+if (showAlmostCombos && almostCombosList) {{
+  showAlmostCombos.addEventListener('change', () => {{
+    almostCombosList.style.display = showAlmostCombos.checked ? 'flex' : 'none';
+  }});
+}}
 
-{refresh_prices_js}
+{save_overrides_js}
 
 applyFilter();
 </script>
@@ -2197,102 +2282,44 @@ if (shutdownBtn) {{
 }}"""
 
 
-def _refresh_prices_js(refresh_endpoint: str) -> str:
-    endpoint_json = json.dumps(refresh_endpoint)
-    return f"""const refreshPricesBtn = document.getElementById('refresh-prices-btn');
-if (refreshPricesBtn) {{
-  const refreshPricesLabel = document.getElementById('refresh-prices-label');
-  function fmtProgress(done, total) {{
-    // Large totals mean bytes (downloading the price index); small ones
-    // mean a plain card count (pricing owned printings).
-    if (total > 100000) {{
-      return (done / 1048576).toFixed(1) + ' / ' + (total / 1048576).toFixed(1) + ' MB';
-    }}
-    return done + '/' + total;
-  }}
-  function pollRefreshPrices(jobId) {{
-    fetch('/compare/progress/' + jobId)
-      .then(r => r.json())
-      .then(data => {{
-        if (data.status === 'running') {{
-          refreshPricesLabel.textContent = data.total > 0
-            ? 'Fetching accurate prices\\u2026 (' + fmtProgress(data.done, data.total) + ')'
-            : 'Fetching accurate prices\\u2026';
-          setTimeout(() => pollRefreshPrices(jobId), 400);
-        }} else if (data.status === 'done') {{
-          refreshPricesLabel.textContent = 'Done! Reloading\\u2026';
-          window.location.href = '/compare/result/' + jobId;
-        }} else {{
-          refreshPricesLabel.textContent = data.error || 'Something went wrong.';
-          refreshPricesBtn.disabled = false;
-        }}
-      }})
-      .catch(() => {{
-        refreshPricesLabel.textContent = 'Lost contact with the server.';
-        refreshPricesBtn.disabled = false;
-      }});
-  }}
-  refreshPricesBtn.addEventListener('click', () => {{
-    refreshPricesBtn.disabled = true;
-    refreshPricesLabel.style.display = 'inline';
-    refreshPricesLabel.textContent = 'Starting\\u2026';
-    fetch({endpoint_json}, {{ method: 'POST' }})
-      .then(r => r.json())
-      .then(data => {{
-        if (data.error) {{ refreshPricesLabel.textContent = data.error; refreshPricesBtn.disabled = false; return; }}
-        pollRefreshPrices(data.job_id);
-      }})
-      .catch(() => {{
-        refreshPricesLabel.textContent = 'Could not reach the server.';
-        refreshPricesBtn.disabled = false;
-      }});
-  }});
-}}"""
-
-
 def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[str],
                  buckets: dict[str, list[CardResult]], totals: dict,
-                 overrides_endpoint: str | None = None, refresh_endpoint: str | None = None,
-                 prices_are_baseline: bool = True, is_commander_format: bool = False) -> str:
-    """Renders the full standalone HTML report.
+                 overrides_endpoint: str | None = None, is_commander_format: bool = False) -> str:
+    """Renders the full standalone HTML report. Every price/enrichment here
+    reflects build_comparison's single always-accurate pass (see its
+    docstring) -- there's no separate "fast vs. accurate" mode to reconcile.
 
     `overrides_endpoint`, if given (e.g. "/api/overrides/abc123" for the Flask
     app), makes the "Save Overrides" button POST there via fetch() instead of
     the CLI's default behavior of downloading a `{deck_id}_overrides.json`
     file for you to drop into your ManaBox export folder.
 
-    `is_commander_format`, together with `prices_are_baseline`, decides
-    whether a "Not Legal in Commander" summary stat and per-card badges are
-    shown -- CardResult.entry.commander_legality is only meaningful when
-    both are true (see build_comparison's is_commander_format param).
-
-    `prices_are_baseline` should reflect whether `totals`/`buckets` were built
-    with build_comparison(fetch_cheapest=True) -- i.e. whether prices already
-    reflect the cheapest printing found for each card, or Moxfield's own
-    (possibly much pricier) referenced printing. `refresh_endpoint`, if given
-    (e.g. "/compare/refresh-prices/abc123" for the Flask app) and
-    prices_are_baseline is False, shows a "Get Accurate Prices" button that
-    kicks off that slower search on demand instead of blocking the initial
-    comparison on it.
+    `is_commander_format` decides whether Commander-specific enrichment
+    (Game Changers, legality, combos, bracket rating) is shown at all --
+    CardResult.entry.commander_legality/is_game_changer/etc. are only
+    meaningful when it's true (see build_comparison's own param of the same
+    name).
     """
     total_cards = totals["owned"] + totals["missing"]
     pct = (totals["owned"] / total_cards * 100) if total_cards else 100.0
     max_card_price = 0.0
 
     game_changers_html = ""
-    if prices_are_baseline and is_commander_format:
+    if is_commander_format:
         gc_names = totals.get("game_changers_names") or []
-        tooltip = (
+        tooltip_text = (
             "Game Changers in this deck: " + ", ".join(gc_names)
-            if gc_names else "On WotC's official Commander Game Changers list -- none found in this deck"
+            if gc_names else "None found in this deck"
         )
         game_changers_html = (
-            f'<div class="stat game-changers" title="{html.escape(tooltip)}">'
-            f'&#9889; Game Changers <b>{len(gc_names)}</b></div>'
+            '<div class="stat game-changers has-tooltip" '
+            'title="On WotC\'s official Commander Game Changers list">'
+            f'&#9889; Game Changers <b>{len(gc_names)}</b>'
+            f'<div class="tooltip-popup">{html.escape(tooltip_text)}</div></div>'
         )
 
     legality_html = ""
-    if prices_are_baseline and is_commander_format:
+    if is_commander_format:
         banned_count = totals.get("banned_count", 0)
         if banned_count:
             legality_html = (
@@ -2304,7 +2331,7 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
 
     bracket_tag_html = ""
     bracket_tag = totals.get("bracket_tag")
-    if prices_are_baseline and is_commander_format and bracket_tag:
+    if is_commander_format and bracket_tag:
         label = BRACKET_TAG_LABELS.get(bracket_tag, bracket_tag)
         bracket_tag_html = (
             '<div class="stat-sub" title="Commander Spellbook\'s own power/style rating for this deck -- '
@@ -2313,7 +2340,7 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
         )
 
     combos_html = ""
-    if prices_are_baseline and is_commander_format:
+    if is_commander_format:
         combos_data = totals.get("combos")
         if combos_data is None:
             combos_html = (
@@ -2343,18 +2370,31 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
                 )
 
             if included or almost:
-                items_html = "".join(_combo_item(c) for c in included)
-                items_html += "".join(_combo_item(c, show_missing=True) for c in almost)
-                count_note = f"{len(included)} in deck"
-                if almost_total:
-                    count_note += (
-                        f" &middot; {almost_total} almost there, showing top {len(almost)} most popular"
-                        if almost_total > len(almost) else f" &middot; {almost_total} almost there"
+                included_html = (
+                    "".join(_combo_item(c) for c in included) if included
+                    else '<div class="combos-note">No combos fully in this deck yet.</div>'
+                )
+                toggle_html = ""
+                almost_section_html = ""
+                if almost:
+                    almost_label = (
+                        f'Show {almost_total} "almost there" combos (showing top {len(almost)} most popular)'
+                        if almost_total > len(almost) else f'Show {almost_total} "almost there" combos'
                     )
+                    toggle_html = (
+                        '<label class="combo-toggle">'
+                        '<input type="checkbox" id="show-almost-combos"> '
+                        f'{html.escape(almost_label)}</label>'
+                    )
+                    almost_items_html = "".join(_combo_item(c, show_missing=True) for c in almost)
+                    almost_section_html = f'<div class="combo-list" id="almost-combos-list">{almost_items_html}</div>'
+
                 combos_html = (
-                    '<details class="combos-panel" open>'
-                    f'<summary>&#128279; Combos <span class="bucket-count">({count_note})</span></summary>'
-                    f'<div class="combo-list">{items_html}</div>'
+                    '<details class="combos-panel">'
+                    f'<summary>&#128279; Combos <span class="bucket-count">({len(included)} in deck)</span></summary>'
+                    f'<div class="combo-list">{included_html}</div>'
+                    f'{toggle_html}'
+                    f'{almost_section_html}'
                     '</details>'
                 )
             else:
@@ -2564,28 +2604,10 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
         )
         header_actions_html = ""
 
-    if prices_are_baseline:
-        cheapest_pricing_html = (
-            '<span class="price-basis-note" title="Every price reflects the cheapest paper printing found for that card">'
-            '&#10003; Accurate pricing</span>'
-        )
-        refresh_prices_js = ""
-    elif refresh_endpoint:
-        cheapest_pricing_html = (
-            '<button class="btn ghost" id="refresh-prices-btn" '
-            'title="Looks up the cheapest price across TCGPlayer, Card Kingdom, and ManaPool for every card -- '
-            'instant once the local price index is built (first time, or after its weekly refresh, takes about '
-            '20-30s to download)">&#127919; Get Accurate Prices</button>'
-            '<span id="refresh-prices-label" class="price-basis-note" style="display:none;"></span>'
-        )
-        refresh_prices_js = _refresh_prices_js(refresh_endpoint)
-    else:
-        cheapest_pricing_html = (
-            '<span class="price-basis-note" title="Prices are whichever printing the source decklist references, '
-            'not necessarily the cheapest -- rerun with --cheapest-pricing for an accurate baseline">'
-            '&#9888; Prices not verified as cheapest</span>'
-        )
-        refresh_prices_js = ""
+    cheapest_pricing_html = (
+        '<span class="price-basis-note" title="Every price reflects the cheapest paper printing found for that card">'
+        '&#10003; Accurate pricing</span>'
+    )
 
     return HTML_TEMPLATE.format(
         title=html.escape(deck_name),
@@ -2616,5 +2638,4 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
         save_overrides_title=save_overrides_title,
         header_actions_html=header_actions_html,
         cheapest_pricing_html=cheapest_pricing_html,
-        refresh_prices_js=refresh_prices_js,
     )

@@ -33,7 +33,6 @@ from brewlist_core import (
     parse_deck_ref,
     price_index_age_days,
     render_html,
-    split_deck_key,
 )
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -116,8 +115,7 @@ JOBS: dict[str, dict] = {}
 
 
 def _run_compare_job(job_id, entries, owned, break_out_basics, reserved,
-                      deck_id, deck_name, deck_url, options, fetch_cheapest=False,
-                      is_commander_format=False):
+                      deck_id, deck_name, deck_url, options, is_commander_format=False):
     def _on_progress(done, total):
         with _JOBS_LOCK:
             job = JOBS.get(job_id)
@@ -128,15 +126,12 @@ def _run_compare_job(job_id, entries, owned, break_out_basics, reserved,
     try:
         bucket_names, buckets, totals = build_comparison(
             entries, owned, ignore_basics=not break_out_basics, overrides=reserved,
-            on_progress=_on_progress, fetch_cheapest=fetch_cheapest,
-            is_commander_format=is_commander_format,
+            on_progress=_on_progress, is_commander_format=is_commander_format,
         )
         save_project(deck_id, deck_name=deck_name, deck_url=deck_url, options=options, reserved=reserved)
         html_report = render_html(
             deck_name, deck_url, deck_id, bucket_names, buckets, totals,
             overrides_endpoint=f"/api/overrides/{deck_id}",
-            refresh_endpoint=f"/compare/refresh-prices/{deck_id}",
-            prices_are_baseline=fetch_cheapest,
             is_commander_format=is_commander_format,
         )
         with _JOBS_LOCK:
@@ -338,7 +333,7 @@ function pollProgress(jobId) {{
         if (data.total > 0) {{
           const pct = Math.round((data.done / data.total) * 100);
           progressFill.style.width = pct + '%';
-          progressLabel.textContent = 'Pricing owned cards via Scryfall... (' + data.done + '/' + data.total + ')';
+          progressLabel.textContent = 'Preparing price data... (' + pct + '%)';
         }} else {{
           progressLabel.textContent = 'Fetching deck and preparing comparison\\u2026';
         }}
@@ -556,65 +551,6 @@ def compare_start():
         target=_run_compare_job,
         args=(job_id, entries, owned, break_out_basics, reserved, project_key, deck_name, deck_url, options),
         kwargs={"is_commander_format": is_commander_format},
-        daemon=True,
-    ).start()
-
-    return jsonify(job_id=job_id)
-
-
-@app.route("/compare/refresh-prices/<deck_id>", methods=["POST"])
-def compare_refresh_prices(deck_id):
-    """Re-runs a comparison that's already on file, this time with
-    fetch_cheapest=True -- the initial /compare/start is fast (skips the
-    cheapest-printing lookup), and this is what the report's "Get Accurate
-    Prices" button calls to fill that in on demand.
-
-    `deck_id` here is really the deck *key* (see brewlist_core.deck_key) -- e.g. an
-    Archidekt deck's key is "archidekt-<id>", split back apart below to get
-    the source and the raw ID the platform's own API expects."""
-    project_key = deck_id
-    project = load_project(project_key)
-    if not project:
-        return jsonify(error="That deck hasn't been compared yet -- start from the home page."), 404
-
-    source, raw_deck_id = split_deck_key(project_key)
-    deck_url = project.get("deck_url") or (
-        f"https://archidekt.com/decks/{raw_deck_id}" if source == "archidekt"
-        else f"https://moxfield.com/decks/{raw_deck_id}"
-    )
-    options = project.get("options") or {}
-    include_sideboard = bool(options.get("include_sideboard"))
-    include_maybeboard = bool(options.get("include_maybeboard"))
-    break_out_basics = bool(options.get("break_out_basics"))
-    reserved = project.get("reserved") or {}
-
-    if not os.path.isfile(COLLECTION_PATH):
-        return jsonify(error="No ManaBox collection on file -- upload your export first."), 400
-
-    try:
-        deck = fetch_deck(source, raw_deck_id)
-    except ValueError as e:
-        return jsonify(error=str(e)), 400
-
-    deck_name = deck.get("name", project.get("deck_name", project_key))
-    if source != "archidekt":
-        deck_url = deck.get("publicUrl", deck_url)
-    entries = extract_entries(source, deck, include_sideboard, include_maybeboard)
-    is_commander_format = deck_is_commander_format(source, deck)
-
-    try:
-        owned = load_collection(COLLECTION_PATH)
-    except ValueError as e:
-        return jsonify(error=str(e)), 400
-
-    job_id = uuid.uuid4().hex
-    with _JOBS_LOCK:
-        JOBS[job_id] = {"status": "running", "done": 0, "total": 0, "html": None, "error": None}
-
-    threading.Thread(
-        target=_run_compare_job,
-        args=(job_id, entries, owned, break_out_basics, reserved, project_key, deck_name, deck_url, options),
-        kwargs={"fetch_cheapest": True, "is_commander_format": is_commander_format},
         daemon=True,
     ).start()
 
