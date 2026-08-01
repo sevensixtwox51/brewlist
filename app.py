@@ -254,10 +254,10 @@ def render_home_page(error: str | None = None, prefill_url: str = "") -> str:
     if index_age is None:
         index_status = 'Not built yet — first use downloads it (~325MB from MTGJSON, one-time, refreshed weekly after).'
     elif index_age < 1:
-        index_status = 'Built today.'
+        index_status = 'Updated today.'
     else:
         days = int(index_age)
-        index_status = f'Built {days} day{"s" if days != 1 else ""} ago.'
+        index_status = f'Updated {days} day{"s" if days != 1 else ""} ago.'
 
     return f"""<!doctype html>
 <html lang="en">
@@ -299,9 +299,10 @@ def render_home_page(error: str | None = None, prefill_url: str = "") -> str:
     </div>
   </form>
   <div class="card" id="price-index-card">
-    <label>Cheapest-price data</label>
+    <label>Card database</label>
+    <div class="hint" style="margin-top:-8px;margin-bottom:8px;">Pricing, price trends, Game Changers, and Commander legality all come from this local MTGJSON-based database.</div>
     <div class="collection-status" id="price-index-status">{_esc(index_status)}</div>
-    <button type="button" class="btn ghost small" id="refresh-index-btn">&#128260; Refresh Price Data</button>
+    <button type="button" class="btn ghost small" id="refresh-index-btn">&#128260; Refresh Database</button>
     <div id="refresh-index-label" class="hint" style="display:none;margin-top:8px;"></div>
   </div>
 </main>
@@ -406,7 +407,7 @@ function pollIndexRefresh(jobId) {{
         setTimeout(() => pollIndexRefresh(jobId), 400);
       }} else if (data.status === 'done') {{
         refreshIndexLabel.textContent = 'Done!';
-        refreshIndexStatus.textContent = 'Built just now.';
+        refreshIndexStatus.textContent = 'Updated just now.';
         refreshIndexBtn.disabled = false;
         setTimeout(() => {{ refreshIndexLabel.style.display = 'none'; }}, 2000);
       }} else {{
@@ -458,9 +459,9 @@ def home():
 
 @app.route("/price-index/refresh", methods=["POST"])
 def refresh_price_index():
-    """Force-rebuilds the local cheapest-price index (see ensure_price_index
+    """Force-rebuilds the local card database (see ensure_price_index
     in brewlist_core.py) regardless of how fresh it already is -- the home
-    page's "Refresh Price Data" button. Runs in the same background-job +
+    page's "Refresh Database" button. Runs in the same background-job +
     polling machinery as a deck comparison, but has no follow-up /compare/result
     step (see compare_progress's self-cleanup for jobs with no "html")."""
     job_id = uuid.uuid4().hex

@@ -101,9 +101,9 @@ From there:
 
 That comparison already uses accurate cheapest-printing prices — the first
 time you ever run one (or after the weekly auto-refresh), it downloads a
-~325MB price index from MTGJSON, which takes under a minute; after that,
-every comparison is instant. You can also refresh that index on demand from
-the home page's **Refresh Price Data** button.
+~325MB card database from MTGJSON, which takes under a minute; after that,
+every comparison is instant. You can also refresh that database on demand
+from the home page's **Refresh Database** button.
 
 The app remembers each deck you've looked at as a "project": any
 "reserved for another deck" overrides you save, plus your last-used
@@ -129,17 +129,17 @@ python3 brewlist_cli.py https://moxfield.com/decks/... --open
 
 (An Archidekt URL works the same way: `https://archidekt.com/decks/... --open`.)
 
-Every card is priced from its cheapest printing using the local price index
-described above (downloads automatically the first time, then instant). Use
-`--refresh-price-index` on its own to force-update that index sooner than
-its automatic weekly refresh.
+Every card is priced from its cheapest printing using the local card
+database described above (downloads automatically the first time, then
+instant). Use `--refresh-price-index` on its own to force-update that
+database sooner than its automatic weekly refresh.
 
 Run `python3 brewlist_cli.py --help` for the full flag list.
 
 ## Where your data lives
 
 Everything the app remembers — your uploaded collection, any saved
-per-deck overrides, and the local cheapest-price index (see above) — is
+per-deck overrides, and the local card database (see above) — is
 stored locally under `data/`, which is excluded from version control
 (`.gitignore`). Nothing leaves your machine except the calls to Moxfield's,
 Archidekt's, Scryfall's, MTGJSON's, and (for Commander decks) Commander

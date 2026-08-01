@@ -343,7 +343,7 @@ def refresh_price_index_cli() -> None:
     --refresh-price-index flag. Same index build_comparison() reuses
     automatically once it's less than a week old."""
     progress = Progress(
-        TextColumn("[dim]Downloading price data from MTGJSON...[/dim]"),
+        TextColumn("[dim]Downloading card database from MTGJSON...[/dim]"),
         BarColumn(),
         TaskProgressColumn(),
         TimeElapsedColumn(),
@@ -360,7 +360,7 @@ def refresh_price_index_cli() -> None:
             index = ensure_price_index(on_progress=_on_progress, force_refresh=True)
         except ValueError as e:
             raise SystemExit(str(e))
-    console.print(f"[green]Price index refreshed -- {len(index)} unique card names.[/green]")
+    console.print(f"[green]Card database refreshed -- {len(index)} unique card names.[/green]")
 
 
 # --------------------------------------------------------------------------
@@ -506,10 +506,10 @@ def main():
     parser.add_argument("--missing-csv", default=None,
                          help="Optional CSV path to dump just the missing cards with buy links")
     parser.add_argument("--refresh-price-index", action="store_true",
-                         help="Force-download a fresh copy of the local cheapest-price index (every card is "
-                              "already priced from the cheapest printing across TCGPlayer, Card Kingdom, and "
-                              "ManaPool by default). Normally this refreshes itself automatically once a week "
-                              "-- use this to update it sooner.")
+                         help="Force-download a fresh copy of the local card database (pricing across "
+                              "TCGPlayer, Card Kingdom, and ManaPool, price trends, Game Changers, and "
+                              "Commander legality all come from it). Normally this refreshes itself "
+                              "automatically once a week -- use this to update it sooner.")
     args = parser.parse_args()
 
     if args.refresh_price_index:
