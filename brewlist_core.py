@@ -1011,10 +1011,14 @@ def build_comparison(
     # printing data whenever cheapest_nonfoil/foil is None.
     price_cache = fetch_scryfall_prices_by_id(needed_ids, on_progress=on_progress)
     game_changers_count = 0
+    game_changers_names: list[str] = []
     banned_count = 0
     if fetch_cheapest:
         by_name = ensure_price_index(on_progress=on_progress)
-        game_changers = game_changers_in_index()
+        # Game Changers is a Commander-bracket concept same as legality --
+        # meaningless (and misleading) outside that format, so both are
+        # gated the same way rather than only checking legality.
+        game_changers = game_changers_in_index() if is_commander_format else set()
         commander_legality = commander_legality_in_index() if is_commander_format else {}
         for e in entries:
             hit = by_name.get(normalize_name(e.name)) or {}
@@ -1022,10 +1026,11 @@ def build_comparison(
             e.cheapest_foil = [tuple(t) for t in hit["foil"]] if hit.get("foil") else None
             e.price_trend_nonfoil = hit.get("nonfoil_trend")
             e.price_trend_foil = hit.get("foil_trend")
-            e.is_game_changer = normalize_name(e.name) in game_changers
-            if e.is_game_changer:
-                game_changers_count += 1
             if is_commander_format:
+                e.is_game_changer = normalize_name(e.name) in game_changers
+                if e.is_game_changer:
+                    game_changers_count += 1
+                    game_changers_names.append(e.name)
                 e.commander_legality = commander_legality.get(normalize_name(e.name))
                 if e.commander_legality and e.commander_legality != "Legal":
                     banned_count += 1
@@ -1036,7 +1041,8 @@ def build_comparison(
         "cost_nonfoil": 0.0, "cost_foil": 0.0,
         "deck_value": 0.0, "owned_value": 0.0,
         "unpriced_count": 0,  # cards (owned or missing) we couldn't find any price for
-        "game_changers": game_changers_count,  # only meaningful when fetch_cheapest was set
+        "game_changers": game_changers_count,  # only meaningful when fetch_cheapest and is_commander_format were set
+        "game_changers_names": sorted(game_changers_names),
         "banned_count": banned_count,  # only meaningful when fetch_cheapest and is_commander_format were set
     }
 
@@ -2092,11 +2098,15 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
     max_card_price = 0.0
 
     game_changers_html = ""
-    if prices_are_baseline:
+    if prices_are_baseline and is_commander_format:
+        gc_names = totals.get("game_changers_names") or []
+        tooltip = (
+            "Game Changers in this deck: " + ", ".join(gc_names)
+            if gc_names else "On WotC's official Commander Game Changers list -- none found in this deck"
+        )
         game_changers_html = (
-            '<div class="stat game-changers" '
-            'title="Cards on WotC\'s official Commander Game Changers list">'
-            f'&#9889; Game Changers <b>{totals.get("game_changers", 0)}</b></div>'
+            f'<div class="stat game-changers" title="{html.escape(tooltip)}">'
+            f'&#9889; Game Changers <b>{len(gc_names)}</b></div>'
         )
 
     legality_html = ""
