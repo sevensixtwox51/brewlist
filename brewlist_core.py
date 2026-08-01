@@ -134,6 +134,7 @@ class CardResult:
     shortfall: int
     best: list[tuple[str, float, str]]  # (store, price, url), cheapest first
     owned_scryfall_id: str | None = None  # the exact printing you own, if known
+    owned_is_foil: bool | None = None  # whether that owned printing is foil; None if not known
     owned_value: float = 0.0  # today's market value of the copies you're using here
     reserved: int = 0  # copies subtracted from `have` because a saved override reserves them elsewhere
 
@@ -1272,8 +1273,9 @@ def build_comparison(
             totals["owned"] += e.quantity
 
         owned_scryfall_id = picks[0][0].scryfall_id if picks else None
+        owned_is_foil = picks[0][0].foil if picks else None
         buckets.setdefault(bucket, []).append(
-            CardResult(e, have, shortfall, prices, owned_scryfall_id, owned_value, reserved_qty)
+            CardResult(e, have, shortfall, prices, owned_scryfall_id, owned_is_foil, owned_value, reserved_qty)
         )
 
     for cards in buckets.values():
@@ -1670,37 +1672,26 @@ details.combos-panel[open] > summary::before {{ transform: rotate(90deg); }}
 .card-main {{ display: flex; gap: 10px; }}
 .card.owned {{ border-left-color: var(--owned); }}
 .card.missing {{ border-left-color: var(--missing); }}
-.card.foil {{ overflow: hidden; }}
+.card.foil {{ overflow: hidden; --mx: 50%; --my: 50%; }}
 .card.foil::before {{
   content: "";
   position: absolute;
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  background: linear-gradient(
-    115deg,
-    transparent 10%,
-    rgba(255, 80, 220, 0.35) 25%,
-    rgba(120, 200, 255, 0.35) 40%,
-    rgba(255, 240, 120, 0.35) 55%,
-    rgba(140, 255, 190, 0.35) 70%,
-    transparent 90%
+  background: radial-gradient(
+    circle at var(--mx) var(--my),
+    rgba(255, 255, 255, 0.22) 0%,
+    rgba(120, 200, 255, 0.14) 25%,
+    rgba(255, 80, 220, 0.12) 45%,
+    transparent 70%
   );
-  background-size: 300% 300%;
-  mix-blend-mode: color-dodge;
-  opacity: 0.4;
-  animation: foil-shimmer 7s ease-in-out infinite;
-  transition: opacity 0.3s ease;
+  mix-blend-mode: soft-light;
+  opacity: 0;
+  transition: opacity 0.7s ease;
 }}
-.card.foil:hover::before {{
-  opacity: 0.8;
-  animation-duration: 1.6s;
-}}
+.card.foil:hover::before {{ opacity: 1; }}
 .card.foil > * {{ position: relative; z-index: 1; }}
-@keyframes foil-shimmer {{
-  0%, 100% {{ background-position: 0% 50%; }}
-  50% {{ background-position: 100% 50%; }}
-}}
 .card-thumb {{
   width: 48px;
   height: 67px;
@@ -2148,6 +2139,14 @@ document.querySelectorAll('.card-thumb[data-full]').forEach(img => {{
   }});
 }});
 
+document.querySelectorAll('.card.foil').forEach(card => {{
+  card.addEventListener('mousemove', (e) => {{
+    const rect = card.getBoundingClientRect();
+    card.style.setProperty('--mx', ((e.clientX - rect.left) / rect.width * 100) + '%');
+    card.style.setProperty('--my', ((e.clientY - rect.top) / rect.height * 100) + '%');
+  }});
+}});
+
 const shoppingBtn = document.getElementById('shopping-list-btn');
 const modalOverlay = document.getElementById('modal-overlay');
 const modalClose = document.getElementById('modal-close');
@@ -2501,10 +2500,15 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
         for r in cards:
             e = r.entry
             name_esc = html.escape(e.name)
+            # For an owned card, whether it's actually foil depends on which
+            # printing you own (r.owned_is_foil), not the decklist's own foil
+            # flag (e.entry.is_foil is just what finish the decklist entry
+            # itself references, e.g. when shopping to fill a shortfall).
+            is_foil = r.owned_is_foil if r.shortfall == 0 and r.owned_is_foil is not None else e.is_foil
             badges = ""
             if e.section == "commander":
                 badges += '<span class="badge">Commander</span>'
-            if e.is_foil:
+            if is_foil:
                 badges += '<span class="badge">Foil</span>'
             if e.is_game_changer:
                 badges += '<span class="badge game-changer" title="On WotC\'s official Commander Game Changers list">&#9889; Game Changer</span>'
@@ -2548,7 +2552,7 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
             store_nonfoil_attr = html.escape(best_nonfoil[0][0]) if best_nonfoil else ''
             store_foil_attr = html.escape(best_foil[0][0]) if best_foil else ''
 
-            foil_class = " foil" if e.is_foil else ""
+            foil_class = " foil" if is_foil else ""
 
             group, subgroup = shopping_group(e)
             group_rank = shopping_group_rank(group, subgroup)
