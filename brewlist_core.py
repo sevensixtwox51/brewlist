@@ -1775,7 +1775,9 @@ details.combos-panel[open] > summary::before {{ transform: rotate(90deg); }}
   border-radius: 999px;
   background: var(--card-border);
   color: var(--text-dim);
+  text-decoration: none;
 }}
+a.badge:hover {{ text-decoration: underline; }}
 .badge.game-changer {{
   background: color-mix(in srgb, var(--gold) 22%, var(--card-bg));
   color: var(--gold);
@@ -2526,7 +2528,12 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
             if is_foil:
                 badges += '<span class="badge">Foil</span>'
             if e.is_game_changer:
-                badges += '<span class="badge game-changer" title="On WotC\'s official Commander Game Changers list">&#9889; Game Changer</span>'
+                badges += (
+                    '<a class="badge game-changer" target="_blank" rel="noopener noreferrer" '
+                    'href="https://magic.wizards.com/en/news/announcements/introducing-commander-brackets-beta" '
+                    'title="On WotC\'s official Commander Game Changers list -- click to read their reasoning">'
+                    '&#9889; Game Changer</a>'
+                )
             if e.commander_legality and e.commander_legality != "Legal":
                 badges += (
                     f'<span class="badge banned" title="Commander legality: {html.escape(e.commander_legality)}">'
