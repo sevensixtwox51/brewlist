@@ -22,6 +22,8 @@ from datetime import datetime, timezone
 from flask import Flask, Response, abort, jsonify, request
 
 from brewlist_core import (
+    PICKABLE_STORE_LABELS,
+    STORE_DISPLAY_NAMES,
     build_comparison,
     deck_is_commander_format,
     deck_key,
@@ -29,10 +31,12 @@ from brewlist_core import (
     extract_entries,
     fetch_deck,
     load_collection,
+    load_store_prefs,
     normalize_name,
     parse_deck_ref,
     price_index_built_at,
     render_html,
+    save_store_prefs,
 )
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -115,7 +119,7 @@ JOBS: dict[str, dict] = {}
 
 
 def _run_compare_job(job_id, entries, owned, break_out_basics, reserved,
-                      deck_id, deck_name, deck_url, options, is_commander_format=False):
+                      deck_id, deck_name, deck_url, options, is_commander_format=False, stores=None):
     def _on_progress(done, total, stage=None):
         with _JOBS_LOCK:
             job = JOBS.get(job_id)
@@ -127,7 +131,7 @@ def _run_compare_job(job_id, entries, owned, break_out_basics, reserved,
     try:
         bucket_names, buckets, totals = build_comparison(
             entries, owned, ignore_basics=not break_out_basics, overrides=reserved,
-            on_progress=_on_progress, is_commander_format=is_commander_format,
+            on_progress=_on_progress, is_commander_format=is_commander_format, stores=stores,
         )
         save_project(deck_id, deck_name=deck_name, deck_url=deck_url, options=options, reserved=reserved)
         html_report = render_html(
@@ -185,6 +189,9 @@ input[type="text"], input[type="url"], input[type="file"] {
 }
 .checkbox-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 0.9rem; color: var(--text-dim); }
 .checkbox-row input { width: auto; margin: 0; }
+.store-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; }
+.store-grid .checkbox-row { margin-bottom: 4px; }
+.hint-inline { color: var(--text-dim); font-size: 0.75rem; }
 .hint { color: var(--text-dim); font-size: 0.8rem; margin-top: -10px; margin-bottom: 16px; }
 .btn {
   cursor: pointer; border: none; border-radius: 8px; padding: 10px 18px;
@@ -257,6 +264,27 @@ def render_home_page(error: str | None = None, prefill_url: str = "") -> str:
     else:
         index_status = f'Updated {index_built_at.strftime("%Y-%m-%d %H:%M UTC")}.'
 
+    selected_stores = set(load_store_prefs())
+
+    def _store_checkbox(label: str) -> str:
+        name = STORE_DISPLAY_NAMES[label]
+        if label == "CM":
+            name_html = f'{_esc(name)} <span class="hint-inline">(EUR, not in totals)</span>'
+            title_attr = (
+                ' title="Cardmarket prices are in EUR, not USD -- shown for reference only, '
+                'never used to pick the cheapest store or in any dollar total"'
+            )
+        else:
+            name_html = _esc(name)
+            title_attr = ""
+        return (
+            f'<div class="checkbox-row"><input type="checkbox" id="store_{label.lower()}" name="stores" '
+            f'value="{label}"{" checked" if label in selected_stores else ""}>'
+            f'<label for="store_{label.lower()}" style="margin:0;font-weight:400;"{title_attr}>{name_html}</label></div>'
+        )
+
+    store_checkboxes_html = "".join(_store_checkbox(label) for label in PICKABLE_STORE_LABELS)
+
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -289,6 +317,10 @@ def render_home_page(error: str | None = None, prefill_url: str = "") -> str:
     <div class="checkbox-row"><input type="checkbox" id="include_sideboard" name="include_sideboard"><label for="include_sideboard" style="margin:0;font-weight:400;">Include sideboard cards</label></div>
     <div class="checkbox-row"><input type="checkbox" id="include_maybeboard" name="include_maybeboard"><label for="include_maybeboard" style="margin:0;font-weight:400;">Include maybeboard cards</label></div>
     <div class="checkbox-row"><input type="checkbox" id="break_out_basics" name="break_out_basics" checked><label for="break_out_basics" style="margin:0;font-weight:400;">Break out basic lands separately</label></div>
+
+    <label>Store pricing</label>
+    <div class="store-grid">{store_checkboxes_html}</div>
+    <div class="hint">Which stores to show prices from -- saved for next time.</div>
 
     <button type="submit" class="btn" id="submit-btn">Compare</button>
     <div id="progress-wrap">
@@ -361,6 +393,10 @@ function pollProgress(jobId) {{
 form.addEventListener('submit', (e) => {{
   e.preventDefault();
   errorBox.style.display = 'none';
+  if (!form.querySelector('input[name="stores"]:checked')) {{
+    showError('Pick at least one store for pricing.');
+    return;
+  }}
   submitBtn.disabled = true;
   submitBtn.textContent = 'Working...';
   progressWrap.style.display = 'block';
@@ -512,6 +548,9 @@ def compare_start():
     include_maybeboard = "include_maybeboard" in request.form
     break_out_basics = "break_out_basics" in request.form
 
+    selected_stores = [s for s in request.form.getlist("stores") if s in PICKABLE_STORE_LABELS]
+    save_store_prefs(selected_stores)
+
     upload = request.files.get("manabox_csv")
     if upload and upload.filename:
         upload.save(COLLECTION_PATH)
@@ -556,7 +595,7 @@ def compare_start():
     threading.Thread(
         target=_run_compare_job,
         args=(job_id, entries, owned, break_out_basics, reserved, project_key, deck_name, deck_url, options),
-        kwargs={"is_commander_format": is_commander_format},
+        kwargs={"is_commander_format": is_commander_format, "stores": selected_stores or None},
         daemon=True,
     ).start()
 

@@ -29,6 +29,8 @@ __all__ = [
     "normalize_name", "find_collection_candidates", "load_collection", "load_overrides",
     "fetch_scryfall_prices_by_id", "price_for_printing", "select_used_printings",
     "price_index_age_days", "price_index_built_at", "rebuild_price_index", "ensure_price_index", "game_changers_in_index",
+    "load_store_prefs", "save_store_prefs", "STORE_LABELS", "STORE_DISPLAY_NAMES",
+    "EXTRA_STORE_LABELS", "PICKABLE_STORE_LABELS",
     "commander_legality_in_index", "deck_is_commander_format",
     "find_deck_combos", "estimate_deck_bracket", "BRACKET_TAG_LABELS", "scryfall_prices_in_index",
     "PRICE_INDEX_PATH", "PRICE_INDEX_MAX_AGE_DAYS",
@@ -63,6 +65,15 @@ STORES = [
     ("CK", "ck", "ck_foil", "cardKingdomUrl", "cardKingdomFoilUrl"),
     ("MP", "mp", "mp_foil", "manapool_url", "manapool_url"),
 ]
+STORE_LABELS = [s[0] for s in STORES]
+# Cardmarket -- a real 4th MTGJSON price provider, but EUR-denominated (every
+# other store here is USD), so it's deliberately NOT part of STORES: it never
+# participates in "cheapest across stores" sorting or any dollar total, only
+# shown as an extra, informational pill when the user opts in. See
+# CardEntry.cardmarket_nonfoil/foil and rebuild_price_index.
+EXTRA_STORE_LABELS = ["CM"]
+PICKABLE_STORE_LABELS = STORE_LABELS + EXTRA_STORE_LABELS
+STORE_DISPLAY_NAMES = {"TCGP": "TCGplayer", "CK": "Card Kingdom", "MP": "ManaPool", "CM": "Cardmarket"}
 
 CARD_KINGDOM_BASE = "https://www.cardkingdom.com/"
 
@@ -111,6 +122,13 @@ class CardEntry:
     # recently printed card).
     price_trend_nonfoil: dict[str, float] | None = None
     price_trend_foil: dict[str, float] | None = None
+    # Cardmarket's own cheapest-across-printings (price, url) -- EUR, not USD
+    # like everything else here, so it's deliberately kept out of
+    # cheapest_nonfoil/foil and every dollar total (deck value, cost to
+    # complete). Shown informationally only when "CM" is in the user's
+    # selected stores. See rebuild_price_index / EXTRA_STORE_LABELS.
+    cardmarket_nonfoil: tuple[float, str] | None = None
+    cardmarket_foil: tuple[float, str] | None = None
     # Whether this card is on WotC's official Commander "Game Changers" list
     # -- see game_changers_in_index. Only set (and only meaningful) when
     # build_comparison was told this deck is Commander format; False otherwise.
@@ -560,6 +578,7 @@ PRICE_TREND_LOOKBACK_DAYS = 7
 
 _CORE_DIR = os.path.dirname(os.path.abspath(__file__))
 PRICE_INDEX_PATH = os.path.join(_CORE_DIR, "data", "price_index.json")
+STORE_PREFS_PATH = os.path.join(_CORE_DIR, "data", "store_prefs.json")
 PRICE_INDEX_MAX_AGE_DAYS = 7
 # Bumped whenever the on-disk shape of the index changes (e.g. the Scryfall ->
 # MTGJSON switch, which changed "nonfoil"/"foil" from a single [price, url]
@@ -567,7 +586,32 @@ PRICE_INDEX_MAX_AGE_DAYS = 7
 # which added "nonfoil_trend"/"foil_trend") so a stale on-disk file from an
 # older version of this code is treated as needing a rebuild rather than
 # silently missing data or crashing.
-PRICE_INDEX_FORMAT_VERSION = 6
+PRICE_INDEX_FORMAT_VERSION = 7
+
+
+def load_store_prefs(path: str = STORE_PREFS_PATH) -> list[str]:
+    """Which stores (see STORE_LABELS) to show pricing from, saved from the
+    web app's initial screen. Defaults to every store if nothing's been
+    saved yet, the file is unreadable, or the saved list is empty/invalid --
+    this is a preference, not something that should ever silently hide all
+    pricing."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            saved = json.load(f).get("stores")
+        selected = [s for s in PICKABLE_STORE_LABELS if s in (saved or [])]
+        if selected:
+            return selected
+    except (OSError, ValueError):
+        pass
+    return list(STORE_LABELS)
+
+
+def save_store_prefs(stores: list[str], path: str = STORE_PREFS_PATH) -> None:
+    """Persists which stores to show pricing from -- see load_store_prefs."""
+    selected = [s for s in PICKABLE_STORE_LABELS if s in stores]
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"stores": selected}, f)
 
 
 def price_index_built_at(path: str = PRICE_INDEX_PATH) -> datetime.datetime | None:
@@ -775,6 +819,28 @@ def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[
                             cur = entry["foil"].get(label)
                             if cur is None or p < cur[0]:
                                 entry["foil"][label] = [p, foil_url, foil_ref]
+
+                # Cardmarket -- EUR, kept separate from the stores loop above
+                # (see EXTRA_STORE_LABELS): still "cheapest across every
+                # printing of this name", just in its own currency, never
+                # blended into cheapest_nonfoil/foil or any dollar total.
+                cm_url = purchase_urls.get("cardmarket")
+                if cm_url:
+                    cm_retail = (paper.get("cardmarket") or {}).get("retail") or {}
+                    cm_nonfoil_price, _ = _trend_price(cm_retail.get("normal") or {})
+                    cm_foil_price, _ = _trend_price(cm_retail.get("foil") or {})
+                    for nm in names:
+                        entry = working.setdefault(nm, {"nonfoil": {}, "foil": {}})
+                        if cm_nonfoil_price:
+                            p = float(cm_nonfoil_price)
+                            cur = entry.get("cardmarket_nonfoil")
+                            if cur is None or p < cur[0]:
+                                entry["cardmarket_nonfoil"] = (p, cm_url)
+                        if cm_foil_price:
+                            p = float(cm_foil_price)
+                            cur = entry.get("cardmarket_foil")
+                            if cur is None or p < cur[0]:
+                                entry["cardmarket_foil"] = (p, cm_url)
     finally:
         for p in (printings_tmp, prices_tmp):
             if os.path.exists(p):
@@ -796,6 +862,8 @@ def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[
             "foil": foil_list or None,
             "nonfoil_trend": _trends(entry["nonfoil"]),
             "foil_trend": _trends(entry["foil"]),
+            "cardmarket_nonfoil": list(entry["cardmarket_nonfoil"]) if entry.get("cardmarket_nonfoil") else None,
+            "cardmarket_foil": list(entry["cardmarket_foil"]) if entry.get("cardmarket_foil") else None,
         }
 
     payload = {
@@ -1074,7 +1142,7 @@ def shopping_group_rank(group: str, subgroup: str) -> str:
 
 
 def best_prices(entry: CardEntry, foil: bool | None = None, max_results: int = 3,
-                 strict: bool = False) -> list[tuple[str, float, str]]:
+                 strict: bool = False, stores: set[str] | None = None) -> list[tuple[str, float, str]]:
     """Returns up to max_results (store, price, url) tuples, cheapest first.
 
     `foil` picks which finish to price -- defaults to the finish the decklist entry
@@ -1094,6 +1162,11 @@ def best_prices(entry: CardEntry, foil: bool | None = None, max_results: int = 3
     whatever finish *is* priced (better than showing nothing). Pass
     strict=True to disable that fallback -- used when a caller wants to know
     specifically whether that finish is priced (e.g. the HTML foil/nonfoil toggle).
+
+    `stores`, if given, restricts results to those store labels (see
+    STORE_LABELS) -- only matters for the raw decklist-price fallback below,
+    since entry.cheapest_nonfoil/foil is already filtered by store preference
+    when build_comparison sets it.
     """
     want_foil = entry.is_foil if foil is None else foil
 
@@ -1105,6 +1178,8 @@ def best_prices(entry: CardEntry, foil: bool | None = None, max_results: int = 3
 
     results = []
     for label, nonfoil_key, foil_key, nonfoil_url_key, foil_url_key in STORES:
+        if stores is not None and label not in stores:
+            continue
         key = foil_key if want_foil else nonfoil_key
         price = entry.prices.get(key)
         if price in (None, 0) and not strict:
@@ -1141,8 +1216,13 @@ def priced_for_finish(entry: CardEntry, want_foil: bool, max_results: int = 3):
 def build_comparison(
     entries: list[CardEntry], owned_collection: dict[str, OwnedCard], ignore_basics: bool,
     overrides: dict[str, int] | None = None, on_progress=None,
-    is_commander_format: bool = False,
+    is_commander_format: bool = False, stores: list[str] | None = None,
 ) -> tuple[list[str], dict[str, list[CardResult]], dict]:
+    # Which stores (TCGP/CK/MP) to show pricing from -- see load_store_prefs.
+    # Defaults to the saved preference (every store, until the user narrows
+    # it from the web app's initial screen) when the caller doesn't pass one
+    # explicitly.
+    selected_stores = set(stores) if stores is not None else set(load_store_prefs())
     # Pass 1: figure out have/shortfall per entry, and which exact owned
     # printings (by Scryfall ID) cover the copies that go into this deck.
     # `overrides` reserves copies for other decks (saved from a previous HTML
@@ -1200,10 +1280,15 @@ def build_comparison(
     commander_legality = commander_legality_in_index() if is_commander_format else {}
     for e in entries:
         hit = by_name.get(normalize_name(e.name)) or {}
-        e.cheapest_nonfoil = [tuple(t) for t in hit["nonfoil"]] if hit.get("nonfoil") else None
-        e.cheapest_foil = [tuple(t) for t in hit["foil"]] if hit.get("foil") else None
+        nonfoil_list = [tuple(t) for t in hit["nonfoil"]] if hit.get("nonfoil") else []
+        foil_list = [tuple(t) for t in hit["foil"]] if hit.get("foil") else []
+        e.cheapest_nonfoil = [t for t in nonfoil_list if t[0] in selected_stores] or None
+        e.cheapest_foil = [t for t in foil_list if t[0] in selected_stores] or None
         e.price_trend_nonfoil = hit.get("nonfoil_trend")
         e.price_trend_foil = hit.get("foil_trend")
+        if "CM" in selected_stores:
+            e.cardmarket_nonfoil = tuple(hit["cardmarket_nonfoil"]) if hit.get("cardmarket_nonfoil") else None
+            e.cardmarket_foil = tuple(hit["cardmarket_foil"]) if hit.get("cardmarket_foil") else None
         if is_commander_format:
             e.is_game_changer = normalize_name(e.name) in game_changers
             if e.is_game_changer:
@@ -1250,7 +1335,7 @@ def build_comparison(
         else:
             bucket = categorize(e.type_line)
 
-        prices = best_prices(e) if shortfall else []
+        prices = best_prices(e, stores=selected_stores) if shortfall else []
 
         owned_value = 0.0
         for printing, qty in picks:
@@ -1262,7 +1347,7 @@ def build_comparison(
         if remainder:
             # Copies with no identified printing (e.g. missing Scryfall ID on
             # import) -- fall back to the deck's own reference-printing price.
-            fallback = best_prices(e)
+            fallback = best_prices(e, stores=selected_stores)
             if fallback:
                 owned_value += fallback[0][1] * remainder
             else:
@@ -1274,8 +1359,8 @@ def build_comparison(
         if shortfall:
             totals["owned"] += owned_used
             totals["missing"] += shortfall
-            nonfoil_prices = best_prices(e, foil=False)
-            foil_prices = best_prices(e, foil=True)
+            nonfoil_prices = best_prices(e, foil=False, stores=selected_stores)
+            foil_prices = best_prices(e, foil=True, stores=selected_stores)
             if nonfoil_prices:
                 totals["cost_nonfoil"] += nonfoil_prices[0][1] * shortfall
             if foil_prices:
@@ -1866,6 +1951,10 @@ a.badge:hover {{ text-decoration: underline; }}
   border-color: var(--gold);
   color: var(--gold);
   font-weight: 600;
+}}
+.price-pill.cardmarket {{
+  border-style: dashed;
+  color: var(--text-dim);
 }}
 .trend {{
   font-size: 0.68rem;
@@ -2498,16 +2587,25 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
             f'over the last {PRICE_TREND_LOOKBACK_DAYS} days">{arrow}{abs(pct):.0f}%</span>'
         )
 
-    def _pills(price_list, note=None, trend=None):
-        if not price_list:
+    def _pills(price_list, note=None, trend=None, cardmarket=None):
+        if not price_list and not cardmarket:
             return '<div class="no-price">no price found</div>'
         note_html = f'<div class="finish-note">{html.escape(note)}</div>' if note else ''
-        return note_html + '<div class="prices">' + "".join(
+        pills_html = "".join(
             f'<a class="price-pill{" best" if i == 0 else ""}" '
             f'href="{html.escape(url)}" target="_blank" rel="noopener noreferrer">'
             f'{html.escape(label)} ${price:.2f}{_trend_span(label, trend)}</a>'
             for i, (label, price, url) in enumerate(price_list)
-        ) + '</div>'
+        )
+        if cardmarket:
+            cm_price, cm_url = cardmarket
+            pills_html += (
+                f'<a class="price-pill cardmarket" href="{html.escape(cm_url)}" '
+                'target="_blank" rel="noopener noreferrer" '
+                'title="Cardmarket, in EUR -- informational only, not used for cheapest-price picks or deck totals">'
+                f'CM &euro;{cm_price:.2f}</a>'
+            )
+        return note_html + '<div class="prices">' + pills_html + '</div>'
 
     bucket_blocks = []
     for bucket in bucket_names:
@@ -2560,8 +2658,8 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
             foil_note = "not sold as foil — showing non-foil price" if best_foil and not foil_used_foil else None
             nonfoil_trend = e.price_trend_foil if nonfoil_used_foil else e.price_trend_nonfoil
             foil_trend = e.price_trend_foil if foil_used_foil else e.price_trend_nonfoil
-            prices_nonfoil_html = f'<div class="prices-nonfoil">{_pills(best_nonfoil, nonfoil_note, nonfoil_trend)}</div>'
-            prices_foil_html = f'<div class="prices-foil">{_pills(best_foil, foil_note, foil_trend)}</div>'
+            prices_nonfoil_html = f'<div class="prices-nonfoil">{_pills(best_nonfoil, nonfoil_note, nonfoil_trend, e.cardmarket_nonfoil)}</div>'
+            prices_foil_html = f'<div class="prices-foil">{_pills(best_foil, foil_note, foil_trend, e.cardmarket_foil)}</div>'
 
             nonfoil_cheapest = best_nonfoil[0][1] if best_nonfoil else None
             foil_cheapest = best_foil[0][1] if best_foil else None
