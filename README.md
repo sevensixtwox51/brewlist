@@ -25,8 +25,10 @@ Markdown/HTML/CSV reports on disk).
   every card across TCGPlayer, Card Kingdom, and ManaPool (decklists
   sometimes reference a rare, much pricier alt-art printing by default) via
   a local price index built from MTGJSON's public bulk data — a one-time
-  ~180MB download, refreshed automatically once a week (or on demand), so
+  ~325MB download, refreshed automatically once a week (or on demand), so
   this step is instant afterward instead of a live lookup per card
+- Each accurate price shows a ▲/▼ trend arrow when it's moved 2%+ over the
+  past week, using MTGJSON's 90-day price history
 - Total deck value at today's market price, plus the owned portion
 - Groups missing cards the way a physical store organizes its binders
   (Lands, Artifacts, then Colors split into mono-color / Multicolor /
@@ -88,7 +90,7 @@ From there:
 That first comparison loads in a few seconds. If you want accurate
 cheapest-printing prices instead of the decklist's referenced printing, click
 **Get Accurate Prices** on the results page. The first time you do this (or
-after the weekly auto-refresh), it downloads a ~180MB price index from
+after the weekly auto-refresh), it downloads a ~325MB price index from
 MTGJSON — after that it's instant. You can also refresh that index on
 demand from the home page's **Refresh Price Data** button.
 

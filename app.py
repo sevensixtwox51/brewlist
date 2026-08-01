@@ -253,7 +253,7 @@ def render_home_page(error: str | None = None, prefill_url: str = "") -> str:
 
     index_age = price_index_age_days()
     if index_age is None:
-        index_status = 'Not built yet — first use downloads it (~180MB from MTGJSON, one-time, refreshed weekly after).'
+        index_status = 'Not built yet — first use downloads it (~325MB from MTGJSON, one-time, refreshed weekly after).'
     elif index_age < 1:
         index_status = 'Built today.'
     else:

@@ -103,6 +103,12 @@ class CardEntry:
     # printing of this card was found in the index.
     cheapest_nonfoil: list[tuple[str, float, str]] | None = None
     cheapest_foil: list[tuple[str, float, str]] | None = None
+    # Per-store % price change since the previous price-index build (see
+    # rebuild_price_index) -- {"TCGP": 3.2, "CK": -5.1, ...}. None for a
+    # store/finish with nothing to compare against yet (e.g. the very first
+    # index build, or a store with no earlier price for this card).
+    price_trend_nonfoil: dict[str, float] | None = None
+    price_trend_foil: dict[str, float] | None = None
 
 
 @dataclass
@@ -486,11 +492,12 @@ def fetch_scryfall_prices_by_id(scryfall_ids: set[str], on_progress=None) -> dic
 # --------------------------------------------------------------------------
 # Cheapest-printing baseline pricing -- a local index built from MTGJSON's
 # public bulk data (AllPrintings for card identity + official purchase
-# links, AllPricesToday for current retail prices), reduced to the cheapest
-# paper nonfoil/foil price at each of TCGPlayer, Card Kingdom, and ManaPool
-# per unique card name. This replaced an earlier per-card live-search
+# links, AllPrices for 90 days of retail price history), reduced to the
+# cheapest paper nonfoil/foil price at each of TCGPlayer, Card Kingdom, and
+# ManaPool per unique card name, plus a 7-day price-trend indicator computed
+# from that same history. This replaced an earlier per-card live-search
 # implementation: with ~90 unique names in a typical deck, live searches
-# routinely tripped Scryfall's rate limiter. A combined ~176MB download
+# routinely tripped Scryfall's rate limiter. A combined ~325MB download
 # refreshed on a schedule (see PRICE_INDEX_MAX_AGE_DAYS) has no such risk
 # and, once warm, resolves every card in a deck instantly with zero network
 # calls. (An earlier version of this used Scryfall's own bulk data instead --
@@ -505,16 +512,23 @@ def fetch_scryfall_prices_by_id(scryfall_ids: set[str], on_progress=None) -> dic
 # --------------------------------------------------------------------------
 
 MTGJSON_ALL_PRINTINGS_URL = "https://mtgjson.com/api/v5/AllPrintings.json.gz"
-MTGJSON_ALL_PRICES_TODAY_URL = "https://mtgjson.com/api/v5/AllPricesToday.json.gz"
+# 90 days of daily price history per printing (not just today's price) --
+# used both for the current price and for the price-trend indicator (see
+# _trend_price), since the trend needs a real reference point in the past,
+# not just an artifact of how recently the index happened to last refresh.
+MTGJSON_ALL_PRICES_URL = "https://mtgjson.com/api/v5/AllPrices.json.gz"
+PRICE_TREND_LOOKBACK_DAYS = 7
 
 _CORE_DIR = os.path.dirname(os.path.abspath(__file__))
 PRICE_INDEX_PATH = os.path.join(_CORE_DIR, "data", "price_index.json")
 PRICE_INDEX_MAX_AGE_DAYS = 7
 # Bumped whenever the on-disk shape of the index changes (e.g. the Scryfall ->
 # MTGJSON switch, which changed "nonfoil"/"foil" from a single [price, url]
-# to a list of [store, price, url]) so a stale on-disk file from an older
-# version of this code is treated as needing a rebuild rather than crashing.
-PRICE_INDEX_FORMAT_VERSION = 2
+# to a list of [store, price, url]; or the AllPricesToday -> AllPrices switch,
+# which added "nonfoil_trend"/"foil_trend") so a stale on-disk file from an
+# older version of this code is treated as needing a rebuild rather than
+# silently missing data or crashing.
+PRICE_INDEX_FORMAT_VERSION = 3
 
 
 def price_index_age_days(path: str = PRICE_INDEX_PATH) -> float | None:
@@ -561,13 +575,39 @@ def _slugify(text: str) -> str:
     return text.strip("-")
 
 
+def _trend_price(date_prices: dict, lookback_days: int = PRICE_TREND_LOOKBACK_DAYS) -> tuple[float | None, float | None]:
+    """Given a {date_str: price} dict (a single store/finish's history),
+    returns (current_price, reference_price) where reference_price is the
+    price from the closest available date at least `lookback_days` before
+    the most recent one -- None if there's no date that far back yet (e.g.
+    a card printed within the lookback window)."""
+    if not date_prices:
+        return None, None
+    dates = sorted(date_prices)
+    current = date_prices[dates[-1]]
+    target = datetime.date.fromisoformat(dates[-1]) - datetime.timedelta(days=lookback_days)
+    reference = None
+    for d in dates:
+        if datetime.date.fromisoformat(d) <= target:
+            reference = date_prices[d]
+        else:
+            break
+    return current, reference
+
+
 def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[str, dict]:
-    """Downloads MTGJSON's AllPrintings + AllPricesToday bulk data and
-    reduces them to {normalized_name: {"nonfoil": [[store, price, url], ...]
-    sorted cheapest first, "foil": [...]}}, writing the result to `path`.
+    """Downloads MTGJSON's AllPrintings + AllPrices (90-day history) bulk
+    data and reduces them to {normalized_name: {"nonfoil": [[store, price,
+    url], ...] sorted cheapest first, "foil": [...], "nonfoil_trend": {store:
+    pct_change, ...}, "foil_trend": {...}}}, writing the result to `path`.
     Double-faced/split cards are indexed under both their combined name and
     their front-face name, since decklists typically reference only the
     front face.
+
+    The price-trend percentages compare each store's current price for
+    whichever printing ends up cheapest against its own price from
+    PRICE_TREND_LOOKBACK_DAYS ago -- omitted for a store/finish without that
+    much history yet (e.g. a card printed within the lookback window).
 
     `on_progress(bytes_done, bytes_total)`, if given, reports combined
     download progress across both files; parsing afterward is fast enough
@@ -576,7 +616,7 @@ def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[
     Raises ValueError on any network failure (nothing is written in that
     case, so a prior index -- if any -- is left untouched)."""
     printings_size = _content_length(MTGJSON_ALL_PRINTINGS_URL)
-    prices_size = _content_length(MTGJSON_ALL_PRICES_TODAY_URL)
+    prices_size = _content_length(MTGJSON_ALL_PRICES_URL)
     total_bytes = printings_size + prices_size
 
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -584,7 +624,7 @@ def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[
     prices_tmp = path + ".prices.download"
     try:
         _download_to_file(MTGJSON_ALL_PRINTINGS_URL, printings_tmp, on_progress, 0, total_bytes)
-        _download_to_file(MTGJSON_ALL_PRICES_TODAY_URL, prices_tmp, on_progress, printings_size, total_bytes)
+        _download_to_file(MTGJSON_ALL_PRICES_URL, prices_tmp, on_progress, printings_size, total_bytes)
     except (urllib.error.URLError, urllib.error.HTTPError) as e:
         for p in (printings_tmp, prices_tmp):
             if os.path.exists(p):
@@ -632,8 +672,8 @@ def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[
                 ]
                 for label, price_key, nonfoil_url, foil_url in stores:
                     retail = (paper.get(price_key) or {}).get("retail") or {}
-                    nonfoil_price = next(iter((retail.get("normal") or {}).values()), None)
-                    foil_price = next(iter((retail.get("foil") or {}).values()), None)
+                    nonfoil_price, nonfoil_ref = _trend_price(retail.get("normal") or {})
+                    foil_price, foil_ref = _trend_price(retail.get("foil") or {})
 
                     for nm in names:
                         entry = working.setdefault(nm, {"nonfoil": {}, "foil": {}})
@@ -641,22 +681,34 @@ def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[
                             p = float(nonfoil_price)
                             cur = entry["nonfoil"].get(label)
                             if cur is None or p < cur[0]:
-                                entry["nonfoil"][label] = [p, nonfoil_url]
+                                entry["nonfoil"][label] = [p, nonfoil_url, nonfoil_ref]
                         if foil_price and foil_url:
                             p = float(foil_price)
                             cur = entry["foil"].get(label)
                             if cur is None or p < cur[0]:
-                                entry["foil"][label] = [p, foil_url]
+                                entry["foil"][label] = [p, foil_url, foil_ref]
     finally:
         for p in (printings_tmp, prices_tmp):
             if os.path.exists(p):
                 os.remove(p)
 
+    def _trends(current_by_store: dict) -> dict[str, float] | None:
+        trend = {}
+        for label, (p, _u, ref) in current_by_store.items():
+            if ref:
+                trend[label] = (p - ref) / ref * 100
+        return trend or None
+
     index: dict[str, dict] = {}
     for nm, entry in working.items():
-        nonfoil_list = sorted(([label, p, u] for label, (p, u) in entry["nonfoil"].items()), key=lambda t: t[1])
-        foil_list = sorted(([label, p, u] for label, (p, u) in entry["foil"].items()), key=lambda t: t[1])
-        index[nm] = {"nonfoil": nonfoil_list or None, "foil": foil_list or None}
+        nonfoil_list = sorted(([label, p, u] for label, (p, u, _ref) in entry["nonfoil"].items()), key=lambda t: t[1])
+        foil_list = sorted(([label, p, u] for label, (p, u, _ref) in entry["foil"].items()), key=lambda t: t[1])
+        index[nm] = {
+            "nonfoil": nonfoil_list or None,
+            "foil": foil_list or None,
+            "nonfoil_trend": _trends(entry["nonfoil"]),
+            "foil_trend": _trends(entry["foil"]),
+        }
 
     payload = {
         "format_version": PRICE_INDEX_FORMAT_VERSION,
@@ -888,6 +940,8 @@ def build_comparison(
             hit = by_name.get(normalize_name(e.name)) or {}
             e.cheapest_nonfoil = [tuple(t) for t in hit["nonfoil"]] if hit.get("nonfoil") else None
             e.cheapest_foil = [tuple(t) for t in hit["foil"]] if hit.get("foil") else None
+            e.price_trend_nonfoil = hit.get("nonfoil_trend")
+            e.price_trend_foil = hit.get("foil_trend")
 
     buckets: dict[str, list[CardResult]] = {}
     totals = {
@@ -1398,6 +1452,13 @@ details.bucket[open] > summary::before {{ transform: rotate(90deg); }}
   color: var(--gold);
   font-weight: 600;
 }}
+.trend {{
+  font-size: 0.68rem;
+  font-weight: 600;
+  white-space: nowrap;
+}}
+.trend-up {{ color: var(--missing); }}
+.trend-down {{ color: var(--owned); }}
 .no-price {{ color: var(--text-dim); font-size: 0.75rem; font-style: italic; text-align: right; }}
 .finish-note {{ color: var(--text-dim); font-size: 0.7rem; font-style: italic; margin-bottom: 3px; text-align: right; }}
 .prices-foil {{ display: none; }}
@@ -1948,14 +2009,25 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
         if bg_url:
             body_attrs = f' style="--commander-bg-url: url(\'{html.escape(bg_url)}\');"'
 
-    def _pills(price_list, note=None):
+    def _trend_span(label, trend):
+        pct = (trend or {}).get(label)
+        if pct is None or abs(pct) < 2:
+            return ''
+        arrow, cls = ('▲', 'trend-up') if pct > 0 else ('▼', 'trend-down')
+        direction = 'up' if pct > 0 else 'down'
+        return (
+            f' <span class="trend {cls}" title="{label} price {direction} {abs(pct):.0f}% '
+            f'over the last {PRICE_TREND_LOOKBACK_DAYS} days">{arrow}{abs(pct):.0f}%</span>'
+        )
+
+    def _pills(price_list, note=None, trend=None):
         if not price_list:
             return '<div class="no-price">no price found</div>'
         note_html = f'<div class="finish-note">{html.escape(note)}</div>' if note else ''
         return note_html + '<div class="prices">' + "".join(
             f'<a class="price-pill{" best" if i == 0 else ""}" '
             f'href="{html.escape(url)}" target="_blank" rel="noopener noreferrer">'
-            f'{html.escape(label)} ${price:.2f}</a>'
+            f'{html.escape(label)} ${price:.2f}{_trend_span(label, trend)}</a>'
             for i, (label, price, url) in enumerate(price_list)
         ) + '</div>'
 
@@ -1987,8 +2059,10 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
             best_foil, foil_used_foil = priced_for_finish(e, want_foil=True)
             nonfoil_note = "not sold non-foil — showing foil price" if best_nonfoil and nonfoil_used_foil else None
             foil_note = "not sold as foil — showing non-foil price" if best_foil and not foil_used_foil else None
-            prices_nonfoil_html = f'<div class="prices-nonfoil">{_pills(best_nonfoil, nonfoil_note)}</div>'
-            prices_foil_html = f'<div class="prices-foil">{_pills(best_foil, foil_note)}</div>'
+            nonfoil_trend = e.price_trend_foil if nonfoil_used_foil else e.price_trend_nonfoil
+            foil_trend = e.price_trend_foil if foil_used_foil else e.price_trend_nonfoil
+            prices_nonfoil_html = f'<div class="prices-nonfoil">{_pills(best_nonfoil, nonfoil_note, nonfoil_trend)}</div>'
+            prices_foil_html = f'<div class="prices-foil">{_pills(best_foil, foil_note, foil_trend)}</div>'
 
             nonfoil_cheapest = best_nonfoil[0][1] if best_nonfoil else None
             foil_cheapest = best_foil[0][1] if best_foil else None
