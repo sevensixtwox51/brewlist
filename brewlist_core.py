@@ -928,7 +928,14 @@ def _commander_spellbook_post(endpoint: str, payload: dict) -> dict | None:
 def _simplify_combo(raw: dict, deck_names: set[str] | None = None) -> dict:
     uses = [u["card"]["name"] for u in raw.get("uses", [])]
     produces = [p["feature"]["name"] for p in raw.get("produces", [])]
-    combo_id = (raw.get("of") or [{}])[0].get("id")
+    # raw["id"] here is this specific card-combination's *variant* ID (e.g.
+    # "513-5034--46") -- what commanderspellbook.com/combo/<id>/ actually
+    # expects. raw["of"][0]["id"] looks similar but is the abstract combo
+    # *template* this variant realizes (a plain int, e.g. 26516); visiting
+    # /combo/<that>/ redirects to the site's own canonical variant for that
+    # template, which is very often a *different* card pairing than the one
+    # this deck actually has -- confirmed by comparing the two live.
+    combo_id = raw.get("id")
     result = {
         "uses": uses,
         "produces": produces,
