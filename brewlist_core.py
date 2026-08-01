@@ -30,6 +30,7 @@ __all__ = [
     "fetch_scryfall_prices_by_id", "price_for_printing", "select_used_printings",
     "price_index_age_days", "rebuild_price_index", "ensure_price_index", "game_changers_in_index",
     "commander_legality_in_index", "deck_is_commander_format",
+    "find_deck_combos", "estimate_deck_bracket", "BRACKET_TAG_LABELS",
     "PRICE_INDEX_PATH", "PRICE_INDEX_MAX_AGE_DAYS",
     "categorize", "shopping_group", "shopping_group_rank",
     "best_prices", "priced_for_finish", "build_comparison",
@@ -118,6 +119,12 @@ class CardEntry:
     # see commander_legality_in_index. Only set (and only meaningful) when
     # build_comparison was told this deck is Commander format; None otherwise.
     commander_legality: str | None = None
+    # From Commander Spellbook's estimate-bracket lookup (see
+    # estimate_deck_bracket) -- only set when is_commander_format and that
+    # lookup succeeded; False otherwise (including on lookup failure, so a
+    # transient outage never falsely flags a card).
+    mass_land_denial: bool = False
+    extra_turn: bool = False
 
 
 @dataclass
@@ -817,6 +824,112 @@ def ensure_price_index(path: str = PRICE_INDEX_PATH, on_progress=None, force_ref
     return rebuild_price_index(path, on_progress=on_progress)
 
 
+# --------------------------------------------------------------------------
+# Commander Spellbook -- a live, single-request-per-deck lookup (not a bulk
+# index like the price data above) against the public combo database at
+# backend.commanderspellbook.com, for two Commander-specific enrichments:
+#
+# 1. Which known combos this deck already has all the pieces for, and which
+#    it's exactly one card away from completing.
+# 2. Per-card mass-land-denial/extra-turn flags, which MTGJSON's data
+#    doesn't have (see PRICE_INDEX_FORMAT_VERSION's history) but WotC's
+#    bracket criteria do care about.
+#
+# Note: the "bracketTag" this API returns (Ruthless/Spicy/Powerful/Oddball/
+# Core/Exhibition/Banned) is Commander Spellbook's own community power/style
+# rating, NOT the official WotC Bracket 1-5 system -- only "Core" and
+# "Exhibition" happen to share a name with WotC's brackets. Surface it
+# labeled as theirs, not as an official bracket number.
+#
+# Both lookups are best-effort: any failure (network, timeout, bad response)
+# returns None rather than raising, since this is a small volunteer-run
+# service and its unavailability shouldn't break the rest of the report.
+# --------------------------------------------------------------------------
+
+COMMANDER_SPELLBOOK_API = "https://backend.commanderspellbook.com"
+
+BRACKET_TAG_LABELS = {
+    "E": "Exhibition", "C": "Core", "P": "Powerful", "O": "Oddball",
+    "S": "Spicy", "R": "Ruthless", "B": "Banned",
+}
+
+
+def _commander_spellbook_deck_payload(entries: list[CardEntry]) -> dict:
+    main = [{"card": e.name, "quantity": e.quantity} for e in entries if e.section != "commander"]
+    commanders = [{"card": e.name, "quantity": e.quantity} for e in entries if e.section == "commander"]
+    return {"main": main, "commanders": commanders}
+
+
+def _commander_spellbook_post(endpoint: str, payload: dict) -> dict | None:
+    try:
+        req = urllib.request.Request(
+            f"{COMMANDER_SPELLBOOK_API}/{endpoint}",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json", "User-Agent": "brewlist/1.0 (personal use)"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError, ValueError, OSError):
+        return None
+
+
+def _simplify_combo(raw: dict, deck_names: set[str] | None = None) -> dict:
+    uses = [u["card"]["name"] for u in raw.get("uses", [])]
+    produces = [p["feature"]["name"] for p in raw.get("produces", [])]
+    combo_id = (raw.get("of") or [{}])[0].get("id")
+    result = {
+        "uses": uses,
+        "produces": produces,
+        "url": f"https://commanderspellbook.com/combo/{combo_id}/" if combo_id else None,
+        "popularity": raw.get("popularity") or 0,
+    }
+    if deck_names is not None:
+        result["missing"] = [nm for nm in uses if normalize_name(nm) not in deck_names]
+    return result
+
+
+def find_deck_combos(entries: list[CardEntry], max_almost: int = 8) -> dict | None:
+    """Queries Commander Spellbook for combos this deck already has all the
+    pieces for ("included"), and the most notable combos it's exactly one
+    card away from ("almost_included", ranked by popularity and capped at
+    `max_almost` -- a real deck can be "one card away" from dozens of
+    obscure combos via generic staples like Sol Ring, so this keeps the
+    result focused on ones actually worth surfacing). Returns None on any
+    failure (see module note above)."""
+    payload = _commander_spellbook_deck_payload(entries)
+    data = _commander_spellbook_post("find-my-combos", payload)
+    if data is None:
+        return None
+    results = data.get("results") or {}
+    deck_names = {normalize_name(e.name) for e in entries}
+    included = [_simplify_combo(c) for c in results.get("included") or []]
+    almost_raw = sorted(results.get("almostIncluded") or [], key=lambda c: c.get("popularity") or 0, reverse=True)
+    almost_total = len(almost_raw)
+    almost = [_simplify_combo(c, deck_names) for c in almost_raw[:max_almost]]
+    return {"included": included, "almost_included": almost, "almost_total": almost_total}
+
+
+def estimate_deck_bracket(entries: list[CardEntry]) -> dict | None:
+    """Queries Commander Spellbook for its own power/style tag for this deck
+    (see BRACKET_TAG_LABELS) plus per-card mass-land-denial/extra-turn flags
+    (normalized_name -> {"massLandDenial": bool, "extraTurn": bool}).
+    Returns None on any failure (see module note above)."""
+    payload = _commander_spellbook_deck_payload(entries)
+    data = _commander_spellbook_post("estimate-bracket", payload)
+    if data is None or "bracketTag" not in data:
+        return None
+    cards = {}
+    for c in data.get("cards") or []:
+        name = (c.get("card") or {}).get("name")
+        if name:
+            cards[normalize_name(name)] = {
+                "massLandDenial": bool(c.get("massLandDenial")),
+                "extraTurn": bool(c.get("extraTurn")),
+            }
+    return {"tag": data["bracketTag"], "cards": cards, "combo_count": len(data.get("combos") or [])}
+
+
 def price_for_printing(scryfall_prices: dict, printing: OwnedPrinting) -> float | None:
     """Pick the right price field for a specific owned printing/finish, falling
     back to whatever finish that printing *does* have priced rather than nothing."""
@@ -1035,6 +1148,24 @@ def build_comparison(
                 if e.commander_legality and e.commander_legality != "Legal":
                     banned_count += 1
 
+    # Commander Spellbook lookups -- a live request each (not a bulk index),
+    # so only worth doing alongside the same "accurate" pass as everything
+    # above, and only for Commander decks (both the combos and the bracket
+    # tag are Commander-specific concepts). Best-effort: either call can
+    # return None (network hiccup, service down) without affecting anything
+    # else in the report.
+    combos = None
+    bracket_estimate = None
+    if fetch_cheapest and is_commander_format:
+        combos = find_deck_combos(entries)
+        bracket_estimate = estimate_deck_bracket(entries)
+        if bracket_estimate:
+            for e in entries:
+                info = bracket_estimate["cards"].get(normalize_name(e.name))
+                if info:
+                    e.mass_land_denial = info["massLandDenial"]
+                    e.extra_turn = info["extraTurn"]
+
     buckets: dict[str, list[CardResult]] = {}
     totals = {
         "owned": 0, "missing": 0,
@@ -1044,6 +1175,8 @@ def build_comparison(
         "game_changers": game_changers_count,  # only meaningful when fetch_cheapest and is_commander_format were set
         "game_changers_names": sorted(game_changers_names),
         "banned_count": banned_count,  # only meaningful when fetch_cheapest and is_commander_format were set
+        "combos": combos,  # {"included": [...], "almost_included": [...], "almost_total": N} or None
+        "bracket_tag": bracket_estimate["tag"] if bracket_estimate else None,
     }
 
     for e, have, shortfall, owned_used, picks, remainder, reserved_qty in per_entry:
@@ -1414,6 +1547,33 @@ details.bucket > summary::before {{
 }}
 details.bucket[open] > summary::before {{ transform: rotate(90deg); }}
 .bucket-count {{ color: var(--text-dim); font-weight: 400; font-size: 0.85rem; }}
+/* Same look as details.bucket, but deliberately NOT that class/selector --
+   the search/filter JS below hides any details.bucket with zero visible
+   .card children, which would silently hide this panel (it has
+   .combo-item children instead, not .card). */
+details.combos-panel {{
+  margin-bottom: 14px;
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  background: var(--bg-elevated);
+  overflow: hidden;
+}}
+details.combos-panel > summary {{
+  cursor: pointer;
+  padding: 12px 16px;
+  font-weight: 600;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}}
+details.combos-panel > summary::-webkit-details-marker {{ display: none; }}
+details.combos-panel > summary::before {{
+  content: "▸";
+  color: var(--text-dim);
+  transition: transform 0.15s ease;
+}}
+details.combos-panel[open] > summary::before {{ transform: rotate(90deg); }}
 .grid {{
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
@@ -1515,6 +1675,26 @@ details.bucket[open] > summary::before {{ transform: rotate(90deg); }}
   text-transform: none;
   letter-spacing: normal;
 }}
+.combos-note {{ color: var(--text-dim); font-size: 0.85rem; margin: 4px 0 14px; }}
+.combo-list {{
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 16px 16px;
+}}
+.combo-item {{
+  border-radius: 10px;
+  border-left: 3px solid var(--gold);
+  background: var(--card-bg);
+  padding: 10px 14px;
+  box-shadow: var(--shadow);
+}}
+.combo-item.almost {{ border-left-color: var(--accent); }}
+.combo-title {{ font-weight: 600; font-size: 0.95rem; margin-bottom: 4px; }}
+.combo-produces {{ color: var(--text-dim); font-size: 0.85rem; margin-bottom: 4px; }}
+.combo-missing {{ color: var(--missing); font-size: 0.85rem; margin-bottom: 6px; }}
+.combo-link {{ color: var(--accent); font-size: 0.8rem; text-decoration: none; }}
+.combo-link:hover {{ text-decoration: underline; }}
 .qty {{
   color: var(--text-dim);
   font-size: 0.8rem;
@@ -1656,6 +1836,7 @@ footer {{
     <div class="stat value">Total deck value (today's market) <b id="stat-deck-value">${deck_value:.2f}</b> &nbsp;<span class="stat-sub">owned portion <span id="stat-owned-value">${owned_value:.2f}</span></span></div>
     {game_changers_html}
     {legality_html}
+    {bracket_tag_html}
     <div class="progress"><div id="progress-bar" style="width:{pct:.1f}%"></div></div>
   </div>
   <div class="controls">
@@ -1676,6 +1857,7 @@ footer {{
   </div>
 </header>
 <main>
+{combos_html}
 {buckets_html}
 </main>
 <footer>Generated {generated} &middot; {deck_name}</footer>
@@ -2120,6 +2302,64 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
         else:
             legality_html = '<div class="stat-sub">&#10003; No Commander-banned cards found</div>'
 
+    bracket_tag_html = ""
+    bracket_tag = totals.get("bracket_tag")
+    if prices_are_baseline and is_commander_format and bracket_tag:
+        label = BRACKET_TAG_LABELS.get(bracket_tag, bracket_tag)
+        bracket_tag_html = (
+            '<div class="stat-sub" title="Commander Spellbook\'s own power/style rating for this deck -- '
+            'not the official WotC Bracket 1-5 system">Commander Spellbook rating: '
+            f'<b>{html.escape(label)}</b></div>'
+        )
+
+    combos_html = ""
+    if prices_are_baseline and is_commander_format:
+        combos_data = totals.get("combos")
+        if combos_data is None:
+            combos_html = (
+                '<div class="combos-note">Combo lookup unavailable right now (Commander Spellbook may be '
+                'down) -- everything else in this report is unaffected.</div>'
+            )
+        else:
+            included = combos_data.get("included") or []
+            almost = combos_data.get("almost_included") or []
+            almost_total = combos_data.get("almost_total") or 0
+
+            def _combo_item(c, show_missing=False):
+                title = " + ".join(html.escape(n) for n in c["uses"])
+                produces = ", ".join(html.escape(p) for p in c["produces"]) or "an effect"
+                link_html = (
+                    f'<a href="{html.escape(c["url"])}" target="_blank" rel="noopener noreferrer" '
+                    f'class="combo-link">View on Commander Spellbook &rarr;</a>' if c.get("url") else ""
+                )
+                missing_html = ""
+                if show_missing and c.get("missing"):
+                    names = ", ".join(html.escape(n) for n in c["missing"])
+                    missing_html = f'<div class="combo-missing">Missing: <b>{names}</b></div>'
+                cls = "combo-item almost" if show_missing else "combo-item"
+                return (
+                    f'<div class="{cls}"><div class="combo-title">{title}</div>'
+                    f'<div class="combo-produces">&rarr; {produces}</div>{missing_html}{link_html}</div>'
+                )
+
+            if included or almost:
+                items_html = "".join(_combo_item(c) for c in included)
+                items_html += "".join(_combo_item(c, show_missing=True) for c in almost)
+                count_note = f"{len(included)} in deck"
+                if almost_total:
+                    count_note += (
+                        f" &middot; {almost_total} almost there, showing top {len(almost)} most popular"
+                        if almost_total > len(almost) else f" &middot; {almost_total} almost there"
+                    )
+                combos_html = (
+                    '<details class="combos-panel" open>'
+                    f'<summary>&#128279; Combos <span class="bucket-count">({count_note})</span></summary>'
+                    f'<div class="combo-list">{items_html}</div>'
+                    '</details>'
+                )
+            else:
+                combos_html = '<div class="combos-note">&#10003; No known combos found in this deck (via Commander Spellbook)</div>'
+
     def _display_scryfall_id(r: CardResult) -> str | None:
         # Show *your* printing's art for owned cards, not whichever printing
         # the decklist happens to reference.
@@ -2190,6 +2430,10 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
                     f'<span class="badge banned" title="Commander legality: {html.escape(e.commander_legality)}">'
                     f'&#9940; {html.escape(e.commander_legality)}</span>'
                 )
+            if e.mass_land_denial:
+                badges += '<span class="badge banned" title="Flagged as mass land denial (Commander Spellbook)">&#9940; Mass Land Denial</span>'
+            if e.extra_turn:
+                badges += '<span class="badge game-changer" title="Extra-turn effect (Commander Spellbook)">&#9203; Extra Turn</span>'
 
             card_colors = [c for c in WUBRG if c in e.color_identity]
             color_icons_html = ""
@@ -2355,6 +2599,8 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
         owned_value=totals["owned_value"],
         game_changers_html=game_changers_html,
         legality_html=legality_html,
+        bracket_tag_html=bracket_tag_html,
+        combos_html=combos_html,
         pct=pct,
         buckets_html="\n".join(bucket_blocks),
         generated=datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),

@@ -36,6 +36,12 @@ Markdown/HTML/CSV reports on disk).
   with a badge and a header summary — Moxfield's format field is used
   directly; for Archidekt (which doesn't expose one), this is inferred from
   an EDH bracket value or a "Commander" category card being present
+- For Commander decks, a "Combos" panel shows any known combos your deck
+  already has all the pieces for, plus the most notable combos you're
+  exactly one card away from completing — via
+  [Commander Spellbook](https://commanderspellbook.com)'s public API, which
+  also flags mass-land-denial and extra-turn cards and gives its own
+  power/style rating for the deck (not the official WotC bracket system)
 - Total deck value at today's market price, plus the owned portion
 - Groups missing cards the way a physical store organizes its binders
   (Lands, Artifacts, then Colors split into mono-color / Multicolor /
@@ -145,8 +151,8 @@ Everything the app remembers — your uploaded collection, any saved
 per-deck overrides, and the local cheapest-price index (see above) — is
 stored locally under `data/`, which is excluded from version control
 (`.gitignore`). Nothing leaves your machine except the calls to Moxfield's,
-Archidekt's, Scryfall's, and MTGJSON's public APIs needed to fetch
-decklists and prices.
+Archidekt's, Scryfall's, MTGJSON's, and (for Commander decks) Commander
+Spellbook's public APIs needed to fetch decklists, prices, and combos.
 
 ## Project layout
 
