@@ -29,6 +29,7 @@ __all__ = [
     "normalize_name", "find_collection_candidates", "load_collection", "load_overrides",
     "fetch_scryfall_prices_by_id", "price_for_printing", "select_used_printings",
     "price_index_age_days", "rebuild_price_index", "ensure_price_index", "game_changers_in_index",
+    "commander_legality_in_index", "deck_is_commander_format",
     "PRICE_INDEX_PATH", "PRICE_INDEX_MAX_AGE_DAYS",
     "categorize", "shopping_group", "shopping_group_rank",
     "best_prices", "priced_for_finish", "build_comparison",
@@ -113,6 +114,10 @@ class CardEntry:
     # -- see game_changers_in_index. False until build_comparison sets it
     # (only when fetch_cheapest, since it comes from the same MTGJSON index).
     is_game_changer: bool = False
+    # Commander legality ("Legal", "Banned", "Restricted", ...) if known --
+    # see commander_legality_in_index. Only set (and only meaningful) when
+    # build_comparison was told this deck is Commander format; None otherwise.
+    commander_legality: str | None = None
 
 
 @dataclass
@@ -172,6 +177,25 @@ def extract_entries(source: str, deck: dict, include_sideboard: bool, include_ma
     if source == "archidekt":
         return _extract_archidekt_entries(deck, include_sideboard, include_maybeboard)
     return _extract_moxfield_entries(deck, include_sideboard, include_maybeboard)
+
+
+def deck_is_commander_format(source: str, deck: dict) -> bool:
+    """Whether this deck is Commander/EDH, used to decide whether it makes
+    sense to check cards against Commander's banned list (see
+    commander_legality_in_index) -- legality warnings are only ever shown
+    for this format, since that's what the rest of this tool (Game Changers,
+    bracket-adjacent info) is oriented around anyway.
+
+    Moxfield gives a clean, direct format string. Archidekt's own format
+    field is an undocumented numeric enum we don't have a verified mapping
+    for, so instead this looks for independent Commander-specific signals
+    already present in the deck data (an "edhBracket" value, or a card
+    explicitly categorized "Commander") rather than guess the enum wrong."""
+    if source == "archidekt":
+        if deck.get("edhBracket") is not None:
+            return True
+        return any("Commander" in (c.get("categories") or []) for c in deck.get("cards", []))
+    return (deck.get("format") or "").strip().lower() == "commander"
 
 
 # --------------------------------------------------------------------------
@@ -532,7 +556,7 @@ PRICE_INDEX_MAX_AGE_DAYS = 7
 # which added "nonfoil_trend"/"foil_trend") so a stale on-disk file from an
 # older version of this code is treated as needing a rebuild rather than
 # silently missing data or crashing.
-PRICE_INDEX_FORMAT_VERSION = 4
+PRICE_INDEX_FORMAT_VERSION = 5
 
 
 def price_index_age_days(path: str = PRICE_INDEX_PATH) -> float | None:
@@ -647,6 +671,11 @@ def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[
         # price data), since bracket-level info shouldn't depend on whether
         # a printing happened to be priced.
         game_changers: set[str] = set()
+        # Commander-legality per name (Legal/Banned/Restricted/etc, straight
+        # from MTGJSON) -- legality is a name-level fact for essentially all
+        # real cards, so whichever printing we see last for a name is fine;
+        # also tracked unconditionally, same reasoning as Game Changers.
+        commander_legality: dict[str, str] = {}
         for set_obj in all_printings.values():
             for card in set_obj.get("cards", []):
                 if "paper" not in (card.get("availability") or []):
@@ -663,6 +692,11 @@ def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[
 
                 if card.get("isGameChanger"):
                     game_changers.update(names)
+
+                legality = (card.get("legalities") or {}).get("commander")
+                if legality:
+                    for nm in names:
+                        commander_legality[nm] = legality
 
                 uuid = card.get("uuid")
                 price_entry = prices_by_uuid.get(uuid) if uuid else None
@@ -729,10 +763,24 @@ def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[
         "card_count": len(index),
         "prices": index,
         "game_changers": sorted(game_changers),
+        "commander_legality": commander_legality,
     }
     with open(path, "w", encoding="utf-8") as f:
         json.dump(payload, f)
     return index
+
+
+def commander_legality_in_index(path: str = PRICE_INDEX_PATH) -> dict[str, str]:
+    """Returns {normalized_name: legality} (e.g. "Legal", "Banned",
+    "Restricted") for the Commander format, read from the local price index
+    (see rebuild_price_index/ensure_price_index -- call that first to make
+    sure the index is actually present/fresh). Empty dict if the index
+    doesn't exist or predates this field."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f).get("commander_legality") or {}
+    except (OSError, ValueError):
+        return {}
 
 
 def game_changers_in_index(path: str = PRICE_INDEX_PATH) -> set[str]:
@@ -922,6 +970,7 @@ def priced_for_finish(entry: CardEntry, want_foil: bool, max_results: int = 3):
 def build_comparison(
     entries: list[CardEntry], owned_collection: dict[str, OwnedCard], ignore_basics: bool,
     overrides: dict[str, int] | None = None, on_progress=None, fetch_cheapest: bool = True,
+    is_commander_format: bool = False,
 ) -> tuple[list[str], dict[str, list[CardResult]], dict]:
     # Pass 1: figure out have/shortfall per entry, and which exact owned
     # printings (by Scryfall ID) cover the copies that go into this deck.
@@ -962,9 +1011,11 @@ def build_comparison(
     # printing data whenever cheapest_nonfoil/foil is None.
     price_cache = fetch_scryfall_prices_by_id(needed_ids, on_progress=on_progress)
     game_changers_count = 0
+    banned_count = 0
     if fetch_cheapest:
         by_name = ensure_price_index(on_progress=on_progress)
         game_changers = game_changers_in_index()
+        commander_legality = commander_legality_in_index() if is_commander_format else {}
         for e in entries:
             hit = by_name.get(normalize_name(e.name)) or {}
             e.cheapest_nonfoil = [tuple(t) for t in hit["nonfoil"]] if hit.get("nonfoil") else None
@@ -974,6 +1025,10 @@ def build_comparison(
             e.is_game_changer = normalize_name(e.name) in game_changers
             if e.is_game_changer:
                 game_changers_count += 1
+            if is_commander_format:
+                e.commander_legality = commander_legality.get(normalize_name(e.name))
+                if e.commander_legality and e.commander_legality != "Legal":
+                    banned_count += 1
 
     buckets: dict[str, list[CardResult]] = {}
     totals = {
@@ -982,6 +1037,7 @@ def build_comparison(
         "deck_value": 0.0, "owned_value": 0.0,
         "unpriced_count": 0,  # cards (owned or missing) we couldn't find any price for
         "game_changers": game_changers_count,  # only meaningful when fetch_cheapest was set
+        "banned_count": banned_count,  # only meaningful when fetch_cheapest and is_commander_format were set
     }
 
     for e, have, shortfall, owned_used, picks, remainder, reserved_qty in per_entry:
@@ -1245,6 +1301,7 @@ header .source a:hover {{ color: var(--accent); }}
 .stat.cost b {{ color: var(--gold); }}
 .stat.value b {{ color: var(--accent); }}
 .stat.game-changers b {{ color: var(--gold); }}
+.stat.banned b {{ color: var(--missing); }}
 .stat-sub {{ color: var(--text-dim); font-size: 0.8rem; }}
 .price-basis-note {{ color: var(--text-dim); font-size: 0.8rem; }}
 .progress {{
@@ -1446,6 +1503,12 @@ details.bucket[open] > summary::before {{ transform: rotate(90deg); }}
   text-transform: none;
   letter-spacing: normal;
 }}
+.badge.banned {{
+  background: color-mix(in srgb, var(--missing) 22%, var(--card-bg));
+  color: var(--missing);
+  text-transform: none;
+  letter-spacing: normal;
+}}
 .qty {{
   color: var(--text-dim);
   font-size: 0.8rem;
@@ -1586,6 +1649,7 @@ footer {{
     <div class="stat cost">Est. cost to complete <b id="stat-cost-nonfoil">${cost_nonfoil:.2f}</b> non-foil &nbsp;/&nbsp; <b id="stat-cost-foil">${cost_foil:.2f}</b> foil</div>
     <div class="stat value">Total deck value (today's market) <b id="stat-deck-value">${deck_value:.2f}</b> &nbsp;<span class="stat-sub">owned portion <span id="stat-owned-value">${owned_value:.2f}</span></span></div>
     {game_changers_html}
+    {legality_html}
     <div class="progress"><div id="progress-bar" style="width:{pct:.1f}%"></div></div>
   </div>
   <div class="controls">
@@ -2001,13 +2065,18 @@ if (refreshPricesBtn) {{
 def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[str],
                  buckets: dict[str, list[CardResult]], totals: dict,
                  overrides_endpoint: str | None = None, refresh_endpoint: str | None = None,
-                 prices_are_baseline: bool = True) -> str:
+                 prices_are_baseline: bool = True, is_commander_format: bool = False) -> str:
     """Renders the full standalone HTML report.
 
     `overrides_endpoint`, if given (e.g. "/api/overrides/abc123" for the Flask
     app), makes the "Save Overrides" button POST there via fetch() instead of
     the CLI's default behavior of downloading a `{deck_id}_overrides.json`
     file for you to drop into your ManaBox export folder.
+
+    `is_commander_format`, together with `prices_are_baseline`, decides
+    whether a "Not Legal in Commander" summary stat and per-card badges are
+    shown -- CardResult.entry.commander_legality is only meaningful when
+    both are true (see build_comparison's is_commander_format param).
 
     `prices_are_baseline` should reflect whether `totals`/`buckets` were built
     with build_comparison(fetch_cheapest=True) -- i.e. whether prices already
@@ -2029,6 +2098,17 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
             'title="Cards on WotC\'s official Commander Game Changers list">'
             f'&#9889; Game Changers <b>{totals.get("game_changers", 0)}</b></div>'
         )
+
+    legality_html = ""
+    if prices_are_baseline and is_commander_format:
+        banned_count = totals.get("banned_count", 0)
+        if banned_count:
+            legality_html = (
+                '<div class="stat banned" title="Cards not legal in Commander (banned/restricted)">'
+                f'&#9940; Not Legal in Commander <b>{banned_count}</b></div>'
+            )
+        else:
+            legality_html = '<div class="stat-sub">&#10003; No Commander-banned cards found</div>'
 
     def _display_scryfall_id(r: CardResult) -> str | None:
         # Show *your* printing's art for owned cards, not whichever printing
@@ -2095,6 +2175,11 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
                 badges += '<span class="badge">Foil</span>'
             if e.is_game_changer:
                 badges += '<span class="badge game-changer" title="On WotC\'s official Commander Game Changers list">&#9889; Game Changer</span>'
+            if e.commander_legality and e.commander_legality != "Legal":
+                badges += (
+                    f'<span class="badge banned" title="Commander legality: {html.escape(e.commander_legality)}">'
+                    f'&#9940; {html.escape(e.commander_legality)}</span>'
+                )
 
             card_colors = [c for c in WUBRG if c in e.color_identity]
             color_icons_html = ""
@@ -2259,6 +2344,7 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
         deck_value=totals["deck_value"],
         owned_value=totals["owned_value"],
         game_changers_html=game_changers_html,
+        legality_html=legality_html,
         pct=pct,
         buckets_html="\n".join(bucket_blocks),
         generated=datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),

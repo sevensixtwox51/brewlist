@@ -140,6 +140,7 @@ _preflight_pyfiglet()
 from brewlist_core import (
     CardResult,
     build_comparison,
+    deck_is_commander_format,
     deck_key,
     ensure_price_index,
     extract_entries,
@@ -396,6 +397,7 @@ def run(deck_input, collection_path, collection_dir, include_sideboard,
         deck_url = deck.get("publicUrl", f"https://moxfield.com/decks/{deck_id}")
 
     entries = extract_entries(source, deck, include_sideboard, include_maybeboard)
+    is_commander_format = deck_is_commander_format(source, deck)
     console.print(f"[dim]Deck '{deck_name}': {len(entries)} unique cards[/dim]")
 
     if not collection_path:
@@ -442,6 +444,7 @@ def run(deck_input, collection_path, collection_dir, include_sideboard,
             bucket_names, buckets, totals = build_comparison(
                 entries, owned, ignore_basics=not include_basics, overrides=overrides,
                 on_progress=_on_progress, fetch_cheapest=cheapest_pricing,
+                is_commander_format=is_commander_format,
             )
         except ValueError as e:
             raise SystemExit(str(e))
@@ -474,7 +477,7 @@ def run(deck_input, collection_path, collection_dir, include_sideboard,
     if html_output:
         html_report = render_html(
             deck_name, deck_url, project_key, bucket_names, buckets, totals,
-            prices_are_baseline=cheapest_pricing,
+            prices_are_baseline=cheapest_pricing, is_commander_format=is_commander_format,
         )
         with open(html_output, "w", encoding="utf-8") as f:
             f.write(html_report)

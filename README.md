@@ -32,6 +32,10 @@ Markdown/HTML/CSV reports on disk).
 - Flags cards on WotC's official Commander "Game Changers" list with a badge
   on the card and a deck-wide count in the header — useful for checking
   your deck against its intended bracket
+- For Commander decks, flags any card that's banned/not legal in the format
+  with a badge and a header summary — Moxfield's format field is used
+  directly; for Archidekt (which doesn't expose one), this is inferred from
+  an EDH bracket value or a "Commander" category card being present
 - Total deck value at today's market price, plus the owned portion
 - Groups missing cards the way a physical store organizes its binders
   (Lands, Artifacts, then Colors split into mono-color / Multicolor /

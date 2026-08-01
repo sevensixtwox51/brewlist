@@ -23,6 +23,7 @@ from flask import Flask, Response, abort, jsonify, request
 
 from brewlist_core import (
     build_comparison,
+    deck_is_commander_format,
     deck_key,
     ensure_price_index,
     extract_entries,
@@ -115,7 +116,8 @@ JOBS: dict[str, dict] = {}
 
 
 def _run_compare_job(job_id, entries, owned, break_out_basics, reserved,
-                      deck_id, deck_name, deck_url, options, fetch_cheapest=False):
+                      deck_id, deck_name, deck_url, options, fetch_cheapest=False,
+                      is_commander_format=False):
     def _on_progress(done, total):
         with _JOBS_LOCK:
             job = JOBS.get(job_id)
@@ -127,6 +129,7 @@ def _run_compare_job(job_id, entries, owned, break_out_basics, reserved,
         bucket_names, buckets, totals = build_comparison(
             entries, owned, ignore_basics=not break_out_basics, overrides=reserved,
             on_progress=_on_progress, fetch_cheapest=fetch_cheapest,
+            is_commander_format=is_commander_format,
         )
         save_project(deck_id, deck_name=deck_name, deck_url=deck_url, options=options, reserved=reserved)
         html_report = render_html(
@@ -134,6 +137,7 @@ def _run_compare_job(job_id, entries, owned, break_out_basics, reserved,
             overrides_endpoint=f"/api/overrides/{deck_id}",
             refresh_endpoint=f"/compare/refresh-prices/{deck_id}",
             prices_are_baseline=fetch_cheapest,
+            is_commander_format=is_commander_format,
         )
         with _JOBS_LOCK:
             job = JOBS.get(job_id)
@@ -529,6 +533,7 @@ def compare_start():
     else:
         deck_url = deck.get("publicUrl", f"https://moxfield.com/decks/{deck_id}")
     entries = extract_entries(source, deck, include_sideboard, include_maybeboard)
+    is_commander_format = deck_is_commander_format(source, deck)
 
     try:
         owned = load_collection(COLLECTION_PATH)
@@ -550,6 +555,7 @@ def compare_start():
     threading.Thread(
         target=_run_compare_job,
         args=(job_id, entries, owned, break_out_basics, reserved, project_key, deck_name, deck_url, options),
+        kwargs={"is_commander_format": is_commander_format},
         daemon=True,
     ).start()
 
@@ -594,6 +600,7 @@ def compare_refresh_prices(deck_id):
     if source != "archidekt":
         deck_url = deck.get("publicUrl", deck_url)
     entries = extract_entries(source, deck, include_sideboard, include_maybeboard)
+    is_commander_format = deck_is_commander_format(source, deck)
 
     try:
         owned = load_collection(COLLECTION_PATH)
@@ -607,7 +614,7 @@ def compare_refresh_prices(deck_id):
     threading.Thread(
         target=_run_compare_job,
         args=(job_id, entries, owned, break_out_basics, reserved, project_key, deck_name, deck_url, options),
-        kwargs={"fetch_cheapest": True},
+        kwargs={"fetch_cheapest": True, "is_commander_format": is_commander_format},
         daemon=True,
     ).start()
 
