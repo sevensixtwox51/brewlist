@@ -416,7 +416,7 @@ def run(deck_input, collection_path, collection_dir, include_sideboard,
         )
 
     progress = Progress(
-        TextColumn("[dim]Pricing cards via local index...[/dim]"),
+        TextColumn("[dim]{task.description}[/dim]"),
         BarColumn(),
         TaskProgressColumn(),
         TimeElapsedColumn(),
@@ -424,10 +424,16 @@ def run(deck_input, collection_path, collection_dir, include_sideboard,
         transient=True,
     )
     with progress:
-        task_id = progress.add_task("pricing", total=None)
+        task_id = progress.add_task("Pricing cards via local index...", total=None)
 
-        def _on_progress(done, total):
-            progress.update(task_id, total=total, completed=done)
+        def _on_progress(done, total, stage=None):
+            if stage == "combos":
+                progress.update(
+                    task_id, description="Checking combos & bracket rating (Commander Spellbook)...",
+                    total=None, completed=0,
+                )
+            else:
+                progress.update(task_id, total=total, completed=done)
 
         try:
             bucket_names, buckets, totals = build_comparison(

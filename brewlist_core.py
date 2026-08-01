@@ -1204,6 +1204,8 @@ def build_comparison(
     combos = None
     bracket_estimate = None
     if is_commander_format:
+        if on_progress:
+            on_progress(0, 0, "combos")
         combos = find_deck_combos(entries)
         bracket_estimate = estimate_deck_bracket(entries)
         if bracket_estimate:
@@ -1511,9 +1513,15 @@ header .source a:hover {{ color: var(--accent); }}
 .stat.banned b {{ color: var(--missing); }}
 .stat-sub {{ color: var(--text-dim); font-size: 0.8rem; }}
 .price-basis-note {{ color: var(--text-dim); font-size: 0.8rem; }}
-.progress {{
+.progress-labeled {{
   flex: 1 1 200px;
   min-width: 160px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}}
+.progress-label {{ color: var(--text-dim); font-size: 0.8rem; }}
+.progress {{
   height: 8px;
   background: var(--card-border);
   border-radius: 4px;
@@ -1745,8 +1753,8 @@ details.combos-panel[open] > summary::before {{ transform: rotate(90deg); }}
 }}
 .combos-note {{ color: var(--text-dim); font-size: 0.85rem; margin: 4px 0 14px; }}
 .combo-list {{
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
   gap: 10px;
   padding: 4px 16px 16px;
 }}
@@ -1916,7 +1924,10 @@ footer {{
     {game_changers_html}
     {legality_html}
     {bracket_tag_html}
-    <div class="progress"><div id="progress-bar" style="width:{pct:.1f}%"></div></div>
+    <div class="progress-labeled" title="Share of this deck you already own">
+      <span class="progress-label">Deck completion <b id="progress-pct">{pct:.0f}%</b></span>
+      <div class="progress"><div id="progress-bar" style="width:{pct:.1f}%"></div></div>
+    </div>
   </div>
   <div class="controls">
     <input id="search" type="search" placeholder="Filter cards by name...">
@@ -2016,6 +2027,7 @@ function updateOverrideCounts() {{
   const total = owned + missing;
   const pct = total ? (owned / total * 100) : 100;
   document.getElementById('progress-bar').style.width = pct.toFixed(1) + '%';
+  document.getElementById('progress-pct').textContent = pct.toFixed(0) + '%';
 }}
 
 document.querySelectorAll('.need-override').forEach(cb => {{
@@ -2201,7 +2213,7 @@ const showAlmostCombos = document.getElementById('show-almost-combos');
 const almostCombosList = document.getElementById('almost-combos-list');
 if (showAlmostCombos && almostCombosList) {{
   showAlmostCombos.addEventListener('change', () => {{
-    almostCombosList.style.display = showAlmostCombos.checked ? 'flex' : 'none';
+    almostCombosList.style.display = showAlmostCombos.checked ? 'grid' : 'none';
   }});
 }}
 

@@ -116,12 +116,13 @@ JOBS: dict[str, dict] = {}
 
 def _run_compare_job(job_id, entries, owned, break_out_basics, reserved,
                       deck_id, deck_name, deck_url, options, is_commander_format=False):
-    def _on_progress(done, total):
+    def _on_progress(done, total, stage=None):
         with _JOBS_LOCK:
             job = JOBS.get(job_id)
             if job:
                 job["done"] = done
                 job["total"] = total
+                job["stage"] = stage
 
     try:
         bucket_names, buckets, totals = build_comparison(
@@ -331,7 +332,10 @@ function pollProgress(jobId) {{
     .then(r => r.json())
     .then(data => {{
       if (data.status === 'running') {{
-        if (data.total > 0) {{
+        if (data.stage === 'combos') {{
+          progressFill.style.width = '100%';
+          progressLabel.textContent = 'Checking combos & bracket rating (Commander Spellbook)\\u2026';
+        }} else if (data.total > 0) {{
           const pct = Math.round((data.done / data.total) * 100);
           progressFill.style.width = pct + '%';
           progressLabel.textContent = 'Preparing price data... (' + pct + '%)';
@@ -546,7 +550,7 @@ def compare_start():
 
     job_id = uuid.uuid4().hex
     with _JOBS_LOCK:
-        JOBS[job_id] = {"status": "running", "done": 0, "total": 0, "html": None, "error": None}
+        JOBS[job_id] = {"status": "running", "done": 0, "total": 0, "stage": None, "html": None, "error": None}
 
     threading.Thread(
         target=_run_compare_job,
@@ -565,13 +569,14 @@ def compare_progress(job_id):
         if not job:
             return jsonify(status="not_found"), 404
         status, done, total, error = job["status"], job["done"], job["total"], job["error"]
+        stage = job.get("stage")
         # Deck-comparison jobs keep their finished HTML around for the
         # follow-up GET /compare/result/<job_id> to serve and clean up. Jobs
         # with no such follow-up (e.g. a bare price-index refresh) have
         # nothing to fetch afterward, so they're self-cleaning here instead.
         if status in ("done", "error") and not job.get("html"):
             del JOBS[job_id]
-    return jsonify(status=status, done=done, total=total, error=error)
+    return jsonify(status=status, done=done, total=total, stage=stage, error=error)
 
 
 @app.route("/compare/result/<job_id>", methods=["GET"])
