@@ -28,7 +28,7 @@ __all__ = [
     "parse_deck_ref", "deck_key", "split_deck_key", "fetch_deck", "extract_entries",
     "normalize_name", "find_collection_candidates", "load_collection", "load_overrides",
     "fetch_scryfall_prices_by_id", "price_for_printing", "select_used_printings",
-    "price_index_age_days", "rebuild_price_index", "ensure_price_index",
+    "price_index_age_days", "rebuild_price_index", "ensure_price_index", "game_changers_in_index",
     "PRICE_INDEX_PATH", "PRICE_INDEX_MAX_AGE_DAYS",
     "categorize", "shopping_group", "shopping_group_rank",
     "best_prices", "priced_for_finish", "build_comparison",
@@ -103,12 +103,16 @@ class CardEntry:
     # printing of this card was found in the index.
     cheapest_nonfoil: list[tuple[str, float, str]] | None = None
     cheapest_foil: list[tuple[str, float, str]] | None = None
-    # Per-store % price change since the previous price-index build (see
+    # Per-store % price change over the last PRICE_TREND_LOOKBACK_DAYS (see
     # rebuild_price_index) -- {"TCGP": 3.2, "CK": -5.1, ...}. None for a
-    # store/finish with nothing to compare against yet (e.g. the very first
-    # index build, or a store with no earlier price for this card).
+    # store/finish without that much price history yet (e.g. a very
+    # recently printed card).
     price_trend_nonfoil: dict[str, float] | None = None
     price_trend_foil: dict[str, float] | None = None
+    # Whether this card is on WotC's official Commander "Game Changers" list
+    # -- see game_changers_in_index. False until build_comparison sets it
+    # (only when fetch_cheapest, since it comes from the same MTGJSON index).
+    is_game_changer: bool = False
 
 
 @dataclass
@@ -528,7 +532,7 @@ PRICE_INDEX_MAX_AGE_DAYS = 7
 # which added "nonfoil_trend"/"foil_trend") so a stale on-disk file from an
 # older version of this code is treated as needing a rebuild rather than
 # silently missing data or crashing.
-PRICE_INDEX_FORMAT_VERSION = 3
+PRICE_INDEX_FORMAT_VERSION = 4
 
 
 def price_index_age_days(path: str = PRICE_INDEX_PATH) -> float | None:
@@ -638,25 +642,17 @@ def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[
             all_printings = (json.load(f) or {}).get("data") or {}
 
         working: dict[str, dict] = {}
+        # Cards on WotC's official Commander "Game Changers" list, by name --
+        # tracked unconditionally for every paper card (not just ones with
+        # price data), since bracket-level info shouldn't depend on whether
+        # a printing happened to be priced.
+        game_changers: set[str] = set()
         for set_obj in all_printings.values():
             for card in set_obj.get("cards", []):
                 if "paper" not in (card.get("availability") or []):
                     continue
-                uuid = card.get("uuid")
-                price_entry = prices_by_uuid.get(uuid) if uuid else None
-                if not price_entry:
-                    continue
-                paper = price_entry.get("paper") or {}
-                purchase_urls = card.get("purchaseUrls") or {}
 
                 name = card.get("name") or ""
-                set_code = (card.get("setCode") or "").lower()
-                number = card.get("number") or ""
-                manapool_url = (
-                    f"https://manapool.com/card/{set_code}/{number}/{_slugify(name)}"
-                    if set_code and number and name else None
-                )
-
                 names = {normalize_name(name)}
                 face_name = card.get("faceName")
                 if face_name and face_name != name:
@@ -664,6 +660,23 @@ def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[
                 names.discard("")
                 if not names:
                     continue
+
+                if card.get("isGameChanger"):
+                    game_changers.update(names)
+
+                uuid = card.get("uuid")
+                price_entry = prices_by_uuid.get(uuid) if uuid else None
+                if not price_entry:
+                    continue
+                paper = price_entry.get("paper") or {}
+                purchase_urls = card.get("purchaseUrls") or {}
+
+                set_code = (card.get("setCode") or "").lower()
+                number = card.get("number") or ""
+                manapool_url = (
+                    f"https://manapool.com/card/{set_code}/{number}/{_slugify(name)}"
+                    if set_code and number and name else None
+                )
 
                 stores = [
                     ("TCGP", "tcgplayer", purchase_urls.get("tcgplayer"), purchase_urls.get("tcgplayer")),
@@ -715,10 +728,24 @@ def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[
         "built_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "card_count": len(index),
         "prices": index,
+        "game_changers": sorted(game_changers),
     }
     with open(path, "w", encoding="utf-8") as f:
         json.dump(payload, f)
     return index
+
+
+def game_changers_in_index(path: str = PRICE_INDEX_PATH) -> set[str]:
+    """Returns the set of normalized card names on WotC's official Commander
+    "Game Changers" list, read from the local price index (see
+    rebuild_price_index/ensure_price_index -- call that first to make sure
+    the index is actually present/fresh). Empty set if the index doesn't
+    exist or predates this field."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            return set(json.load(f).get("game_changers") or [])
+    except (OSError, ValueError):
+        return set()
 
 
 def ensure_price_index(path: str = PRICE_INDEX_PATH, on_progress=None, force_refresh: bool = False) -> dict[str, dict]:
@@ -934,14 +961,19 @@ def build_comparison(
     # best_prices() already falls back to the decklist's own referenced-
     # printing data whenever cheapest_nonfoil/foil is None.
     price_cache = fetch_scryfall_prices_by_id(needed_ids, on_progress=on_progress)
+    game_changers_count = 0
     if fetch_cheapest:
         by_name = ensure_price_index(on_progress=on_progress)
+        game_changers = game_changers_in_index()
         for e in entries:
             hit = by_name.get(normalize_name(e.name)) or {}
             e.cheapest_nonfoil = [tuple(t) for t in hit["nonfoil"]] if hit.get("nonfoil") else None
             e.cheapest_foil = [tuple(t) for t in hit["foil"]] if hit.get("foil") else None
             e.price_trend_nonfoil = hit.get("nonfoil_trend")
             e.price_trend_foil = hit.get("foil_trend")
+            e.is_game_changer = normalize_name(e.name) in game_changers
+            if e.is_game_changer:
+                game_changers_count += 1
 
     buckets: dict[str, list[CardResult]] = {}
     totals = {
@@ -949,6 +981,7 @@ def build_comparison(
         "cost_nonfoil": 0.0, "cost_foil": 0.0,
         "deck_value": 0.0, "owned_value": 0.0,
         "unpriced_count": 0,  # cards (owned or missing) we couldn't find any price for
+        "game_changers": game_changers_count,  # only meaningful when fetch_cheapest was set
     }
 
     for e, have, shortfall, owned_used, picks, remainder, reserved_qty in per_entry:
@@ -1211,6 +1244,7 @@ header .source a:hover {{ color: var(--accent); }}
 .stat.missing b {{ color: var(--missing); }}
 .stat.cost b {{ color: var(--gold); }}
 .stat.value b {{ color: var(--accent); }}
+.stat.game-changers b {{ color: var(--gold); }}
 .stat-sub {{ color: var(--text-dim); font-size: 0.8rem; }}
 .price-basis-note {{ color: var(--text-dim); font-size: 0.8rem; }}
 .progress {{
@@ -1406,6 +1440,12 @@ details.bucket[open] > summary::before {{ transform: rotate(90deg); }}
   background: var(--card-border);
   color: var(--text-dim);
 }}
+.badge.game-changer {{
+  background: color-mix(in srgb, var(--gold) 22%, var(--card-bg));
+  color: var(--gold);
+  text-transform: none;
+  letter-spacing: normal;
+}}
 .qty {{
   color: var(--text-dim);
   font-size: 0.8rem;
@@ -1545,6 +1585,7 @@ footer {{
     <div class="stat missing">Missing <b id="stat-missing">{missing}</b></div>
     <div class="stat cost">Est. cost to complete <b id="stat-cost-nonfoil">${cost_nonfoil:.2f}</b> non-foil &nbsp;/&nbsp; <b id="stat-cost-foil">${cost_foil:.2f}</b> foil</div>
     <div class="stat value">Total deck value (today's market) <b id="stat-deck-value">${deck_value:.2f}</b> &nbsp;<span class="stat-sub">owned portion <span id="stat-owned-value">${owned_value:.2f}</span></span></div>
+    {game_changers_html}
     <div class="progress"><div id="progress-bar" style="width:{pct:.1f}%"></div></div>
   </div>
   <div class="controls">
@@ -1981,6 +2022,14 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
     pct = (totals["owned"] / total_cards * 100) if total_cards else 100.0
     max_card_price = 0.0
 
+    game_changers_html = ""
+    if prices_are_baseline:
+        game_changers_html = (
+            '<div class="stat game-changers" '
+            'title="Cards on WotC\'s official Commander Game Changers list">'
+            f'&#9889; Game Changers <b>{totals.get("game_changers", 0)}</b></div>'
+        )
+
     def _display_scryfall_id(r: CardResult) -> str | None:
         # Show *your* printing's art for owned cards, not whichever printing
         # the decklist happens to reference.
@@ -2044,6 +2093,8 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
                 badges += '<span class="badge">Commander</span>'
             if e.is_foil:
                 badges += '<span class="badge">Foil</span>'
+            if e.is_game_changer:
+                badges += '<span class="badge game-changer" title="On WotC\'s official Commander Game Changers list">&#9889; Game Changer</span>'
 
             card_colors = [c for c in WUBRG if c in e.color_identity]
             color_icons_html = ""
@@ -2207,6 +2258,7 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
         cost_foil=totals["cost_foil"],
         deck_value=totals["deck_value"],
         owned_value=totals["owned_value"],
+        game_changers_html=game_changers_html,
         pct=pct,
         buckets_html="\n".join(bucket_blocks),
         generated=datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),

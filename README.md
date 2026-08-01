@@ -29,6 +29,9 @@ Markdown/HTML/CSV reports on disk).
   this step is instant afterward instead of a live lookup per card
 - Each accurate price shows a ▲/▼ trend arrow when it's moved 2%+ over the
   past week, using MTGJSON's 90-day price history
+- Flags cards on WotC's official Commander "Game Changers" list with a badge
+  on the card and a deck-wide count in the header — useful for checking
+  your deck against its intended bracket
 - Total deck value at today's market price, plus the owned portion
 - Groups missing cards the way a physical store organizes its binders
   (Lands, Artifacts, then Colors split into mono-color / Multicolor /
