@@ -31,7 +31,7 @@ from brewlist_core import (
     load_collection,
     normalize_name,
     parse_deck_ref,
-    price_index_age_days,
+    price_index_built_at,
     render_html,
 )
 
@@ -251,14 +251,11 @@ def render_home_page(error: str | None = None, prefill_url: str = "") -> str:
 
     error_html = f'<div class="error">{_esc(error)}</div>' if error else ""
 
-    index_age = price_index_age_days()
-    if index_age is None:
+    index_built_at = price_index_built_at()
+    if index_built_at is None:
         index_status = 'Not built yet — first use downloads it (~325MB from MTGJSON, one-time, refreshed weekly after).'
-    elif index_age < 1:
-        index_status = 'Updated today.'
     else:
-        days = int(index_age)
-        index_status = f'Updated {days} day{"s" if days != 1 else ""} ago.'
+        index_status = f'Updated {index_built_at.strftime("%Y-%m-%d %H:%M UTC")}.'
 
     return f"""<!doctype html>
 <html lang="en">
@@ -411,7 +408,11 @@ function pollIndexRefresh(jobId) {{
         setTimeout(() => pollIndexRefresh(jobId), 400);
       }} else if (data.status === 'done') {{
         refreshIndexLabel.textContent = 'Done!';
-        refreshIndexStatus.textContent = 'Updated just now.';
+        const now = new Date();
+        const pad = n => String(n).padStart(2, '0');
+        const stamp = now.getUTCFullYear() + '-' + pad(now.getUTCMonth() + 1) + '-' + pad(now.getUTCDate())
+          + ' ' + pad(now.getUTCHours()) + ':' + pad(now.getUTCMinutes()) + ' UTC';
+        refreshIndexStatus.textContent = 'Updated ' + stamp + '.';
         refreshIndexBtn.disabled = false;
         setTimeout(() => {{ refreshIndexLabel.style.display = 'none'; }}, 2000);
       }} else {{

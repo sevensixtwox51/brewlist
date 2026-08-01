@@ -28,7 +28,7 @@ __all__ = [
     "parse_deck_ref", "deck_key", "split_deck_key", "fetch_deck", "extract_entries",
     "normalize_name", "find_collection_candidates", "load_collection", "load_overrides",
     "fetch_scryfall_prices_by_id", "price_for_printing", "select_used_printings",
-    "price_index_age_days", "rebuild_price_index", "ensure_price_index", "game_changers_in_index",
+    "price_index_age_days", "price_index_built_at", "rebuild_price_index", "ensure_price_index", "game_changers_in_index",
     "commander_legality_in_index", "deck_is_commander_format",
     "find_deck_combos", "estimate_deck_bracket", "BRACKET_TAG_LABELS", "scryfall_prices_in_index",
     "PRICE_INDEX_PATH", "PRICE_INDEX_MAX_AGE_DAYS",
@@ -570,16 +570,24 @@ PRICE_INDEX_MAX_AGE_DAYS = 7
 PRICE_INDEX_FORMAT_VERSION = 6
 
 
-def price_index_age_days(path: str = PRICE_INDEX_PATH) -> float | None:
-    """Age of the local price index in days, or None if it doesn't exist or
-    can't be read (treated the same as "needs a rebuild" by callers)."""
+def price_index_built_at(path: str = PRICE_INDEX_PATH) -> datetime.datetime | None:
+    """The local price index's build timestamp (UTC), or None if it doesn't
+    exist or can't be read."""
     if not os.path.isfile(path):
         return None
     try:
         with open(path, encoding="utf-8") as f:
             built_at = json.load(f).get("built_at")
-        built = datetime.datetime.fromisoformat(built_at)
+        return datetime.datetime.fromisoformat(built_at)
     except (OSError, ValueError, TypeError):
+        return None
+
+
+def price_index_age_days(path: str = PRICE_INDEX_PATH) -> float | None:
+    """Age of the local price index in days, or None if it doesn't exist or
+    can't be read (treated the same as "needs a rebuild" by callers)."""
+    built = price_index_built_at(path)
+    if built is None:
         return None
     return (datetime.datetime.now(datetime.timezone.utc) - built).total_seconds() / 86400
 
