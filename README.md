@@ -22,11 +22,11 @@ Markdown/HTML/CSV reports on disk).
   (fast), foil and non-foil toggle
 - The initial comparison loads fast using that data as-is; a one-click
   "Get Accurate Prices" step then looks up the true cheapest printing of
-  every card (decklists sometimes reference a rare, much pricier alt-art
-  printing by default) via a local price index built from Scryfall's public
-  bulk data — a one-time ~75MB download, refreshed automatically once a
-  week (or on demand), so this step is instant afterward instead of hitting
-  Scryfall's API once per card
+  every card across TCGPlayer, Card Kingdom, and ManaPool (decklists
+  sometimes reference a rare, much pricier alt-art printing by default) via
+  a local price index built from MTGJSON's public bulk data — a one-time
+  ~180MB download, refreshed automatically once a week (or on demand), so
+  this step is instant afterward instead of a live lookup per card
 - Total deck value at today's market price, plus the owned portion
 - Groups missing cards the way a physical store organizes its binders
   (Lands, Artifacts, then Colors split into mono-color / Multicolor /
@@ -88,8 +88,8 @@ From there:
 That first comparison loads in a few seconds. If you want accurate
 cheapest-printing prices instead of the decklist's referenced printing, click
 **Get Accurate Prices** on the results page. The first time you do this (or
-after the weekly auto-refresh), it downloads a ~75MB price index from
-Scryfall — after that it's instant. You can also refresh that index on
+after the weekly auto-refresh), it downloads a ~180MB price index from
+MTGJSON — after that it's instant. You can also refresh that index on
 demand from the home page's **Refresh Price Data** button.
 
 The app remembers each deck you've looked at as a "project": any
@@ -136,14 +136,14 @@ Everything the app remembers — your uploaded collection, any saved
 per-deck overrides, and the local cheapest-price index (see above) — is
 stored locally under `data/`, which is excluded from version control
 (`.gitignore`). Nothing leaves your machine except the calls to Moxfield's,
-Archidekt's, and Scryfall's public APIs needed to fetch decklists and
-prices.
+Archidekt's, Scryfall's, and MTGJSON's public APIs needed to fetch
+decklists and prices.
 
 ## Project layout
 
 | File | Purpose |
 | --- | --- |
-| `brewlist_core.py` | Shared logic: Moxfield/Archidekt/Scryfall fetching, ManaBox parsing, price comparison, HTML report rendering. No UI dependencies — imported by both entry points below. |
+| `brewlist_core.py` | Shared logic: Moxfield/Archidekt/Scryfall/MTGJSON fetching, ManaBox parsing, price comparison, HTML report rendering. No UI dependencies — imported by both entry points below. |
 | `app.py` | Flask web app. |
 | `brewlist_cli.py` | Terminal CLI (interactive menu or scriptable flags). |
 | `Brewlist.command` | macOS double-click launcher for the web app. |

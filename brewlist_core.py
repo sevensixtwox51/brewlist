@@ -97,11 +97,12 @@ class CardEntry:
     set_name: str = ""
     set_code: str = ""
     collector_number: str = ""
-    # Cheapest (price, url) found across every paper printing of this card via
-    # Scryfall search (see fetch_cheapest_printings) -- filled in by
-    # build_comparison before pricing happens, None until then / on lookup failure.
-    cheapest_nonfoil: tuple | None = None
-    cheapest_foil: tuple | None = None
+    # Per-store cheapest (store, price, url) found across every paper printing
+    # of this card, sorted cheapest first -- see ensure_price_index. Filled in
+    # by build_comparison before pricing happens, None until then / if no
+    # printing of this card was found in the index.
+    cheapest_nonfoil: list[tuple[str, float, str]] | None = None
+    cheapest_foil: list[tuple[str, float, str]] | None = None
 
 
 @dataclass
@@ -297,7 +298,7 @@ def _extract_archidekt_entries(deck: dict, include_sideboard: bool, include_mayb
         # only gives raw vendor product IDs for TCGPlayer (not CK/MP), so a
         # clickable link is only reliably buildable for TCGPlayer here. This
         # is just the fast-path fallback anyway -- "Get Accurate Prices"
-        # (Scryfall's cheapest-printing search) works identically regardless
+        # (the local MTGJSON-based price index) works identically regardless
         # of source, since it only ever needs the card name.
         entries.append(
             CardEntry(
@@ -483,21 +484,37 @@ def fetch_scryfall_prices_by_id(scryfall_ids: set[str], on_progress=None) -> dic
 
 
 # --------------------------------------------------------------------------
-# Cheapest-printing baseline pricing -- a local index built from Scryfall's
-# public bulk data dump (one JSON object per unique printing, same schema as
-# their live API), reduced to the cheapest paper nonfoil/foil TCGPlayer price
+# Cheapest-printing baseline pricing -- a local index built from MTGJSON's
+# public bulk data (AllPrintings for card identity + official purchase
+# links, AllPricesToday for current retail prices), reduced to the cheapest
+# paper nonfoil/foil price at each of TCGPlayer, Card Kingdom, and ManaPool
 # per unique card name. This replaced an earlier per-card live-search
 # implementation: with ~90 unique names in a typical deck, live searches
-# routinely tripped Scryfall's rate limiter. A single ~75MB download refreshed
-# on a schedule (see PRICE_INDEX_MAX_AGE_DAYS) has no such risk and, once
-# warm, resolves every card in a deck instantly with zero network calls.
+# routinely tripped Scryfall's rate limiter. A combined ~176MB download
+# refreshed on a schedule (see PRICE_INDEX_MAX_AGE_DAYS) has no such risk
+# and, once warm, resolves every card in a deck instantly with zero network
+# calls. (An earlier version of this used Scryfall's own bulk data instead --
+# smaller at ~75MB, but Scryfall only tracks TCGPlayer/Cardmarket prices, so
+# it couldn't show Card Kingdom or ManaPool.)
+#
+# TCGPlayer and Card Kingdom links are MTGJSON's own official affiliate
+# redirect links (purchaseUrls), guaranteed to resolve to the exact product.
+# ManaPool isn't in that data, so its link is instead constructed from the
+# (verified) https://manapool.com/card/<set>/<number>/<slug> pattern --
+# best-effort, unlike the other two.
 # --------------------------------------------------------------------------
 
-SCRYFALL_BULK_DATA_TYPE_API = "https://api.scryfall.com/bulk-data/default_cards"
+MTGJSON_ALL_PRINTINGS_URL = "https://mtgjson.com/api/v5/AllPrintings.json.gz"
+MTGJSON_ALL_PRICES_TODAY_URL = "https://mtgjson.com/api/v5/AllPricesToday.json.gz"
 
 _CORE_DIR = os.path.dirname(os.path.abspath(__file__))
 PRICE_INDEX_PATH = os.path.join(_CORE_DIR, "data", "price_index.json")
 PRICE_INDEX_MAX_AGE_DAYS = 7
+# Bumped whenever the on-disk shape of the index changes (e.g. the Scryfall ->
+# MTGJSON switch, which changed "nonfoil"/"foil" from a single [price, url]
+# to a list of [store, price, url]) so a stale on-disk file from an older
+# version of this code is treated as needing a rebuild rather than crashing.
+PRICE_INDEX_FORMAT_VERSION = 2
 
 
 def price_index_age_days(path: str = PRICE_INDEX_PATH) -> float | None:
@@ -514,96 +531,135 @@ def price_index_age_days(path: str = PRICE_INDEX_PATH) -> float | None:
     return (datetime.datetime.now(datetime.timezone.utc) - built).total_seconds() / 86400
 
 
-def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[str, dict]:
-    """Downloads Scryfall's "default_cards" bulk data dump and reduces it to
-    {normalized_name: {"nonfoil": [price, url] | None, "foil": [...] | None}},
-    writing the result to `path`. Double-faced/split cards are indexed under
-    both their combined name and their front-face name, since decklists
-    typically reference only the front face.
+def _content_length(url: str) -> int:
+    req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": "brewlist/1.0 (personal use)"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            return int(resp.headers.get("Content-Length") or 0)
+    except (urllib.error.URLError, urllib.error.HTTPError, ValueError):
+        return 0
 
-    `on_progress(bytes_done, bytes_total)`, if given, reports download
-    progress -- parsing the (already-downloaded) file afterward is fast
-    enough not to need its own granular progress.
+
+def _download_to_file(url: str, tmp_path: str, on_progress, offset: int, total_bytes: int) -> None:
+    req = urllib.request.Request(url, headers={"User-Agent": "brewlist/1.0 (personal use)"})
+    with urllib.request.urlopen(req, timeout=180) as resp, open(tmp_path, "wb") as out:
+        downloaded = 0
+        while True:
+            chunk = resp.read(1 << 16)
+            if not chunk:
+                break
+            out.write(chunk)
+            downloaded += len(chunk)
+            if on_progress:
+                on_progress(offset + downloaded, total_bytes)
+
+
+def _slugify(text: str) -> str:
+    text = text.lower()
+    text = re.sub(r"[’']", "", text)
+    text = re.sub(r"[^a-z0-9]+", "-", text)
+    return text.strip("-")
+
+
+def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[str, dict]:
+    """Downloads MTGJSON's AllPrintings + AllPricesToday bulk data and
+    reduces them to {normalized_name: {"nonfoil": [[store, price, url], ...]
+    sorted cheapest first, "foil": [...]}}, writing the result to `path`.
+    Double-faced/split cards are indexed under both their combined name and
+    their front-face name, since decklists typically reference only the
+    front face.
+
+    `on_progress(bytes_done, bytes_total)`, if given, reports combined
+    download progress across both files; parsing afterward is fast enough
+    not to need its own granular progress.
 
     Raises ValueError on any network failure (nothing is written in that
     case, so a prior index -- if any -- is left untouched)."""
-    req = urllib.request.Request(
-        SCRYFALL_BULK_DATA_TYPE_API,
-        headers={"User-Agent": "brewlist/1.0 (personal use)", "Accept": "application/json"},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            meta = json.loads(resp.read().decode("utf-8"))
-    except (urllib.error.URLError, urllib.error.HTTPError) as e:
-        raise ValueError(f"Could not reach Scryfall's bulk data API: {e}")
-
-    download_uri = meta.get("download_uri") or meta.get("jsonl_download_uri")
-    total_bytes = meta.get("compressed_size") or 0
-    if not download_uri:
-        raise ValueError("Scryfall's bulk data API didn't return a download link.")
+    printings_size = _content_length(MTGJSON_ALL_PRINTINGS_URL)
+    prices_size = _content_length(MTGJSON_ALL_PRICES_TODAY_URL)
+    total_bytes = printings_size + prices_size
 
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp_path = path + ".download"
+    printings_tmp = path + ".printings.download"
+    prices_tmp = path + ".prices.download"
     try:
-        req = urllib.request.Request(download_uri, headers={"User-Agent": "brewlist/1.0 (personal use)"})
-        with urllib.request.urlopen(req, timeout=120) as resp, open(tmp_path, "wb") as out:
-            downloaded = 0
-            while True:
-                chunk = resp.read(1 << 16)
-                if not chunk:
-                    break
-                out.write(chunk)
-                downloaded += len(chunk)
-                if on_progress:
-                    on_progress(downloaded, total_bytes or downloaded)
+        _download_to_file(MTGJSON_ALL_PRINTINGS_URL, printings_tmp, on_progress, 0, total_bytes)
+        _download_to_file(MTGJSON_ALL_PRICES_TODAY_URL, prices_tmp, on_progress, printings_size, total_bytes)
     except (urllib.error.URLError, urllib.error.HTTPError) as e:
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
-        raise ValueError(f"Could not download Scryfall's price data: {e}")
+        for p in (printings_tmp, prices_tmp):
+            if os.path.exists(p):
+                os.remove(p)
+        raise ValueError(f"Could not download MTGJSON's price data: {e}")
+
+    try:
+        with gzip.open(prices_tmp, "rt", encoding="utf-8") as f:
+            prices_by_uuid = (json.load(f) or {}).get("data") or {}
+        with gzip.open(printings_tmp, "rt", encoding="utf-8") as f:
+            all_printings = (json.load(f) or {}).get("data") or {}
+
+        working: dict[str, dict] = {}
+        for set_obj in all_printings.values():
+            for card in set_obj.get("cards", []):
+                if "paper" not in (card.get("availability") or []):
+                    continue
+                uuid = card.get("uuid")
+                price_entry = prices_by_uuid.get(uuid) if uuid else None
+                if not price_entry:
+                    continue
+                paper = price_entry.get("paper") or {}
+                purchase_urls = card.get("purchaseUrls") or {}
+
+                name = card.get("name") or ""
+                set_code = (card.get("setCode") or "").lower()
+                number = card.get("number") or ""
+                manapool_url = (
+                    f"https://manapool.com/card/{set_code}/{number}/{_slugify(name)}"
+                    if set_code and number and name else None
+                )
+
+                names = {normalize_name(name)}
+                face_name = card.get("faceName")
+                if face_name and face_name != name:
+                    names.add(normalize_name(face_name))
+                names.discard("")
+                if not names:
+                    continue
+
+                stores = [
+                    ("TCGP", "tcgplayer", purchase_urls.get("tcgplayer"), purchase_urls.get("tcgplayer")),
+                    ("CK", "cardkingdom", purchase_urls.get("cardKingdom"), purchase_urls.get("cardKingdomFoil")),
+                    ("MP", "manapool", manapool_url, manapool_url),
+                ]
+                for label, price_key, nonfoil_url, foil_url in stores:
+                    retail = (paper.get(price_key) or {}).get("retail") or {}
+                    nonfoil_price = next(iter((retail.get("normal") or {}).values()), None)
+                    foil_price = next(iter((retail.get("foil") or {}).values()), None)
+
+                    for nm in names:
+                        entry = working.setdefault(nm, {"nonfoil": {}, "foil": {}})
+                        if nonfoil_price and nonfoil_url:
+                            p = float(nonfoil_price)
+                            cur = entry["nonfoil"].get(label)
+                            if cur is None or p < cur[0]:
+                                entry["nonfoil"][label] = [p, nonfoil_url]
+                        if foil_price and foil_url:
+                            p = float(foil_price)
+                            cur = entry["foil"].get(label)
+                            if cur is None or p < cur[0]:
+                                entry["foil"][label] = [p, foil_url]
+    finally:
+        for p in (printings_tmp, prices_tmp):
+            if os.path.exists(p):
+                os.remove(p)
 
     index: dict[str, dict] = {}
-    try:
-        with gzip.open(tmp_path, "rt", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    card = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if "paper" not in (card.get("games") or []):
-                    continue
-                purchase_url = (card.get("purchase_uris") or {}).get("tcgplayer")
-                if not purchase_url:
-                    continue
-                prices = card.get("prices") or {}
-                nonfoil_price = prices.get("usd")
-                foil_price = prices.get("usd_foil")
-                if not nonfoil_price and not foil_price:
-                    continue
-
-                names = {normalize_name(card.get("name") or "")}
-                faces = card.get("card_faces") or []
-                if faces and faces[0].get("name"):
-                    names.add(normalize_name(faces[0]["name"]))
-                names.discard("")
-
-                for nm in names:
-                    entry = index.setdefault(nm, {"nonfoil": None, "foil": None})
-                    if nonfoil_price:
-                        p = float(nonfoil_price)
-                        if entry["nonfoil"] is None or p < entry["nonfoil"][0]:
-                            entry["nonfoil"] = [p, purchase_url]
-                    if foil_price:
-                        p = float(foil_price)
-                        if entry["foil"] is None or p < entry["foil"][0]:
-                            entry["foil"] = [p, purchase_url]
-    finally:
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
+    for nm, entry in working.items():
+        nonfoil_list = sorted(([label, p, u] for label, (p, u) in entry["nonfoil"].items()), key=lambda t: t[1])
+        foil_list = sorted(([label, p, u] for label, (p, u) in entry["foil"].items()), key=lambda t: t[1])
+        index[nm] = {"nonfoil": nonfoil_list or None, "foil": foil_list or None}
 
     payload = {
+        "format_version": PRICE_INDEX_FORMAT_VERSION,
         "built_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "card_count": len(index),
         "prices": index,
@@ -623,12 +679,14 @@ def ensure_price_index(path: str = PRICE_INDEX_PATH, on_progress=None, force_ref
         if age is not None and age < PRICE_INDEX_MAX_AGE_DAYS:
             try:
                 with open(path, encoding="utf-8") as f:
-                    prices = json.load(f).get("prices") or {}
+                    payload = json.load(f)
+                if payload.get("format_version") != PRICE_INDEX_FORMAT_VERSION:
+                    raise ValueError("stale index format")
                 if on_progress:
                     on_progress(1, 1)
-                return prices
+                return payload.get("prices") or {}
             except (OSError, ValueError):
-                pass  # corrupt cache file -- fall through and rebuild
+                pass  # corrupt or outdated cache file -- fall through and rebuild
     return rebuild_price_index(path, on_progress=on_progress)
 
 
@@ -726,13 +784,13 @@ def best_prices(entry: CardEntry, foil: bool | None = None, max_results: int = 3
     fields and can differ a lot, so pass foil=True/False explicitly to price the
     other finish.
 
-    Prefers the cheapest price found across *every* printing of the card (see
-    fetch_cheapest_printings / entry.cheapest_nonfoil/foil) -- a true baseline,
-    since whichever single printing a Moxfield decklist entry happens to
-    reference can be a rare, dramatically more expensive alt-art. Falls back to
-    Moxfield's own referenced-printing price/link data if no Scryfall-search
-    price was found for this finish (e.g. the search failed or the card
-    couldn't be resolved).
+    Prefers the cheapest price found across *every* printing of the card at
+    each of TCGPlayer/Card Kingdom/ManaPool (see ensure_price_index /
+    entry.cheapest_nonfoil/foil) -- a true baseline, since whichever single
+    printing the source decklist entry happens to reference can be a rare,
+    dramatically more expensive alt-art. Falls back to the decklist's own
+    referenced-printing price/link data if no baseline price was found for
+    this finish (e.g. the lookup failed or the card couldn't be resolved).
 
     By default, if the requested finish has no listed price, we fall back to
     whatever finish *is* priced (better than showing nothing). Pass
@@ -742,10 +800,10 @@ def best_prices(entry: CardEntry, foil: bool | None = None, max_results: int = 3
     want_foil = entry.is_foil if foil is None else foil
 
     cheapest = entry.cheapest_foil if want_foil else entry.cheapest_nonfoil
-    if cheapest is None and not strict:
+    if not cheapest and not strict:
         cheapest = entry.cheapest_nonfoil if want_foil else entry.cheapest_foil
     if cheapest:
-        return [("TCGP", cheapest[0], cheapest[1])]
+        return cheapest[:max_results]
 
     results = []
     for label, nonfoil_key, foil_key, nonfoil_url_key, foil_url_key in STORES:
@@ -828,8 +886,8 @@ def build_comparison(
         by_name = ensure_price_index(on_progress=on_progress)
         for e in entries:
             hit = by_name.get(normalize_name(e.name)) or {}
-            e.cheapest_nonfoil = tuple(hit["nonfoil"]) if hit.get("nonfoil") else None
-            e.cheapest_foil = tuple(hit["foil"]) if hit.get("foil") else None
+            e.cheapest_nonfoil = [tuple(t) for t in hit["nonfoil"]] if hit.get("nonfoil") else None
+            e.cheapest_foil = [tuple(t) for t in hit["foil"]] if hit.get("foil") else None
 
     buckets: dict[str, list[CardResult]] = {}
     totals = {
@@ -2051,14 +2109,15 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
     elif refresh_endpoint:
         cheapest_pricing_html = (
             '<button class="btn ghost" id="refresh-prices-btn" '
-            'title="Searches every printing of each card on Scryfall for the true cheapest price -- '
-            'slower (about a minute) but accurate">&#127919; Get Accurate Prices</button>'
+            'title="Looks up the cheapest price across TCGPlayer, Card Kingdom, and ManaPool for every card -- '
+            'instant once the local price index is built (first time, or after its weekly refresh, takes about '
+            '20-30s to download)">&#127919; Get Accurate Prices</button>'
             '<span id="refresh-prices-label" class="price-basis-note" style="display:none;"></span>'
         )
         refresh_prices_js = _refresh_prices_js(refresh_endpoint)
     else:
         cheapest_pricing_html = (
-            '<span class="price-basis-note" title="Prices are whichever printing the Moxfield decklist references, '
+            '<span class="price-basis-note" title="Prices are whichever printing the source decklist references, '
             'not necessarily the cheapest -- rerun with --cheapest-pricing for an accurate baseline">'
             '&#9888; Prices not verified as cheapest</span>'
         )

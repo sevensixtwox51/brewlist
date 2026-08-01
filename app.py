@@ -253,7 +253,7 @@ def render_home_page(error: str | None = None, prefill_url: str = "") -> str:
 
     index_age = price_index_age_days()
     if index_age is None:
-        index_status = 'Not built yet — first use downloads it (~75MB, one-time, refreshed weekly after).'
+        index_status = 'Not built yet — first use downloads it (~180MB from MTGJSON, one-time, refreshed weekly after).'
     elif index_age < 1:
         index_status = 'Built today.'
     else:
@@ -560,8 +560,8 @@ def compare_start():
 def compare_refresh_prices(deck_id):
     """Re-runs a comparison that's already on file, this time with
     fetch_cheapest=True -- the initial /compare/start is fast (skips the
-    per-card Scryfall cheapest-printing search), and this is what the report's
-    "Get Accurate Prices" button calls to fill that in on demand.
+    cheapest-printing lookup), and this is what the report's "Get Accurate
+    Prices" button calls to fill that in on demand.
 
     `deck_id` here is really the deck *key* (see brewlist_core.deck_key) -- e.g. an
     Archidekt deck's key is "archidekt-<id>", split back apart below to get
