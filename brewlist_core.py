@@ -1670,6 +1670,37 @@ details.combos-panel[open] > summary::before {{ transform: rotate(90deg); }}
 .card-main {{ display: flex; gap: 10px; }}
 .card.owned {{ border-left-color: var(--owned); }}
 .card.missing {{ border-left-color: var(--missing); }}
+.card.foil {{ overflow: hidden; }}
+.card.foil::before {{
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    115deg,
+    transparent 10%,
+    rgba(255, 80, 220, 0.35) 25%,
+    rgba(120, 200, 255, 0.35) 40%,
+    rgba(255, 240, 120, 0.35) 55%,
+    rgba(140, 255, 190, 0.35) 70%,
+    transparent 90%
+  );
+  background-size: 300% 300%;
+  mix-blend-mode: color-dodge;
+  opacity: 0.4;
+  animation: foil-shimmer 7s ease-in-out infinite;
+  transition: opacity 0.3s ease;
+}}
+.card.foil:hover::before {{
+  opacity: 0.8;
+  animation-duration: 1.6s;
+}}
+.card.foil > * {{ position: relative; z-index: 1; }}
+@keyframes foil-shimmer {{
+  0%, 100% {{ background-position: 0% 50%; }}
+  50% {{ background-position: 100% 50%; }}
+}}
 .card-thumb {{
   width: 48px;
   height: 67px;
@@ -2517,6 +2548,8 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
             store_nonfoil_attr = html.escape(best_nonfoil[0][0]) if best_nonfoil else ''
             store_foil_attr = html.escape(best_foil[0][0]) if best_foil else ''
 
+            foil_class = " foil" if e.is_foil else ""
+
             group, subgroup = shopping_group(e)
             group_rank = shopping_group_rank(group, subgroup)
             norm_name_attr = html.escape(normalize_name(e.name))
@@ -2536,7 +2569,7 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
                     f' &middot; {r.reserved} reserved for another deck' if r.reserved > 0 else ''
                 )
                 card_tiles.append(f"""
-<div class="card owned" data-name="{name_esc.lower()}" data-qty="{e.quantity}" data-display-name="{name_esc}" data-owned-value="{r.owned_value:.2f}" data-reserved-qty="{reserved_flag}" {shop_data_attrs}>
+<div class="card owned{foil_class}" data-name="{name_esc.lower()}" data-qty="{e.quantity}" data-display-name="{name_esc}" data-owned-value="{r.owned_value:.2f}" data-reserved-qty="{reserved_flag}" {shop_data_attrs}>
   <label class="override-toggle">
     <input type="checkbox" class="need-override"{reserved_checked}> Need another copy (used elsewhere)
   </label>
@@ -2561,7 +2594,7 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
             else:
                 have_str = f" &middot; have {r.have}" if r.have else ""
                 card_tiles.append(f"""
-<div class="card missing" data-name="{name_esc.lower()}" data-qty="{r.shortfall}" data-display-name="{name_esc}" {shop_data_attrs}>
+<div class="card missing{foil_class}" data-name="{name_esc.lower()}" data-qty="{r.shortfall}" data-display-name="{name_esc}" {shop_data_attrs}>
   <div class="card-main">
     {thumb_html}
     <div class="card-body">
