@@ -11,6 +11,8 @@ Available two ways: a **web app** (paste a URL, upload a CSV, done — no
 terminal needed) and the original **CLI** (menu-driven, generates
 Markdown/HTML/CSV reports on disk).
 
+![Comparison results — pricing, Game Changers, Commander legality, deck completion](screenshots/results.png)
+
 ## What it does
 
 - Fetches a decklist straight from Moxfield's or Archidekt's API given just
@@ -39,6 +41,8 @@ Markdown/HTML/CSV reports on disk).
   surfaces budget mana rocks, a missing fetch land surfaces cheaper fetches
   you don't have (or the one you already do). Uses Scryfall's community-
   curated Oracle Tags to find same-function cards — no AI-generated guesses
+
+  ![Budget-alternative suggestions on a card tile](screenshots/budget-alternatives.png)
 - Flags cards on WotC's official Commander "Game Changers" list with a badge
   on the card and a deck-wide count in the header — useful for checking
   your deck against its intended bracket
@@ -52,6 +56,8 @@ Markdown/HTML/CSV reports on disk).
   [Commander Spellbook](https://commanderspellbook.com)'s public API, which
   also flags mass-land-denial and extra-turn cards and gives its own
   power/style rating for the deck (not the official WotC bracket system)
+
+  ![Combos panel](screenshots/combos.png)
 - Total deck value at today's market price, plus the owned portion
 - A **Shopping List** button opens a plain-text, alphabetized list of
   what's still missing (quantity + name), pre-selected and one click away
@@ -107,6 +113,8 @@ downloaded ZIP); if it pulls new commits, restart the app afterward to
 actually run the new code.
 
 ## Usage: web app (recommended)
+
+![Home page](screenshots/home.png)
 
 **macOS:** double-click `Brewlist.command` in Finder. If you see "'Brewlist.command'
 can't be opened because it is from an unidentified developer" -- this happens
