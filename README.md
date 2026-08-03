@@ -86,7 +86,13 @@ restart the app afterward to actually run the new code.
 
 ## Usage: web app (recommended)
 
-**macOS:** double-click `Brewlist.command` in Finder.
+**macOS:** double-click `Brewlist.command` in Finder. If you see "'Brewlist.command'
+can't be opened because it is from an unidentified developer" -- this happens
+when the file was downloaded via a browser (e.g. GitHub's "Download ZIP"
+button) rather than `git clone`, which triggers macOS's Gatekeeper quarantine
+on unsigned scripts. Right-click the file and choose **Open** instead of
+double-clicking (bypasses it just for that file), or run
+`xattr -dr com.apple.quarantine Brewlist.command` in Terminal first.
 
 **Any OS / from a terminal:**
 
