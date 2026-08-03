@@ -30,6 +30,11 @@ Markdown/HTML/CSV reports on disk).
   are instant instead of a live call per card
 - Each price shows a ▲/▼ trend arrow when it's moved 2%+ over the past
   week, using MTGJSON's 90-day price history
+- For missing cards priced $20+, suggests cheaper same-role alternatives to
+  buy, or flags it if you already own one — e.g. a missing Mana Crypt
+  surfaces budget mana rocks, a missing fetch land surfaces cheaper fetches
+  you don't have (or the one you already do). Uses Scryfall's community-
+  curated Oracle Tags to find same-function cards — no AI-generated guesses
 - Flags cards on WotC's official Commander "Game Changers" list with a badge
   on the card and a deck-wide count in the header — useful for checking
   your deck against its intended bracket
