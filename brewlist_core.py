@@ -21,6 +21,7 @@ import subprocess
 import time
 import unicodedata
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 
@@ -34,6 +35,7 @@ __all__ = [
     "EXTRA_STORE_LABELS", "PICKABLE_STORE_LABELS",
     "commander_legality_in_index", "deck_is_commander_format",
     "find_deck_combos", "estimate_deck_bracket", "BRACKET_TAG_LABELS", "scryfall_prices_in_index",
+    "budget_alt_data_in_index", "BUDGET_ALT_MIN_PRICE",
     "PRICE_INDEX_PATH", "PRICE_INDEX_MAX_AGE_DAYS",
     "categorize", "shopping_group", "shopping_group_rank",
     "best_prices", "priced_for_finish", "build_comparison",
@@ -130,6 +132,17 @@ class CardEntry:
     # selected stores. See rebuild_price_index / EXTRA_STORE_LABELS.
     cardmarket_nonfoil: tuple[float, str] | None = None
     cardmarket_foil: tuple[float, str] | None = None
+    # Functional-alternative suggestions for this (missing) card -- see
+    # budget_alt_data_in_index / _compute_budget_alt_groups. cheaper_alt_tag
+    # is the Scryfall Oracle Tag label used to find them (e.g. "mana rock").
+    # owned_alternatives: display names of same-role cards you already own
+    # (free -- shown regardless of their own market price). cheaper_alternatives:
+    # [(name, price), ...] for same-role cards you don't own, cheapest
+    # first, guaranteed cheaper than this card's own price. Only set for
+    # missing cards priced above BUDGET_ALT_MIN_PRICE.
+    cheaper_alt_tag: str | None = None
+    owned_alternatives: list[str] | None = None
+    cheaper_alternatives: list[tuple[str, float]] | None = None
     # Whether this card is on WotC's official Commander "Game Changers" list
     # -- see game_changers_in_index. Only set (and only meaningful) when
     # build_comparison was told this deck is Commander format; False otherwise.
@@ -509,6 +522,29 @@ def load_overrides(deck_id: str, directory: str) -> tuple[dict[str, int], str | 
 # --------------------------------------------------------------------------
 
 SCRYFALL_CARD_API = "https://api.scryfall.com/cards/{scryfall_id}"
+SCRYFALL_BULK_DATA_API = "https://api.scryfall.com/bulk-data"
+
+
+def _scryfall_bulk_download_url(bulk_type: str) -> str | None:
+    """Looks up the current JSONL download URL for a Scryfall bulk-data file
+    type (e.g. "oracle_tags") -- these URLs are timestamped and regenerated
+    whenever Scryfall rebuilds the file, so they can't be hardcoded. Returns
+    None on any failure (network, unexpected response shape, type not
+    found) -- callers should treat that as "this optional data isn't
+    available right now", not a hard error."""
+    try:
+        req = urllib.request.Request(
+            SCRYFALL_BULK_DATA_API,
+            headers={"User-Agent": "brewlist/1.0 (personal use)", "Accept": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        for entry in data.get("data") or []:
+            if entry.get("type") == bulk_type:
+                return entry.get("jsonl_download_uri")
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError, ValueError, OSError):
+        pass
+    return None
 
 
 def fetch_scryfall_prices_by_id(scryfall_ids: set[str], on_progress=None) -> dict[str, dict]:
@@ -577,6 +613,35 @@ MTGJSON_ALL_PRINTINGS_URL = "https://mtgjson.com/api/v5/AllPrintings.json.gz"
 MTGJSON_ALL_PRICES_URL = "https://mtgjson.com/api/v5/AllPrices.json.gz"
 PRICE_TREND_LOOKBACK_DAYS = 7
 
+# Budget-alternative suggestions (see _compute_budget_alternatives) use
+# Scryfall's Oracle Tags -- community-curated functional tags like "mana
+# rock" or "ramp", NOT anything LLM-generated. A tag's own taggings count
+# is used as a rough specificity filter: too rare isn't useful (barely any
+# alternatives to suggest), too common (e.g. "activated ability", "spot
+# removal") is too broad a bucket to mean much.
+BUDGET_ALT_MIN_TAG_COUNT = 5
+BUDGET_ALT_MAX_TAG_COUNT = 1200
+BUDGET_ALT_MAX_RESULTS = 3
+# Missing cards cheaper than this don't get alternative suggestions shown
+# -- not worth the UI noise for a $8 card.
+BUDGET_ALT_MIN_PRICE = 20.0
+# Tags that describe a rules mechanic, a flavor/community quirk, or print
+# metadata rather than a deck-building *role* -- e.g. Mana Crypt is tagged
+# both "mana rock" (its actual function) and "coin flip" (an incidental
+# drawback clause with fewer total taggings, which the raw specificity
+# filter alone would have wrongly preferred). Found by testing real chase
+# cards (Mana Crypt, Swords to Plowshares, Demonic Tutor, Gaea's Cradle,
+# Wasteland, The Tabernacle at Pendrell Vale) and checking what tag got
+# picked -- not guessed. Tags with "cycle" anywhere in the label (print-
+# cycle metadata, e.g. "cycle-usg-legendary-land", "supercycle-legendary-land")
+# are excluded by substring match, not listed here.
+BUDGET_ALT_EXCLUDED_TAGS = {
+    "coin flip", "drawback", "doesn't untap", "burn-you",
+    "activated ability", "triggered ability",
+    "single target instant/sorcery", "meme", "bible reference", "namesake spell",
+    "full refund", "creature count matters",
+}
+
 _CORE_DIR = os.path.dirname(os.path.abspath(__file__))
 PRICE_INDEX_PATH = os.path.join(_CORE_DIR, "data", "price_index.json")
 STORE_PREFS_PATH = os.path.join(_CORE_DIR, "data", "store_prefs.json")
@@ -587,7 +652,7 @@ PRICE_INDEX_MAX_AGE_DAYS = 7
 # which added "nonfoil_trend"/"foil_trend") so a stale on-disk file from an
 # older version of this code is treated as needing a rebuild rather than
 # silently missing data or crashing.
-PRICE_INDEX_FORMAT_VERSION = 7
+PRICE_INDEX_FORMAT_VERSION = 10
 
 
 # --------------------------------------------------------------------------
@@ -740,6 +805,102 @@ def _latest_price(date_prices: dict) -> float | None:
     return date_prices[max(date_prices)]
 
 
+def _compute_budget_alt_groups(
+    oracle_id_by_name: dict[str, str], display_name_by_name: dict[str, str],
+    is_land_by_name: dict[str, bool], tags_gz_path: str,
+) -> dict[str, dict]:
+    """Precomputes "which cards share a functional role" groups, using
+    Scryfall's Oracle Tags bulk file (community-curated functional tags
+    like "mana rock" or "ramp" -- see BUDGET_ALT_* above). Grouping only --
+    no pricing or ownership here, since which alternatives are actually
+    cheap or already-owned depends on a specific price index snapshot and a
+    specific user's collection, both only available later in
+    build_comparison. This is just "what else does the same thing."
+
+    For each card, picks one tag to represent its role: among its tags that
+    aren't excluded (BUDGET_ALT_EXCLUDED_TAGS / "cycle" anywhere in the label) and whose
+    total taggings count falls in [MIN, MAX]_TAG_COUNT, tags that have a
+    parent in Scryfall's tag hierarchy (e.g. "mana rock" under "ramp") are
+    preferred over root-level tags, ties broken by fewest total taggings
+    (more specific). This matters: raw specificity alone picks wrong --
+    Mana Crypt's "coin flip" tag (an incidental drawback clause) has fewer
+    total taggings than its actual "mana rock" tag, so the parent-first
+    preference is what keeps the pick meaningful.
+
+    Returns {} if the tags file can't be read -- this is a nice-to-have,
+    never worth failing the whole index build over.
+
+    Returns {"tag_by_name": {name: tag_id}, "tag_labels": {tag_id: label},
+    "groups": {tag_id: [[name, display_name, is_land], ...]}} -- "groups"
+    only includes tag_ids that at least one card actually picked (via
+    tag_by_name), not every tag in the file. is_land lets build_comparison
+    restrict a land's suggested alternatives to other lands -- a creature
+    or spell sharing an oracle tag with a utility land isn't a drop-in
+    replacement for it in the mana base.
+    """
+    try:
+        name_by_oracle_id: dict[str, str] = {}
+        for nm, oid in oracle_id_by_name.items():
+            name_by_oracle_id.setdefault(oid, nm)
+
+        taggings_by_tag: dict[str, list[str]] = {}  # tag_id -> [oracle_id, ...]
+        tag_labels: dict[str, str] = {}
+        tag_has_parent: dict[str, bool] = {}
+        with gzip.open(tags_gz_path, "rt", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                tag = json.loads(line)
+                if tag.get("type") != "oracle":
+                    continue
+                label = tag.get("label") or tag["id"]
+                if label in BUDGET_ALT_EXCLUDED_TAGS or "cycle" in label:
+                    continue
+                oids = [t["oracle_id"] for t in (tag.get("taggings") or []) if t.get("oracle_id")]
+                if oids:
+                    taggings_by_tag[tag["id"]] = oids
+                    tag_labels[tag["id"]] = label
+                    tag_has_parent[tag["id"]] = bool(tag.get("parent_ids"))
+
+        tags_by_oracle_id: dict[str, list[tuple[str, int]]] = {}
+        for tag_id, oids in taggings_by_tag.items():
+            count = len(oids)
+            for oid in oids:
+                tags_by_oracle_id.setdefault(oid, []).append((tag_id, count))
+
+        tag_by_name: dict[str, str] = {}
+        for nm, oid in oracle_id_by_name.items():
+            candidate_tags = [
+                (tag_id, count) for tag_id, count in tags_by_oracle_id.get(oid, [])
+                if BUDGET_ALT_MIN_TAG_COUNT <= count <= BUDGET_ALT_MAX_TAG_COUNT
+            ]
+            if not candidate_tags:
+                continue
+            # Prefer a tag with a parent (a specific sub-category, e.g.
+            # "mana rock") over a root-level tag; within each tier, prefer
+            # the fewest total taggings (more specific/useful).
+            tag_id, _count = min(candidate_tags, key=lambda t: (not tag_has_parent[t[0]], t[1]))
+            tag_by_name[nm] = tag_id
+
+        needed_tag_ids = set(tag_by_name.values())
+        groups: dict[str, list[list]] = {}
+        for tag_id in needed_tag_ids:
+            seen = set()
+            members = []
+            for oid in taggings_by_tag.get(tag_id, []):
+                nm = name_by_oracle_id.get(oid)
+                if nm and nm not in seen:
+                    seen.add(nm)
+                    members.append([nm, display_name_by_name.get(nm, nm), is_land_by_name.get(nm, False)])
+            if members:
+                groups[tag_id] = members
+
+        return {"tag_by_name": tag_by_name, "tag_labels": tag_labels, "groups": groups}
+    except (OSError, ValueError, KeyError, gzip.BadGzipFile):
+        return {}
+
+
 def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[str, dict]:
     """Downloads MTGJSON's AllPrintings + AllPrices (90-day history) bulk
     data and reduces them to {normalized_name: {"nonfoil": [[store, price,
@@ -799,6 +960,22 @@ def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[
         # recorded Scryfall ID to the exact printing you hold) be a local
         # lookup instead of a live per-card Scryfall API call.
         by_scryfall_id: dict[str, dict] = {}
+        # Scryfall oracle_id per name -- MTGJSON already carries this in
+        # identifiers.scryfallOracleId, so no extra download is needed just
+        # to get it. Used to cross-reference against Scryfall's Oracle Tags
+        # for budget-alternative suggestions (see _compute_budget_alt_groups).
+        oracle_id_by_name: dict[str, str] = {}
+        # Proper-cased display name per normalized name -- the index itself
+        # is keyed by normalize_name() (lowercased), which is right for
+        # lookups but wrong to show a user directly (see the same fix
+        # elsewhere for e.name vs normalized keys).
+        display_name_by_name: dict[str, str] = {}
+        # Whether a name is a Land -- budget-alternative suggestions for a
+        # land should only ever suggest other lands (a creature or spell
+        # that shares an oracle tag with a utility land isn't actually a
+        # drop-in replacement for it in the mana base). See
+        # _compute_budget_alt_groups / the is_land filter in build_comparison.
+        is_land_by_name: dict[str, bool] = {}
         for set_obj in all_printings.values():
             for card in set_obj.get("cards", []):
                 if "paper" not in (card.get("availability") or []):
@@ -813,6 +990,11 @@ def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[
                 if not names:
                     continue
 
+                is_land = "Land" in (card.get("types") or [])
+                for nm in names:
+                    display_name_by_name.setdefault(nm, face_name if (face_name and normalize_name(face_name) == nm) else name)
+                    is_land_by_name.setdefault(nm, is_land)
+
                 if card.get("isGameChanger"):
                     game_changers.update(names)
 
@@ -820,6 +1002,11 @@ def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[
                 if legality:
                     for nm in names:
                         commander_legality[nm] = legality
+
+                scryfall_oracle_id = (card.get("identifiers") or {}).get("scryfallOracleId")
+                if scryfall_oracle_id:
+                    for nm in names:
+                        oracle_id_by_name.setdefault(nm, scryfall_oracle_id)
 
                 uuid = card.get("uuid")
                 price_entry = prices_by_uuid.get(uuid) if uuid else None
@@ -913,6 +1100,25 @@ def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[
             "cardmarket_foil": list(entry["cardmarket_foil"]) if entry.get("cardmarket_foil") else None,
         }
 
+    # Budget-alternative groupings -- a separate, best-effort download
+    # (Scryfall's Oracle Tags, ~6MB) after the main MTGJSON pull above. Never
+    # allowed to fail the whole index build: any problem here just means no
+    # alternative suggestions this time, everything else is unaffected.
+    budget_alt_groups: dict[str, dict] = {}
+    tags_tmp = path + ".tags.download"
+    tags_url = _scryfall_bulk_download_url("oracle_tags")
+    if tags_url:
+        try:
+            _download_to_file(tags_url, tags_tmp, None, 0, 0)
+            budget_alt_groups = _compute_budget_alt_groups(
+                oracle_id_by_name, display_name_by_name, is_land_by_name, tags_tmp
+            )
+        except (urllib.error.URLError, urllib.error.HTTPError, OSError):
+            pass
+        finally:
+            if os.path.exists(tags_tmp):
+                os.remove(tags_tmp)
+
     payload = {
         "format_version": PRICE_INDEX_FORMAT_VERSION,
         "built_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -921,6 +1127,9 @@ def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[
         "game_changers": sorted(game_changers),
         "commander_legality": commander_legality,
         "scryfall_prices": by_scryfall_id,
+        "budget_alt_tag_by_name": budget_alt_groups.get("tag_by_name") or {},
+        "budget_alt_tag_labels": budget_alt_groups.get("tag_labels") or {},
+        "budget_alt_groups": budget_alt_groups.get("groups") or {},
     }
     with open(path, "w", encoding="utf-8") as f:
         json.dump(payload, f)
@@ -941,6 +1150,30 @@ def scryfall_prices_in_index(path: str = PRICE_INDEX_PATH) -> dict[str, dict]:
             return json.load(f).get("scryfall_prices") or {}
     except (OSError, ValueError):
         return {}
+
+
+def budget_alt_data_in_index(path: str = PRICE_INDEX_PATH) -> dict:
+    """Returns {"tag_by_name": {name: tag_id}, "tag_labels": {tag_id: label},
+    "groups": {tag_id: [[name, display_name], ...]}} -- "which cards share a
+    functional role" groupings, read from the local price index (see
+    _compute_budget_alt_groups). build_comparison uses this plus a live
+    price index / owned-collection lookup to decide, per missing card,
+    which group members are already owned vs. cheaper to buy -- that split
+    can't be precomputed at index-build time since it depends on a specific
+    user's collection. All three keys default to {} if the index doesn't
+    have this data yet (predates this field, or the Oracle Tags download
+    failed the last time the index was built -- best-effort, see
+    rebuild_price_index)."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        return {
+            "tag_by_name": data.get("budget_alt_tag_by_name") or {},
+            "tag_labels": data.get("budget_alt_tag_labels") or {},
+            "groups": data.get("budget_alt_groups") or {},
+        }
+    except (OSError, ValueError):
+        return {"tag_by_name": {}, "tag_labels": {}, "groups": {}}
 
 
 def commander_legality_in_index(path: str = PRICE_INDEX_PATH) -> dict[str, str]:
@@ -1363,6 +1596,8 @@ def build_comparison(
                     e.mass_land_denial = info["massLandDenial"]
                     e.extra_turn = info["extraTurn"]
 
+    budget_alt = budget_alt_data_in_index()
+
     buckets: dict[str, list[CardResult]] = {}
     totals = {
         "owned": 0, "missing": 0,
@@ -1383,6 +1618,36 @@ def build_comparison(
             bucket = categorize(e.type_line)
 
         prices = best_prices(e, stores=selected_stores) if shortfall else []
+
+        if shortfall and prices and prices[0][1] >= BUDGET_ALT_MIN_PRICE:
+            self_price = prices[0][1]
+            self_norm = normalize_name(e.name)
+            self_is_land = "Land" in e.type_line
+            tag_id = budget_alt["tag_by_name"].get(self_norm)
+            group = budget_alt["groups"].get(tag_id) if tag_id else None
+            if group:
+                owned_names: list[str] = []
+                cheap_candidates: list[tuple[str, float]] = []
+                for member_norm, member_display, member_is_land in group:
+                    if member_norm == self_norm or member_is_land != self_is_land:
+                        continue
+                    member_owned = owned_collection.get(member_norm)
+                    if member_owned and member_owned.total > 0:
+                        owned_names.append(member_display)
+                        continue
+                    member_hit = by_name.get(member_norm) or {}
+                    member_prices = [p for _label, p, _url in (member_hit.get("nonfoil") or [])]
+                    if member_prices:
+                        cheapest = min(member_prices)
+                        if cheapest < self_price:
+                            cheap_candidates.append((member_display, cheapest))
+                if owned_names or cheap_candidates:
+                    e.cheaper_alt_tag = budget_alt["tag_labels"].get(tag_id)
+                    if owned_names:
+                        e.owned_alternatives = owned_names[:BUDGET_ALT_MAX_RESULTS]
+                    if cheap_candidates:
+                        cheap_candidates.sort(key=lambda c: c[1])
+                        e.cheaper_alternatives = cheap_candidates[:BUDGET_ALT_MAX_RESULTS]
 
         owned_value = 0.0
         for printing, qty in picks:
@@ -2018,6 +2283,18 @@ a.badge:hover {{ text-decoration: underline; }}
 .prices-foil {{ display: none; }}
 body.show-foil-prices .prices-foil {{ display: block; }}
 body.show-foil-prices .prices-nonfoil {{ display: none; }}
+.budget-alt-note {{
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--card-border);
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}}
+.budget-alt-note a {{ color: var(--accent); text-decoration: none; }}
+.budget-alt-note a:hover {{ text-decoration: underline; }}
 footer {{
   text-align: center;
   color: var(--text-dim);
@@ -2711,6 +2988,41 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
             prices_nonfoil_html = f'<div class="prices-nonfoil">{_pills(best_nonfoil, nonfoil_note, nonfoil_trend, e.cardmarket_nonfoil)}</div>'
             prices_foil_html = f'<div class="prices-foil">{_pills(best_foil, foil_note, foil_trend, e.cardmarket_foil)}</div>'
 
+            budget_alt_html = ""
+            if e.owned_alternatives or e.cheaper_alternatives:
+                tag_label = html.escape(e.cheaper_alt_tag or "")
+                title_attr = (
+                    f'title="Other cards tagged &quot;{tag_label}&quot; on Scryfall '
+                    '(community-curated function tags, not an AI guess)"'
+                )
+
+                def _scryfall_search_url(card_name: str) -> str:
+                    return "https://scryfall.com/search?q=" + urllib.parse.quote(f'!"{card_name}"')
+
+                owned_row_html = ""
+                if e.owned_alternatives:
+                    owned_links = " &middot; ".join(
+                        f'<a href="{_scryfall_search_url(name)}" target="_blank" rel="noopener noreferrer">'
+                        f'{html.escape(name)}</a>'
+                        for name in e.owned_alternatives
+                    )
+                    owned_row_html = (
+                        f'<div {title_attr}>&#9989; You already own (tagged &quot;{tag_label}&quot;): {owned_links}</div>'
+                    )
+
+                cheap_row_html = ""
+                if e.cheaper_alternatives:
+                    cheap_links = " &middot; ".join(
+                        f'<a href="{_scryfall_search_url(name)}" target="_blank" rel="noopener noreferrer">'
+                        f'{html.escape(name)} (${price:.2f})</a>'
+                        for name, price in e.cheaper_alternatives
+                    )
+                    cheap_row_html = (
+                        f'<div {title_attr}>&#128161; Cheaper to buy (tagged &quot;{tag_label}&quot;): {cheap_links}</div>'
+                    )
+
+                budget_alt_html = f'<div class="budget-alt-note">{owned_row_html}{cheap_row_html}</div>'
+
             nonfoil_cheapest = best_nonfoil[0][1] if best_nonfoil else None
             foil_cheapest = best_foil[0][1] if best_foil else None
             if nonfoil_cheapest is not None:
@@ -2782,6 +3094,7 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
       </div>
     </div>
   </div>
+  {budget_alt_html}
 </div>""")
 
         bucket_blocks.append(f"""<details class="bucket" open>
