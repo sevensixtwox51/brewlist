@@ -1,5 +1,7 @@
 # Brewlist
 
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/imtotallymeh)
+
 Compare a [Moxfield](https://moxfield.com) or [Archidekt](https://archidekt.com)
 decklist against your [ManaBox](https://manabox.app) card collection: see what
 you already own, what's missing, and what it'll cost to finish the deck at
@@ -144,6 +146,13 @@ stored locally under `data/`, which is excluded from version control
 (`.gitignore`). Nothing leaves your machine except the calls to Moxfield's,
 Archidekt's, Scryfall's, MTGJSON's, and (for Commander decks) Commander
 Spellbook's public APIs needed to fetch decklists, prices, and combos.
+
+## Support
+
+Brewlist is a free, personal project — if it's saved you time or money
+building your next deck, consider [buying me a coffee on
+Ko-fi](https://ko-fi.com/imtotallymeh). Not required, but always
+appreciated!
 
 ## Project layout
 

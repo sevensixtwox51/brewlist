@@ -1563,6 +1563,9 @@ header {{
 }}
 .home-link:hover {{ color: var(--accent); border-color: var(--accent); }}
 .shutdown-btn:hover {{ color: var(--missing); border-color: var(--missing); }}
+.kofi-link {{ display: flex; align-items: center; border-radius: 8px; overflow: hidden; }}
+.kofi-link img {{ display: block; height: 30px; width: auto; }}
+.kofi-link:hover {{ opacity: 0.85; }}
 .card-thumb.commander-thumb {{
   width: 60px;
   height: 84px;
@@ -2756,11 +2759,17 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
         shopping_button = ""
         instore_button = ""
 
+    kofi_html = (
+        '<a class="kofi-link" href="https://ko-fi.com/imtotallymeh" target="_blank" '
+        'rel="noopener noreferrer" title="Support Brewlist on Ko-fi">'
+        '<img src="https://storage.ko-fi.com/cdn/kofi5.png?v=3" alt="Support me on Ko-fi" loading="lazy"></a>'
+    )
     if overrides_endpoint:
         save_overrides_js = _post_overrides_js(overrides_endpoint)
         save_overrides_title = "Save which owned cards are reserved for other decks -- remembered automatically for this deck"
         header_actions_html = (
             '<div class="header-actions">'
+            f'{kofi_html}'
             '<a class="home-link" href="/">&larr; New comparison</a>'
             '<button type="button" class="shutdown-btn" id="shutdown-btn" title="Stops the local server">&#9209; Shut Down</button>'
             '</div>'
@@ -2771,7 +2780,7 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
             "Download a JSON file remembering which owned cards are reserved for other decks -- "
             "drop it in your ManaBox export folder and future runs will account for it automatically"
         )
-        header_actions_html = ""
+        header_actions_html = f'<div class="header-actions">{kofi_html}</div>'
 
     cheapest_pricing_html = (
         '<span class="price-basis-note" title="Every price reflects the cheapest paper printing found for that card">'
