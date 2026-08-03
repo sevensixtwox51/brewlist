@@ -75,14 +75,23 @@ Homebrew Python) and `pip3 install` refuses to run, add
 pip3 install --break-system-packages -r requirements.txt
 ```
 
+On Windows, use `pip` and `python` instead of `pip3`/`python3` if those
+aren't recognized (depends on how Python was installed).
+
 ## Updating
 
-Both the web app (a **Check for Updates** button on the home page) and the
-CLI (`python3 brewlist_cli.py --update`) can pull the latest code straight
-from GitHub with a plain `git pull` -- no separate download step, works the
-same on macOS, Windows, or Linux. This only works if you installed with
-`git clone` as shown above (not a downloaded ZIP); if it pulls new commits,
-restart the app afterward to actually run the new code.
+The web app has a **Check for Updates** button on the home page. From the
+CLI:
+
+```bash
+python3 brewlist_cli.py --update
+```
+
+Both pull the latest code straight from GitHub with a plain `git pull` --
+no separate download step, works the same on macOS, Windows, or Linux.
+This only works if you installed with `git clone` as shown above (not a
+downloaded ZIP); if it pulls new commits, restart the app afterward to
+actually run the new code.
 
 ## Usage: web app (recommended)
 
@@ -91,8 +100,21 @@ can't be opened because it is from an unidentified developer" -- this happens
 when the file was downloaded via a browser (e.g. GitHub's "Download ZIP"
 button) rather than `git clone`, which triggers macOS's Gatekeeper quarantine
 on unsigned scripts. Right-click the file and choose **Open** instead of
-double-clicking (bypasses it just for that file), or run
-`xattr -dr com.apple.quarantine Brewlist.command` in Terminal first.
+double-clicking (bypasses it just for that file), or run this in Terminal
+first:
+
+```bash
+xattr -dr com.apple.quarantine Brewlist.command
+```
+
+**Windows:** double-click `Brewlist.bat` in File Explorer.
+
+**Linux:** most file managers won't run a `.sh` file on double-click by
+default, so from a terminal in the `brewlist` folder:
+
+```bash
+./brewlist.sh
+```
 
 **Any OS / from a terminal:**
 
@@ -151,7 +173,11 @@ database described above (downloads automatically the first time, then
 instant). Use `--refresh-price-index` on its own to force-update that
 database sooner than its automatic weekly refresh.
 
-Run `python3 brewlist_cli.py --help` for the full flag list.
+Run this for the full flag list:
+
+```bash
+python3 brewlist_cli.py --help
+```
 
 ## Where your data lives
 
@@ -177,3 +203,5 @@ appreciated!
 | `app.py` | Flask web app. |
 | `brewlist_cli.py` | Terminal CLI (interactive menu or scriptable flags). |
 | `Brewlist.command` | macOS double-click launcher for the web app. |
+| `Brewlist.bat` | Windows double-click launcher for the web app. |
+| `brewlist.sh` | Linux/other-POSIX launcher for the web app (run from a terminal). |
