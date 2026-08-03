@@ -8,15 +8,22 @@ overrides per project (deck) between visits. No terminal required.
 Run it with:
     python3 app.py
 
-Then open http://localhost:5000
+It finds a free port automatically and opens your browser to it -- same
+behavior on macOS, Windows, and Linux (see _find_free_port/_open_browser_when_ready
+below). Set PORT to force a specific one instead.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import socket
 import threading
+import time
+import urllib.error
+import urllib.request
 import uuid
+import webbrowser
 from datetime import datetime, timezone
 
 from flask import Flask, Response, abort, jsonify, request
@@ -716,8 +723,39 @@ def shutdown():
     return {"ok": True}
 
 
+def _find_free_port(start: int = 5050, attempts: int = 50) -> int:
+    """First port >= start that isn't already bound -- macOS's AirPlay
+    Receiver often squats on 5000, so 5050 is a friendlier default. Pure
+    stdlib (socket), so this behaves identically on macOS/Windows/Linux."""
+    port = start
+    for _ in range(attempts):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            if s.connect_ex(("127.0.0.1", port)) != 0:
+                return port
+        port += 1
+    return start  # give up scanning -- let Flask's own bind error surface
+
+
+def _open_browser_when_ready(url: str, timeout: float = 15.0) -> None:
+    """Polls `url` until the server actually answers, then opens the user's
+    default browser -- webbrowser.open() picks the right mechanism per OS
+    on its own (macOS 'open', Windows os.startfile, Linux xdg-open/$BROWSER),
+    so this needs no OS-specific code. Runs in a background thread since
+    app.run() below blocks the main one."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            urllib.request.urlopen(url, timeout=0.5)
+            webbrowser.open(url)
+            return
+        except (urllib.error.URLError, OSError):
+            time.sleep(0.3)
+
+
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
+    explicit_port = os.environ.get("PORT")
+    port = int(explicit_port) if explicit_port else _find_free_port()
+    threading.Thread(target=_open_browser_when_ready, args=(f"http://localhost:{port}",), daemon=True).start()
     # use_reloader=False: the reloader runs the app in a child process and
     # respawns it on exit, which would silently undo the /shutdown route above.
     # debug=True is kept for friendly in-browser tracebacks if something breaks.

@@ -86,10 +86,7 @@ restart the app afterward to actually run the new code.
 
 ## Usage: web app (recommended)
 
-**macOS:** double-click `Brewlist.command` in Finder. It finds a free
-port automatically, starts the app, and opens your browser to it. Closing
-the terminal window (or the "Shut Down" button in the page itself) stops
-the server.
+**macOS:** double-click `Brewlist.command` in Finder.
 
 **Any OS / from a terminal:**
 
@@ -97,10 +94,12 @@ the server.
 python3 app.py
 ```
 
-Then open **http://localhost:5000**. (macOS's AirPlay Receiver often
-squats on port 5000 — if you hit a "port in use" error, either disable it
-in *System Settings → General → AirDrop & Handoff*, or run on a different
-port: `PORT=5050 python3 app.py`.)
+Either way, it finds a free port automatically (starting at 5050, since
+macOS's AirPlay Receiver often squats on 5000) and opens your browser to
+it -- same behavior on macOS, Windows, and Linux. Closing the terminal
+window (or the "Shut Down" button in the page itself) stops the server.
+Set `PORT` (e.g. `PORT=6000 python3 app.py`) to force a specific port
+instead of auto-picking one.
 
 From there:
 
