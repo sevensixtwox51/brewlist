@@ -135,14 +135,17 @@ class CardEntry:
     # Functional-alternative suggestions for this (missing) card -- see
     # budget_alt_data_in_index / _compute_budget_alt_groups. cheaper_alt_tag
     # is the Scryfall Oracle Tag label used to find them (e.g. "mana rock").
-    # owned_alternatives: display names of same-role cards you already own
-    # (free -- shown regardless of their own market price). cheaper_alternatives:
-    # [(name, price), ...] for same-role cards you don't own, cheapest
-    # first, guaranteed cheaper than this card's own price. Only set for
-    # missing cards priced above BUDGET_ALT_MIN_PRICE.
+    # owned_alternatives: [(display_name, scryfall_id), ...] for same-role
+    # cards you already own (free -- shown regardless of their own market
+    # price; scryfall_id is your actual owned printing, for a hover-preview
+    # image, None if unknown). cheaper_alternatives: [(name, price,
+    # scryfall_id), ...] for same-role cards you don't own, cheapest first,
+    # guaranteed cheaper than this card's own price (scryfall_id here is
+    # just a representative printing, not tied to any specific one you'd
+    # buy). Only set for missing cards priced above BUDGET_ALT_MIN_PRICE.
     cheaper_alt_tag: str | None = None
-    owned_alternatives: list[str] | None = None
-    cheaper_alternatives: list[tuple[str, float]] | None = None
+    owned_alternatives: list[tuple[str, str | None]] | None = None
+    cheaper_alternatives: list[tuple[str, float, str | None]] | None = None
     # Whether this card is on WotC's official Commander "Game Changers" list
     # -- see game_changers_in_index. Only set (and only meaningful) when
     # build_comparison was told this deck is Commander format; False otherwise.
@@ -681,7 +684,7 @@ PRICE_INDEX_MAX_AGE_DAYS = 7
 # v12: BUDGET_ALT_EXCLUDED_BRANCHES), since this is the only lever available
 # to force an immediate rebuild rather than waiting up to
 # PRICE_INDEX_MAX_AGE_DAYS for stale picks to self-heal.
-PRICE_INDEX_FORMAT_VERSION = 12
+PRICE_INDEX_FORMAT_VERSION = 13
 
 
 # --------------------------------------------------------------------------
@@ -836,7 +839,7 @@ def _latest_price(date_prices: dict) -> float | None:
 
 def _compute_budget_alt_groups(
     oracle_id_by_name: dict[str, str], display_name_by_name: dict[str, str],
-    is_land_by_name: dict[str, bool], tags_gz_path: str,
+    is_land_by_name: dict[str, bool], scryfall_id_by_name: dict[str, str], tags_gz_path: str,
 ) -> dict[str, dict]:
     """Precomputes "which cards share a functional role" groups, using
     Scryfall's Oracle Tags bulk file (community-curated functional tags
@@ -860,12 +863,15 @@ def _compute_budget_alt_groups(
     never worth failing the whole index build over.
 
     Returns {"tag_by_name": {name: tag_id}, "tag_labels": {tag_id: label},
-    "groups": {tag_id: [[name, display_name, is_land], ...]}} -- "groups"
-    only includes tag_ids that at least one card actually picked (via
-    tag_by_name), not every tag in the file. is_land lets build_comparison
-    restrict a land's suggested alternatives to other lands -- a creature
-    or spell sharing an oracle tag with a utility land isn't a drop-in
-    replacement for it in the mana base.
+    "groups": {tag_id: [[name, display_name, is_land, scryfall_id], ...]}}
+    -- "groups" only includes tag_ids that at least one card actually
+    picked (via tag_by_name), not every tag in the file. is_land lets
+    build_comparison restrict a land's suggested alternatives to other
+    lands -- a creature or spell sharing an oracle tag with a utility land
+    isn't a drop-in
+    replacement for it in the mana base. scryfall_id is just for a
+    hover-preview image (see scryfall_image_url) -- any printing works, so
+    it's not tied to a specific one.
     """
     try:
         name_by_oracle_id: dict[str, str] = {}
@@ -960,7 +966,10 @@ def _compute_budget_alt_groups(
                 nm = name_by_oracle_id.get(oid)
                 if nm and nm not in seen:
                     seen.add(nm)
-                    members.append([nm, display_name_by_name.get(nm, nm), is_land_by_name.get(nm, False)])
+                    members.append([
+                        nm, display_name_by_name.get(nm, nm), is_land_by_name.get(nm, False),
+                        scryfall_id_by_name.get(nm),
+                    ])
             if members:
                 groups[tag_id] = members
 
@@ -1044,6 +1053,11 @@ def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[
         # drop-in replacement for it in the mana base). See
         # _compute_budget_alt_groups / the is_land filter in build_comparison.
         is_land_by_name: dict[str, bool] = {}
+        # One representative printing's Scryfall ID per name -- just for a
+        # hover-preview image on budget-alternative suggestions (see
+        # scryfall_image_url), so it doesn't matter which printing; first
+        # one seen wins, same as display_name_by_name.
+        scryfall_id_by_name: dict[str, str] = {}
         for set_obj in all_printings.values():
             for card in set_obj.get("cards", []):
                 if "paper" not in (card.get("availability") or []):
@@ -1059,9 +1073,12 @@ def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[
                     continue
 
                 is_land = "Land" in (card.get("types") or [])
+                card_scryfall_id = (card.get("identifiers") or {}).get("scryfallId")
                 for nm in names:
                     display_name_by_name.setdefault(nm, face_name if (face_name and normalize_name(face_name) == nm) else name)
                     is_land_by_name.setdefault(nm, is_land)
+                    if card_scryfall_id:
+                        scryfall_id_by_name.setdefault(nm, card_scryfall_id)
 
                 if card.get("isGameChanger"):
                     game_changers.update(names)
@@ -1179,7 +1196,7 @@ def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[
         try:
             _download_to_file(tags_url, tags_tmp, None, 0, 0)
             budget_alt_groups = _compute_budget_alt_groups(
-                oracle_id_by_name, display_name_by_name, is_land_by_name, tags_tmp
+                oracle_id_by_name, display_name_by_name, is_land_by_name, scryfall_id_by_name, tags_tmp
             )
         except (urllib.error.URLError, urllib.error.HTTPError, OSError):
             pass
@@ -1694,25 +1711,29 @@ def build_comparison(
             tag_id = budget_alt["tag_by_name"].get(self_norm)
             group = budget_alt["groups"].get(tag_id) if tag_id else None
             if group:
-                owned_names: list[str] = []
-                cheap_candidates: list[tuple[str, float]] = []
-                for member_norm, member_display, member_is_land in group:
+                owned_alts: list[tuple[str, str | None]] = []
+                cheap_candidates: list[tuple[str, float, str | None]] = []
+                for member_norm, member_display, member_is_land, member_scryfall_id in group:
                     if member_norm == self_norm or member_is_land != self_is_land:
                         continue
                     member_owned = owned_collection.get(member_norm)
                     if member_owned and member_owned.total > 0:
-                        owned_names.append(member_display)
+                        # Show *your* printing's art, not a generic one --
+                        # same reasoning as _display_scryfall_id for owned
+                        # card tiles.
+                        owned_id = member_owned.printings[0].scryfall_id if member_owned.printings else member_scryfall_id
+                        owned_alts.append((member_display, owned_id))
                         continue
                     member_hit = by_name.get(member_norm) or {}
                     member_prices = [p for _label, p, _url in (member_hit.get("nonfoil") or [])]
                     if member_prices:
                         cheapest = min(member_prices)
                         if cheapest < self_price:
-                            cheap_candidates.append((member_display, cheapest))
-                if owned_names or cheap_candidates:
+                            cheap_candidates.append((member_display, cheapest, member_scryfall_id))
+                if owned_alts or cheap_candidates:
                     e.cheaper_alt_tag = budget_alt["tag_labels"].get(tag_id)
-                    if owned_names:
-                        e.owned_alternatives = owned_names[:BUDGET_ALT_MAX_RESULTS]
+                    if owned_alts:
+                        e.owned_alternatives = owned_alts[:BUDGET_ALT_MAX_RESULTS]
                     if cheap_candidates:
                         cheap_candidates.sort(key=lambda c: c[1])
                         e.cheaper_alternatives = cheap_candidates[:BUDGET_ALT_MAX_RESULTS]
@@ -2621,7 +2642,7 @@ priceSegBtns.forEach(btn => {{
 }});
 
 const hoverPreview = document.getElementById('hover-preview');
-document.querySelectorAll('.card-thumb[data-full]').forEach(img => {{
+document.querySelectorAll('.card-thumb[data-full], .alt-link[data-full]').forEach(img => {{
   img.addEventListener('mouseenter', () => {{
     hoverPreview.src = img.dataset.full;
     hoverPreview.classList.add('show');
@@ -3067,12 +3088,23 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
                 def _scryfall_search_url(card_name: str) -> str:
                     return "https://scryfall.com/search?q=" + urllib.parse.quote(f'!"{card_name}"')
 
+                def _alt_link(name: str, scryfall_id: str | None, label: str) -> str:
+                    # Reuses the same hover-preview mechanism as the main
+                    # card thumbnails (#hover-preview, see the shared JS
+                    # listener below) -- data-full is just omitted when no
+                    # scryfall_id is known, leaving a plain link.
+                    full_url = scryfall_image_url(scryfall_id) if scryfall_id else None
+                    full_attr = f' data-full="{html.escape(full_url)}"' if full_url else ""
+                    return (
+                        f'<a class="alt-link" href="{_scryfall_search_url(name)}"{full_attr} '
+                        f'target="_blank" rel="noopener noreferrer">{label}</a>'
+                    )
+
                 owned_row_html = ""
                 if e.owned_alternatives:
                     owned_links = " &middot; ".join(
-                        f'<a href="{_scryfall_search_url(name)}" target="_blank" rel="noopener noreferrer">'
-                        f'{html.escape(name)}</a>'
-                        for name in e.owned_alternatives
+                        _alt_link(name, scryfall_id, html.escape(name))
+                        for name, scryfall_id in e.owned_alternatives
                     )
                     owned_row_html = (
                         f'<div {title_attr}>&#9989; You already own (tagged &quot;{tag_label}&quot;): {owned_links}</div>'
@@ -3081,9 +3113,8 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
                 cheap_row_html = ""
                 if e.cheaper_alternatives:
                     cheap_links = " &middot; ".join(
-                        f'<a href="{_scryfall_search_url(name)}" target="_blank" rel="noopener noreferrer">'
-                        f'{html.escape(name)} (${price:.2f})</a>'
-                        for name, price in e.cheaper_alternatives
+                        _alt_link(name, scryfall_id, f'{html.escape(name)} (${price:.2f})')
+                        for name, price, scryfall_id in e.cheaper_alternatives
                     )
                     cheap_row_html = (
                         f'<div {title_attr}>&#128161; Cheaper to buy (tagged &quot;{tag_label}&quot;): {cheap_links}</div>'
