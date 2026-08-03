@@ -641,6 +641,31 @@ BUDGET_ALT_EXCLUDED_TAGS = {
     "single target instant/sorcery", "meme", "bible reference", "namesake spell",
     "full refund", "creature count matters",
 }
+# Whole administrative branches of Scryfall's tag hierarchy to exclude (see
+# _compute_budget_alt_groups, which walks every tag's full ancestor set --
+# a tag can have more than one parent -- to check membership). Found after
+# Mana Drain (a counterspell) got matched with Dark Ritual via its
+# "interrupt" tag ("This spell was an interrupt before Sixth Edition Rules
+# introduced the stack" -- a pre-6E rules-template classification, not a
+# functional role); a deliberate sweep of the full tag set for similar
+# "deprecated"/"obsolete" language turned up a sibling branch
+# ("deprecated mechanics", 17 tags like "old lifelink"/"deprecated p/t
+# counter") and a third ("type errata", creature-type correction metadata
+# like "type errata hound") that would have had the exact same problem.
+BUDGET_ALT_EXCLUDED_BRANCHES = {"deprecated card types", "deprecated mechanics", "type errata"}
+# A short, evidence-checked list of unambiguous "this is the card's actual
+# deck-building role" tags -- checked before the generic has-parent/fewest-
+# taggings heuristic below, since that heuristic alone still isn't reliable
+# enough: Mana Drain also carries "ritual" (67 taggings, has a parent) for
+# its delayed bonus-mana clause, which beats its real "counterspell" tag
+# (97 taggings) on count alone even after excluding "interrupt". Every
+# label here was confirmed to actually exist in Scryfall's tag set before
+# adding it, not guessed.
+BUDGET_ALT_PREFERRED_TAGS = {
+    "counterspell", "counterspell-soft", "protection", "recursion", "mana rock",
+    "ramp", "removal-exile", "spot removal", "tutor-card", "tutor-to-hand",
+    "discard", "fog", "extra turn", "sweeper", "pure draw", "draw",
+}
 
 _CORE_DIR = os.path.dirname(os.path.abspath(__file__))
 PRICE_INDEX_PATH = os.path.join(_CORE_DIR, "data", "price_index.json")
@@ -651,8 +676,12 @@ PRICE_INDEX_MAX_AGE_DAYS = 7
 # to a list of [store, price, url]; or the AllPricesToday -> AllPrices switch,
 # which added "nonfoil_trend"/"foil_trend") so a stale on-disk file from an
 # older version of this code is treated as needing a rebuild rather than
-# silently missing data or crashing.
-PRICE_INDEX_FORMAT_VERSION = 10
+# silently missing data or crashing. Also bumped for budget-alt tag-
+# selection logic fixes with no shape change (v11: BUDGET_ALT_PREFERRED_TAGS;
+# v12: BUDGET_ALT_EXCLUDED_BRANCHES), since this is the only lever available
+# to force an immediate rebuild rather than waiting up to
+# PRICE_INDEX_MAX_AGE_DAYS for stale picks to self-heal.
+PRICE_INDEX_FORMAT_VERSION = 12
 
 
 # --------------------------------------------------------------------------
@@ -843,25 +872,60 @@ def _compute_budget_alt_groups(
         for nm, oid in oracle_id_by_name.items():
             name_by_oracle_id.setdefault(oid, nm)
 
-        taggings_by_tag: dict[str, list[str]] = {}  # tag_id -> [oracle_id, ...]
-        tag_labels: dict[str, str] = {}
-        tag_has_parent: dict[str, bool] = {}
+        # Two passes: first collect every oracle tag's raw metadata (need the
+        # full set to walk parent_ids, including tags that turn out
+        # excluded), then build the filtered structures actually used below.
+        all_tags_by_id: dict[str, dict] = {}
         with gzip.open(tags_gz_path, "rt", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line:
                     continue
                 tag = json.loads(line)
-                if tag.get("type") != "oracle":
-                    continue
-                label = tag.get("label") or tag["id"]
-                if label in BUDGET_ALT_EXCLUDED_TAGS or "cycle" in label:
-                    continue
-                oids = [t["oracle_id"] for t in (tag.get("taggings") or []) if t.get("oracle_id")]
-                if oids:
-                    taggings_by_tag[tag["id"]] = oids
-                    tag_labels[tag["id"]] = label
-                    tag_has_parent[tag["id"]] = bool(tag.get("parent_ids"))
+                if tag.get("type") == "oracle":
+                    all_tags_by_id[tag["id"]] = tag
+
+        # Whole administrative branches to exclude, not just individual
+        # labels -- e.g. "deprecated mechanics" alone has 17 children like
+        # "old lifelink"/"deprecated p/t counter" that describe how old
+        # card templating worked, not what a card does today. Found by
+        # deliberately searching the full tag set for "deprecated"/
+        # "obsolete" after the "interrupt" bug (see BUDGET_ALT_EXCLUDED_TAGS)
+        # turned out to be one card type branch among several similar ones.
+        # A tag can have more than one parent_id, so this walks the full
+        # ancestor set, not just a single chain.
+        branch_root_ids = {
+            tid for tid, t in all_tags_by_id.items()
+            if (t.get("label") or "") in BUDGET_ALT_EXCLUDED_BRANCHES
+        }
+        branch_memo: dict[str, bool] = {}
+
+        def _under_excluded_branch(tag_id: str) -> bool:
+            if tag_id in branch_memo:
+                return branch_memo[tag_id]
+            branch_memo[tag_id] = False  # cycle guard while this id is in progress
+            tag = all_tags_by_id.get(tag_id)
+            result = False
+            if tag:
+                for pid in (tag.get("parent_ids") or []):
+                    if pid in branch_root_ids or _under_excluded_branch(pid):
+                        result = True
+                        break
+            branch_memo[tag_id] = result
+            return result
+
+        taggings_by_tag: dict[str, list[str]] = {}  # tag_id -> [oracle_id, ...]
+        tag_labels: dict[str, str] = {}
+        tag_has_parent: dict[str, bool] = {}
+        for tag_id, tag in all_tags_by_id.items():
+            label = tag.get("label") or tag_id
+            if label in BUDGET_ALT_EXCLUDED_TAGS or "cycle" in label or _under_excluded_branch(tag_id):
+                continue
+            oids = [t["oracle_id"] for t in (tag.get("taggings") or []) if t.get("oracle_id")]
+            if oids:
+                taggings_by_tag[tag_id] = oids
+                tag_labels[tag_id] = label
+                tag_has_parent[tag_id] = bool(tag.get("parent_ids"))
 
         tags_by_oracle_id: dict[str, list[tuple[str, int]]] = {}
         for tag_id, oids in taggings_by_tag.items():
@@ -877,10 +941,14 @@ def _compute_budget_alt_groups(
             ]
             if not candidate_tags:
                 continue
-            # Prefer a tag with a parent (a specific sub-category, e.g.
+            # Prefer a known-unambiguous role tag (BUDGET_ALT_PREFERRED_TAGS)
+            # first; then a tag with a parent (a specific sub-category, e.g.
             # "mana rock") over a root-level tag; within each tier, prefer
             # the fewest total taggings (more specific/useful).
-            tag_id, _count = min(candidate_tags, key=lambda t: (not tag_has_parent[t[0]], t[1]))
+            tag_id, _count = min(
+                candidate_tags,
+                key=lambda t: (tag_labels[t[0]] not in BUDGET_ALT_PREFERRED_TAGS, not tag_has_parent[t[0]], t[1]),
+            )
             tag_by_name[nm] = tag_id
 
         needed_tag_ids = set(tag_by_name.values())
