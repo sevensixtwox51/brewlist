@@ -37,6 +37,7 @@ from brewlist_core import (
     price_index_built_at,
     render_html,
     save_store_prefs,
+    update_from_git,
 )
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -345,6 +346,12 @@ def render_home_page(error: str | None = None, prefill_url: str = "") -> str:
     <button type="button" class="btn ghost small" id="refresh-index-btn">&#128260; Refresh Database</button>
     <div id="refresh-index-label" class="hint" style="display:none;margin-top:8px;"></div>
   </div>
+  <div class="card" id="update-card">
+    <label>App updates</label>
+    <div class="hint" style="margin-top:-8px;margin-bottom:8px;">Pulls the latest Brewlist code from GitHub -- only works if this was installed with 'git clone'.</div>
+    <button type="button" class="btn ghost small" id="check-updates-btn">&#8635; Check for Updates</button>
+    <div id="update-label" class="hint" style="margin-top:8px;"></div>
+  </div>
 </main>
 <script>
 const form = document.getElementById('compare-form');
@@ -487,6 +494,23 @@ refreshIndexBtn.addEventListener('click', () => {{
       refreshIndexBtn.disabled = false;
     }});
 }});
+
+const checkUpdatesBtn = document.getElementById('check-updates-btn');
+const updateLabel = document.getElementById('update-label');
+checkUpdatesBtn.addEventListener('click', () => {{
+  checkUpdatesBtn.disabled = true;
+  updateLabel.textContent = 'Checking\\u2026';
+  fetch('/update/check', {{ method: 'POST' }})
+    .then(r => r.json())
+    .then(data => {{
+      updateLabel.textContent = data.message;
+      checkUpdatesBtn.disabled = false;
+    }})
+    .catch(() => {{
+      updateLabel.textContent = 'Could not reach the server.';
+      checkUpdatesBtn.disabled = false;
+    }});
+}});
 </script>
 </body>
 </html>
@@ -541,6 +565,16 @@ def refresh_price_index():
 
     threading.Thread(target=_run, daemon=True).start()
     return jsonify(job_id=job_id)
+
+
+@app.route("/update/check", methods=["POST"])
+def check_for_updates():
+    """Runs `git pull` in the app's own directory -- the home page's "Check
+    for Updates" button. Synchronous (a git pull on a small text repo is
+    fast, no need for the job-polling machinery the price index download
+    uses). See update_from_git in brewlist_core.py for what each field of
+    the response means."""
+    return jsonify(update_from_git(APP_DIR))
 
 
 @app.route("/compare/start", methods=["POST"])

@@ -17,6 +17,7 @@ import json
 import math
 import os
 import re
+import subprocess
 import time
 import unicodedata
 import urllib.error
@@ -29,7 +30,7 @@ __all__ = [
     "normalize_name", "find_collection_candidates", "load_collection", "load_overrides",
     "fetch_scryfall_prices_by_id", "price_for_printing", "select_used_printings",
     "price_index_age_days", "price_index_built_at", "rebuild_price_index", "ensure_price_index", "game_changers_in_index",
-    "load_store_prefs", "save_store_prefs", "STORE_LABELS", "STORE_DISPLAY_NAMES",
+    "load_store_prefs", "save_store_prefs", "STORE_LABELS", "STORE_DISPLAY_NAMES", "update_from_git",
     "EXTRA_STORE_LABELS", "PICKABLE_STORE_LABELS",
     "commander_legality_in_index", "deck_is_commander_format",
     "find_deck_combos", "estimate_deck_bracket", "BRACKET_TAG_LABELS", "scryfall_prices_in_index",
@@ -587,6 +588,52 @@ PRICE_INDEX_MAX_AGE_DAYS = 7
 # older version of this code is treated as needing a rebuild rather than
 # silently missing data or crashing.
 PRICE_INDEX_FORMAT_VERSION = 7
+
+
+# --------------------------------------------------------------------------
+# Self-update -- a plain `git pull`, run via subprocess (never a shell
+# string or an OS-specific script) so it behaves identically on macOS,
+# Windows, and Linux as long as git is on PATH. Requires the repo to have
+# been `git clone`d (not downloaded as a ZIP) and be public so a plain
+# `git pull` needs no credentials -- see README.
+# --------------------------------------------------------------------------
+
+def update_from_git(path: str = _CORE_DIR) -> dict:
+    """Pulls the latest code from the repo `path` is inside (defaults to
+    this module's own directory). Returns {"ok", "updated", "message"}:
+
+    - ok=False: git isn't installed, this isn't a git checkout, or the pull
+      itself failed (e.g. local edits conflict with the update) -- "message"
+      explains why, safe to show directly to the user.
+    - ok=True, updated=False: already on the latest version.
+    - ok=True, updated=True: pulled new commits -- the running process is
+      still the old code (Python doesn't hot-reload already-imported
+      modules), so the app needs restarting to actually use them.
+    """
+    if not os.path.isdir(os.path.join(path, ".git")):
+        return {
+            "ok": False, "updated": False,
+            "message": "This doesn't look like a git checkout -- if you downloaded a ZIP instead of "
+                       "running 'git clone', re-install with git to enable updates.",
+        }
+    try:
+        result = subprocess.run(
+            ["git", "pull", "--ff-only"],
+            cwd=path, capture_output=True, text=True, errors="replace", timeout=30,
+        )
+    except FileNotFoundError:
+        return {"ok": False, "updated": False, "message": "git isn't installed (or isn't on your PATH) -- install it to enable updates."}
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "updated": False, "message": "Timed out reaching GitHub -- check your connection and try again."}
+
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "git pull failed").strip()
+        return {"ok": False, "updated": False, "message": detail}
+
+    output = (result.stdout or "").strip()
+    updated = "up to date" not in output.lower()
+    message = "Updated! Restart Brewlist to use the new version." if updated else "Already up to date."
+    return {"ok": True, "updated": updated, "message": message}
 
 
 def load_store_prefs(path: str = STORE_PREFS_PATH) -> list[str]:

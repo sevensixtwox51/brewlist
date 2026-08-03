@@ -57,6 +57,7 @@ Markdown/HTML/CSV reports on disk).
 
 - Python 3.9+ (developed and tested on 3.14)
 - pip
+- git (needed to install and to check for updates -- see below)
 
 ## Install
 
@@ -73,6 +74,15 @@ Homebrew Python) and `pip3 install` refuses to run, add
 ```bash
 pip3 install --break-system-packages -r requirements.txt
 ```
+
+## Updating
+
+Both the web app (a **Check for Updates** button on the home page) and the
+CLI (`python3 brewlist_cli.py --update`) can pull the latest code straight
+from GitHub with a plain `git pull` -- no separate download step, works the
+same on macOS, Windows, or Linux. This only works if you installed with
+`git clone` as shown above (not a downloaded ZIP); if it pulls new commits,
+restart the app afterward to actually run the new code.
 
 ## Usage: web app (recommended)
 

@@ -151,6 +151,7 @@ from brewlist_core import (
     parse_deck_ref,
     render_html,
     render_markdown,
+    update_from_git,
     write_missing_csv,
 )
 
@@ -363,6 +364,18 @@ def refresh_price_index_cli() -> None:
     console.print(f"[green]Card database refreshed -- {len(index)} unique card names.[/green]")
 
 
+def update_cli() -> None:
+    """Pulls the latest Brewlist code from GitHub and exits -- the --update
+    flag. Plain `git pull`, so it only works if this was installed with
+    'git clone' (not a downloaded ZIP)."""
+    with console.status("Checking for updates..."):
+        result = update_from_git()
+    if not result["ok"]:
+        raise SystemExit(result["message"])
+    style = "green" if result["updated"] else "dim"
+    console.print(f"[{style}]{result['message']}[/{style}]")
+
+
 # --------------------------------------------------------------------------
 # Core run
 # --------------------------------------------------------------------------
@@ -516,10 +529,17 @@ def main():
                               "TCGPlayer, Card Kingdom, and ManaPool, price trends, Game Changers, and "
                               "Commander legality all come from it). Normally this refreshes itself "
                               "automatically once a week -- use this to update it sooner.")
+    parser.add_argument("--update", action="store_true",
+                         help="Pull the latest Brewlist code from GitHub and exit. Only works if this was "
+                              "installed with 'git clone' (not a downloaded ZIP).")
     args = parser.parse_args()
 
     if args.refresh_price_index:
         refresh_price_index_cli()
+        return
+
+    if args.update:
+        update_cli()
         return
 
     if args.deck is None:
