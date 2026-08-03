@@ -22,7 +22,11 @@ Markdown/HTML/CSV reports on disk).
   happens to reference
 - Prices **missing** cards from the true cheapest printing available across
   TCGPlayer, Card Kingdom, and ManaPool (decklists sometimes reference a
-  rare, much pricier alt-art printing by default), foil and non-foil toggle
+  rare, much pricier alt-art printing by default), foil and non-foil toggle.
+  Pick which stores to price from on the home page (all three checked by
+  default, saved for next time) — Cardmarket is also available as a 4th,
+  opt-in option, shown separately in EUR since it's never blended into any
+  dollar total or "cheapest" comparison
 - All pricing comes from a local index built from MTGJSON's public bulk
   data, so every comparison is accurate from the first click — no separate
   "accurate pricing" step to run. The index is a one-time ~325MB download,
@@ -49,9 +53,13 @@ Markdown/HTML/CSV reports on disk).
   also flags mass-land-denial and extra-turn cards and gives its own
   power/style rating for the deck (not the official WotC bracket system)
 - Total deck value at today's market price, plus the owned portion
-- Groups missing cards the way a physical store organizes its binders
-  (Lands, Artifacts, then Colors split into mono-color / Multicolor /
-  Colorless bins) for an exportable in-store shopping CSV
+- A **Shopping List** button opens a plain-text, alphabetized list of
+  what's still missing (quantity + name), pre-selected and one click away
+  from your clipboard
+- A separate **Export In-Store CSV** button groups missing cards the way a
+  physical store organizes its binders (Lands, Artifacts, then Colors
+  split into mono-color / Multicolor / Colorless bins) as a downloadable
+  CSV file
 - A price slider to cap what you're willing to spend per card
 - Per-card "reserved for another deck" overrides, so a card you technically
   own but have committed to a different build still shows as needed here —
@@ -187,8 +195,9 @@ python3 brewlist_cli.py --help
 ## Where your data lives
 
 Everything the app remembers — your uploaded collection, any saved
-per-deck overrides, and the local card database (see above) — is
-stored locally under `data/`, which is excluded from version control
+per-deck overrides, your store-pricing preference, and the local card
+database (see above) — is stored locally under `data/`, which is excluded
+from version control
 (`.gitignore`). Nothing leaves your machine except the calls to Moxfield's,
 Archidekt's, Scryfall's, MTGJSON's, and (for Commander decks) Commander
 Spellbook's public APIs needed to fetch decklists, prices, and combos.
