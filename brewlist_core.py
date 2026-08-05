@@ -2897,10 +2897,17 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
     bracket_tag = totals.get("bracket_tag")
     if is_commander_format and bracket_tag:
         label = BRACKET_TAG_LABELS.get(bracket_tag, bracket_tag)
+        # Same URL shape as commanderspellbook.com/find-my-combos/ itself
+        # uses for its own "paste your decklist url" field (confirmed live,
+        # not guessed) -- lets a user see Spellbook's own fuller breakdown
+        # (an estimated WotC bracket *number*, plus why) for this exact deck.
+        spellbook_url = "https://commanderspellbook.com/find-my-combos/?deckUrl=" + urllib.parse.quote(deck_url, safe="")
         bracket_tag_html = (
             '<div class="stat-sub" title="Commander Spellbook\'s own power/style rating for this deck -- '
             'not the official WotC Bracket 1-5 system">Commander Spellbook rating: '
-            f'<b>{html.escape(label)}</b></div>'
+            f'<b>{html.escape(label)}</b> '
+            f'<a href="{html.escape(spellbook_url)}" target="_blank" rel="noopener noreferrer">'
+            'see on Commander Spellbook &rarr;</a></div>'
         )
 
     combos_html = ""
