@@ -2904,10 +2904,10 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
         spellbook_url = "https://commanderspellbook.com/find-my-combos/?deckUrl=" + urllib.parse.quote(deck_url, safe="")
         bracket_tag_html = (
             '<div class="stat-sub" title="Commander Spellbook\'s own power/style rating for this deck -- '
-            'not the official WotC Bracket 1-5 system">Commander Spellbook rating: '
-            f'<b>{html.escape(label)}</b> '
+            'not the official WotC Bracket 1-5 system, click to see their full breakdown">'
+            'Commander Spellbook rating: '
             f'<a href="{html.escape(spellbook_url)}" target="_blank" rel="noopener noreferrer">'
-            'see on Commander Spellbook &rarr;</a></div>'
+            f'<b>{html.escape(label)}</b></a></div>'
         )
 
     combos_html = ""
