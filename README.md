@@ -99,8 +99,14 @@ aren't recognized (depends on how Python was installed).
 
 ## Updating
 
-The web app has a **Check for Updates** button on the home page. From the
-CLI:
+Both the web app and CLI also check automatically every time you launch
+them, and only say something if there's actually an update (a banner on
+the home page, or a line printed before the menu/comparison starts) --
+silent otherwise, so a normal launch isn't cluttered with "already up to
+date" every time.
+
+To check on demand instead: the web app has a **Check for Updates** button
+on the home page. From the CLI:
 
 ```bash
 python3 brewlist_cli.py --update

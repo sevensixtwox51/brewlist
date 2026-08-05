@@ -125,6 +125,20 @@ def collection_meta() -> dict | None:
 _JOBS_LOCK = threading.Lock()
 JOBS: dict[str, dict] = {}
 
+# Populated once by a background check kicked off at server startup (see
+# __main__) -- the home page reads this to show a banner if an update was
+# actually pulled. Left at "checked": False if the check hasn't finished
+# yet (or the process wasn't started via `python3 app.py`, e.g. tests
+# importing this module directly).
+_STARTUP_UPDATE_LOCK = threading.Lock()
+STARTUP_UPDATE: dict = {"checked": False, "ok": None, "updated": None, "message": None}
+
+
+def _check_for_updates_on_launch() -> None:
+    result = update_from_git(APP_DIR)
+    with _STARTUP_UPDATE_LOCK:
+        STARTUP_UPDATE.update(checked=True, **result)
+
 
 def _run_compare_job(job_id, entries, owned, break_out_basics, reserved,
                       deck_id, deck_name, deck_url, options, is_commander_format=False, stores=None):
@@ -240,6 +254,8 @@ input[type="text"], input[type="url"], input[type="file"] {
 .project-list .when { color: var(--text-dim); font-size: 0.8rem; white-space: nowrap; }
 .error { color: var(--missing); background: color-mix(in srgb, var(--missing) 12%, var(--bg-elevated));
   border: 1px solid var(--missing); border-radius: 8px; padding: 12px 16px; margin-bottom: 20px; }
+.update-banner { color: var(--owned); background: color-mix(in srgb, var(--owned) 12%, var(--bg-elevated));
+  border: 1px solid var(--owned); border-radius: 8px; padding: 12px 16px; margin-bottom: 20px; }
 #progress-wrap { display: none; margin-top: 14px; }
 .progress-track { height: 8px; background: var(--card-border); border-radius: 4px; overflow: hidden; }
 .progress-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--owned), var(--accent)); transition: width 0.2s ease; }
@@ -272,6 +288,16 @@ def render_home_page(error: str | None = None, prefill_url: str = "") -> str:
         projects_html = ""
 
     error_html = f'<div class="error">{_esc(error)}</div>' if error else ""
+
+    with _STARTUP_UPDATE_LOCK:
+        startup_update = dict(STARTUP_UPDATE)
+    if startup_update.get("checked") and startup_update.get("ok") and startup_update.get("updated"):
+        update_banner_html = (
+            '<div class="update-banner">&#9889; Brewlist was just updated to the latest version -- '
+            'restart the app to use it.</div>'
+        )
+    else:
+        update_banner_html = ""
 
     index_built_at = price_index_built_at()
     if index_built_at is None:
@@ -321,6 +347,7 @@ def render_home_page(error: str | None = None, prefill_url: str = "") -> str:
     </div>
     <button type="button" class="btn small danger" id="shutdown-btn" title="Stops the local server">&#9209; Shut Down</button>
   </div>
+  {update_banner_html}
   <div id="error-box" class="error" style="display:{"block" if error else "none"};">{_esc(error) if error else ""}</div>
   {projects_html}
   <form class="card" id="compare-form">
@@ -756,6 +783,7 @@ if __name__ == "__main__":
     explicit_port = os.environ.get("PORT")
     port = int(explicit_port) if explicit_port else _find_free_port()
     threading.Thread(target=_open_browser_when_ready, args=(f"http://localhost:{port}",), daemon=True).start()
+    threading.Thread(target=_check_for_updates_on_launch, daemon=True).start()
     # use_reloader=False: the reloader runs the app in a child process and
     # respawns it on exit, which would silently undo the /shutdown route above.
     # debug=True is kept for friendly in-browser tracebacks if something breaks.

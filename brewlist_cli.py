@@ -376,6 +376,21 @@ def update_cli() -> None:
     console.print(f"[{style}]{result['message']}[/{style}]")
 
 
+def _check_for_updates_on_launch() -> None:
+    """Runs on every normal launch (not for --update/--refresh-price-index,
+    which already have their own explicit flow) -- silent unless an update
+    was actually found and pulled, since most launches have nothing to
+    report and a message every time would just be noise. Never raises: a
+    network hiccup or a non-git install here shouldn't block using the
+    app, only --update itself is allowed to fail loudly."""
+    try:
+        result = update_from_git()
+    except Exception:  # noqa: BLE001 -- this must never block a normal run
+        return
+    if result.get("ok") and result.get("updated"):
+        console.print(f"[green]⚡ {result['message']}[/green]\n")
+
+
 # --------------------------------------------------------------------------
 # Core run
 # --------------------------------------------------------------------------
@@ -541,6 +556,8 @@ def main():
     if args.update:
         update_cli()
         return
+
+    _check_for_updates_on_launch()
 
     if args.deck is None:
         run_interactive()
