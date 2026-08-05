@@ -55,9 +55,17 @@ Markdown/HTML/CSV reports on disk).
   exactly one card away from completing — via
   [Commander Spellbook](https://commanderspellbook.com)'s public API, which
   also flags mass-land-denial and extra-turn cards and gives its own
-  power/style rating for the deck (not the official WotC bracket system)
+  power/style rating for the deck (not the official WotC bracket system,
+  but linked out to Commander Spellbook's own page for the deck, which
+  shows more detail)
 
   ![Combos panel](screenshots/combos.png)
+- Alongside that, an **Estimated Bracket** (1-2 / 3 / 4+) computed straight
+  from WotC's own published Commander Brackets rules — Game Changers
+  count, mass land denial, two-card combos, and extra-turn cards, all data
+  the app already has. Brackets 1-2 and 4-5 genuinely aren't
+  distinguishable from a decklist alone per WotC's own text, so those
+  report as a range rather than guessing
 - Total deck value at today's market price, plus the owned portion
 - A **Shopping List** button opens a plain-text, alphabetized list of
   what's still missing (quantity + name), pre-selected and one click away

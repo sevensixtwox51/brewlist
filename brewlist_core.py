@@ -35,6 +35,7 @@ __all__ = [
     "EXTRA_STORE_LABELS", "PICKABLE_STORE_LABELS",
     "commander_legality_in_index", "deck_is_commander_format",
     "find_deck_combos", "estimate_deck_bracket", "BRACKET_TAG_LABELS", "scryfall_prices_in_index",
+    "estimate_wotc_bracket", "WOTC_BRACKET_LABELS",
     "budget_alt_data_in_index", "BUDGET_ALT_MIN_PRICE",
     "PRICE_INDEX_PATH", "PRICE_INDEX_MAX_AGE_DAYS",
     "categorize", "shopping_group", "shopping_group_rank",
@@ -1421,6 +1422,60 @@ def estimate_deck_bracket(entries: list[CardEntry]) -> dict | None:
     return {"tag": data["bracketTag"], "cards": cards, "combo_count": len(data.get("combos") or [])}
 
 
+# WotC's own published deck-building rules per bracket (from "Introducing
+# Commander Brackets Beta", magic.wizards.com -- fetched and read directly,
+# not paraphrased from memory):
+#   Bracket 1 (Exhibition) / Bracket 2 (Core): 0 Game Changers, no
+#     intentional two-card infinite combos, no mass land denial. Bracket 1
+#     additionally forbids extra-turn cards outright; Bracket 2 allows them
+#     only "in low quantities". The two brackets aren't otherwise
+#     distinguishable from decklist content alone (the difference is deck
+#     polish/strength, not a rule), so this estimator reports "1-2" rather
+#     than guessing between them.
+#   Bracket 3 (Upgraded): up to 3 Game Changers, no mass land denial, no
+#     *early-game, cheap* two-card combos specifically (a nuance this
+#     estimator can't reliably detect -- see EXTRA_TURN_LOW_QUANTITY_MAX
+#     below), extra-turn cards in low quantities.
+#   Bracket 4 (Optimized) / Bracket 5 (cEDH): no deck-building restrictions
+#     at all. The two are explicitly a playstyle/mindset distinction, not
+#     a rules one -- not detectable from a decklist, so this estimator
+#     reports "4+".
+WOTC_BRACKET_GAME_CHANGER_MAX = {1: 0, 2: 0, 3: 3}
+# WotC's own text says extra-turn cards are fine in "low quantities" for
+# Brackets 2-3 without giving a number -- this is our own reasonable
+# reading of that, not a verified official threshold, and is called out
+# as such wherever it's shown.
+EXTRA_TURN_LOW_QUANTITY_MAX = 2
+WOTC_BRACKET_LABELS = {
+    "1-2": "Exhibition / Core", "3": "Upgraded", "4+": "Optimized / cEDH",
+}
+
+
+def estimate_wotc_bracket(
+    game_changers_count: int, has_two_card_combo: bool, has_mass_land_denial: bool, extra_turn_count: int
+) -> tuple[str, str] | None:
+    """Estimates which of WotC's own official Commander Brackets (1-5) a
+    deck fits, straight from their own published deck-building rules (see
+    the constants above) -- a different thing from BRACKET_TAG_LABELS,
+    which is Commander Spellbook's own separate community power/style tag.
+    Every input here is data build_comparison already has (Game Changers
+    count, mass-land-denial/extra-turn flags, and completed combos, all
+    from the same estimate-bracket/find-my-combos Commander Spellbook
+    calls it already makes) -- no extra network request.
+
+    Brackets 1-2 and 4-5 genuinely aren't distinguishable from a decklist
+    alone per WotC's own text (see comment above), so this returns one of
+    three buckets: ("1-2", "Exhibition / Core"), ("3", "Upgraded"), or
+    ("4+", "Optimized / cEDH")."""
+    if has_mass_land_denial:
+        return ("4+", WOTC_BRACKET_LABELS["4+"])
+    if game_changers_count == 0 and not has_two_card_combo and extra_turn_count == 0:
+        return ("1-2", WOTC_BRACKET_LABELS["1-2"])
+    if game_changers_count <= WOTC_BRACKET_GAME_CHANGER_MAX[3] and extra_turn_count <= EXTRA_TURN_LOW_QUANTITY_MAX:
+        return ("3", WOTC_BRACKET_LABELS["3"])
+    return ("4+", WOTC_BRACKET_LABELS["4+"])
+
+
 def price_for_printing(scryfall_prices: dict, printing: OwnedPrinting) -> float | None:
     """Pick the right price field for a specific owned printing/finish, falling
     back to whatever finish that printing *does* have priced rather than nothing."""
@@ -1681,6 +1736,20 @@ def build_comparison(
                     e.mass_land_denial = info["massLandDenial"]
                     e.extra_turn = info["extraTurn"]
 
+    # Our own estimate of WotC's official Bracket (1-5), from their own
+    # published rules -- see estimate_wotc_bracket. Needs both Commander
+    # Spellbook calls above to have actually succeeded (mass-land-denial/
+    # extra-turn flags come from bracket_estimate, two-card-combo detection
+    # from combos) -- if either failed, we don't have a full enough signal
+    # to estimate responsibly, so this stays None rather than risk an
+    # under-informed (and likely too-low) guess.
+    wotc_bracket = None
+    if is_commander_format and bracket_estimate and combos is not None:
+        has_two_card_combo = any(len(c.get("uses") or []) <= 2 for c in (combos.get("included") or []))
+        has_mass_land_denial = any(e.mass_land_denial for e in entries)
+        extra_turn_count = sum(1 for e in entries if e.extra_turn)
+        wotc_bracket = estimate_wotc_bracket(game_changers_count, has_two_card_combo, has_mass_land_denial, extra_turn_count)
+
     budget_alt = budget_alt_data_in_index()
 
     buckets: dict[str, list[CardResult]] = {}
@@ -1694,6 +1763,7 @@ def build_comparison(
         "banned_count": banned_count,  # only meaningful when is_commander_format was set
         "combos": combos,  # {"included": [...], "almost_included": [...], "almost_total": N} or None
         "bracket_tag": bracket_estimate["tag"] if bracket_estimate else None,
+        "wotc_bracket": wotc_bracket,  # (short_label, full_name) e.g. ("3", "Upgraded"), or None
     }
 
     for e, have, shortfall, owned_used, picks, remainder, reserved_qty in per_entry:
@@ -2468,6 +2538,7 @@ footer {{
     {game_changers_html}
     {legality_html}
     {bracket_tag_html}
+    {wotc_bracket_html}
     <div class="progress-labeled" title="Share of this deck you already own">
       <span class="progress-label">Deck completion <b id="progress-pct">{pct:.0f}%</b></span>
       <div class="progress"><div id="progress-bar" style="width:{pct:.1f}%"></div></div>
@@ -2910,6 +2981,21 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
             f'<b>{html.escape(label)}</b></a></div>'
         )
 
+    wotc_bracket_html = ""
+    wotc_bracket = totals.get("wotc_bracket")
+    if is_commander_format and wotc_bracket:
+        short_label, full_name = wotc_bracket
+        wotc_bracket_html = (
+            '<div class="stat-sub" title="Our own estimate from WotC\'s own published Bracket rules '
+            '(Game Changers count, mass land denial, two-card combos, extra-turn cards) -- brackets 1/2 and '
+            '4/5 aren\'t distinguishable from a decklist alone, so this reports the narrowest honest range. '
+            'Click to read WotC\'s own criteria.">'
+            'Estimated Bracket: '
+            '<a href="https://magic.wizards.com/en/news/announcements/introducing-commander-brackets-beta" '
+            f'target="_blank" rel="noopener noreferrer"><b>{html.escape(short_label)}</b> '
+            f'({html.escape(full_name)})</a></div>'
+        )
+
     combos_html = ""
     if is_commander_format:
         combos_data = totals.get("combos")
@@ -3266,6 +3352,7 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
         game_changers_html=game_changers_html,
         legality_html=legality_html,
         bracket_tag_html=bracket_tag_html,
+        wotc_bracket_html=wotc_bracket_html,
         combos_html=combos_html,
         pct=pct,
         buckets_html="\n".join(bucket_blocks),
