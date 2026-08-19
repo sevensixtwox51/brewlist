@@ -278,7 +278,7 @@ def render_home_page(error: str | None = None, prefill_url: str = "") -> str:
     projects = list_projects()
     if projects:
         items = "".join(
-            f'<li><a href="/?deck={_esc(p.get("deck_url", p.get("deck_id", "")))}">'
+            f'<li><a href="#" class="recent-deck-link" data-url="{_esc(p.get("deck_url", p.get("deck_id", "")))}">'
             f'{_esc(p.get("deck_name", p.get("deck_id", "unknown")))}</a>'
             f'<span class="when">{_esc((p.get("updated") or "")[:16].replace("T", " "))}</span></li>'
             for p in projects[:15]
@@ -394,6 +394,15 @@ const progressWrap = document.getElementById('progress-wrap');
 const progressFill = document.getElementById('progress-fill');
 const progressLabel = document.getElementById('progress-label');
 const errorBox = document.getElementById('error-box');
+const moxfieldUrlInput = document.getElementById('moxfield_url');
+
+document.querySelectorAll('.recent-deck-link').forEach(link => {{
+  link.addEventListener('click', (e) => {{
+    e.preventDefault();
+    moxfieldUrlInput.value = link.dataset.url;
+    moxfieldUrlInput.focus();
+  }});
+}});
 
 function showError(message) {{
   errorBox.textContent = message;
@@ -415,6 +424,12 @@ function pollProgress(jobId) {{
         if (data.stage === 'combos') {{
           progressFill.style.width = '100%';
           progressLabel.textContent = 'Checking combos & bracket rating (Commander Spellbook)\\u2026';
+        }} else if (data.stage === 'processing') {{
+          progressFill.style.width = '100%';
+          progressLabel.textContent = 'Processing downloaded card data\\u2026';
+        }} else if (data.stage === 'tags') {{
+          progressFill.style.width = '100%';
+          progressLabel.textContent = 'Finding budget-alternative tags\\u2026';
         }} else if (data.total > 0) {{
           const pct = Math.round((data.done / data.total) * 100);
           progressFill.style.width = pct + '%';
@@ -489,9 +504,15 @@ function pollIndexRefresh(jobId) {{
     .then(r => r.json())
     .then(data => {{
       if (data.status === 'running') {{
-        refreshIndexLabel.textContent = data.total > 0
-          ? 'Downloading\\u2026 (' + fmtIndexProgress(data.done, data.total) + ')'
-          : 'Starting\\u2026';
+        if (data.stage === 'processing') {{
+          refreshIndexLabel.textContent = 'Processing downloaded card data\\u2026';
+        }} else if (data.stage === 'tags') {{
+          refreshIndexLabel.textContent = 'Finding budget-alternative tags\\u2026';
+        }} else {{
+          refreshIndexLabel.textContent = data.total > 0
+            ? 'Downloading\\u2026 (' + fmtIndexProgress(data.done, data.total) + ')'
+            : 'Starting\\u2026';
+        }}
         setTimeout(() => pollIndexRefresh(jobId), 400);
       }} else if (data.status === 'done') {{
         refreshIndexLabel.textContent = 'Done!';
@@ -575,15 +596,16 @@ def refresh_price_index():
     step (see compare_progress's self-cleanup for jobs with no "html")."""
     job_id = uuid.uuid4().hex
     with _JOBS_LOCK:
-        JOBS[job_id] = {"status": "running", "done": 0, "total": 0, "html": None, "error": None}
+        JOBS[job_id] = {"status": "running", "done": 0, "total": 0, "stage": None, "html": None, "error": None}
 
     def _run():
-        def _on_progress(done, total):
+        def _on_progress(done, total, stage=None):
             with _JOBS_LOCK:
                 job = JOBS.get(job_id)
                 if job:
                     job["done"] = done
                     job["total"] = total
+                    job["stage"] = stage
         try:
             ensure_price_index(on_progress=_on_progress, force_refresh=True)
             with _JOBS_LOCK:

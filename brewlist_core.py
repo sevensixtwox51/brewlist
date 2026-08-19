@@ -993,9 +993,12 @@ def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[
     PRICE_TREND_LOOKBACK_DAYS ago -- omitted for a store/finish without that
     much history yet (e.g. a card printed within the lookback window).
 
-    `on_progress(bytes_done, bytes_total)`, if given, reports combined
-    download progress across both files; parsing afterward is fast enough
-    not to need its own granular progress.
+    `on_progress(bytes_done, bytes_total, stage=None)`, if given, reports
+    combined byte progress across both downloads (stage=None), then two
+    more best-effort stage markers with no byte counts: "processing" once
+    both downloads finish and the (multi-second, CPU-bound) JSON parsing
+    and per-card indexing starts, and "tags" once that's done and the
+    separate Oracle Tags download/processing begins.
 
     Raises ValueError on any network failure (nothing is written in that
     case, so a prior index -- if any -- is left untouched)."""
@@ -1014,6 +1017,9 @@ def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[
             if os.path.exists(p):
                 os.remove(p)
         raise ValueError(f"Could not download MTGJSON's price data: {e}")
+
+    if on_progress:
+        on_progress(0, 0, "processing")
 
     try:
         with gzip.open(prices_tmp, "rt", encoding="utf-8") as f:
@@ -1194,6 +1200,8 @@ def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[
     tags_tmp = path + ".tags.download"
     tags_url = _scryfall_bulk_download_url("oracle_tags")
     if tags_url:
+        if on_progress:
+            on_progress(0, 0, "tags")
         try:
             _download_to_file(tags_url, tags_tmp, None, 0, 0)
             budget_alt_groups = _compute_budget_alt_groups(

@@ -344,7 +344,7 @@ def refresh_price_index_cli() -> None:
     --refresh-price-index flag. Same index build_comparison() reuses
     automatically once it's less than a week old."""
     progress = Progress(
-        TextColumn("[dim]Downloading card database from MTGJSON...[/dim]"),
+        TextColumn("[dim]{task.description}[/dim]"),
         BarColumn(),
         TaskProgressColumn(),
         TimeElapsedColumn(),
@@ -352,10 +352,15 @@ def refresh_price_index_cli() -> None:
         transient=True,
     )
     with progress:
-        task_id = progress.add_task("downloading", total=None)
+        task_id = progress.add_task("Downloading card database from MTGJSON...", total=None)
 
-        def _on_progress(done, total):
-            progress.update(task_id, total=total, completed=done)
+        def _on_progress(done, total, stage=None):
+            if stage == "processing":
+                progress.update(task_id, description="Processing downloaded card data...", total=None, completed=0)
+            elif stage == "tags":
+                progress.update(task_id, description="Finding budget-alternative tags...", total=None, completed=0)
+            else:
+                progress.update(task_id, description="Downloading card database from MTGJSON...", total=total, completed=done)
 
         try:
             index = ensure_price_index(on_progress=_on_progress, force_refresh=True)
@@ -460,8 +465,12 @@ def run(deck_input, collection_path, collection_dir, include_sideboard,
                     task_id, description="Checking combos & bracket rating (Commander Spellbook)...",
                     total=None, completed=0,
                 )
+            elif stage == "processing":
+                progress.update(task_id, description="Processing downloaded card data...", total=None, completed=0)
+            elif stage == "tags":
+                progress.update(task_id, description="Finding budget-alternative tags...", total=None, completed=0)
             else:
-                progress.update(task_id, total=total, completed=done)
+                progress.update(task_id, description="Pricing cards via local index...", total=total, completed=done)
 
         try:
             bucket_names, buckets, totals = build_comparison(
