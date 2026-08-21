@@ -234,13 +234,13 @@ input[type="text"], input[type="url"], input[type="file"] {
 }
 .btn.ghost:hover { color: var(--accent); border-color: var(--accent); filter: none; }
 .page-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
-.kofi-float {
-  position: fixed; top: 70px; right: 16px; z-index: 40;
+.kofi-top { display: flex; justify-content: center; margin: 0 0 20px; }
+.kofi-top a {
   display: block; border-radius: 8px; overflow: hidden;
   box-shadow: var(--shadow); transition: transform 0.15s ease;
 }
-.kofi-float:hover { transform: scale(1.05); }
-.kofi-float img { display: block; height: 36px; width: auto; }
+.kofi-top a:hover { transform: scale(1.05); }
+.kofi-top img { display: block; height: 36px; width: auto; }
 .collection-status { font-size: 0.85rem; color: var(--text-dim); margin-bottom: 12px; }
 .collection-status b { color: var(--owned); }
 .project-list { list-style: none; padding: 0; margin: 0; }
@@ -338,10 +338,12 @@ def render_home_page(error: str | None = None, prefill_url: str = "") -> str:
 <style>{PAGE_STYLE}</style>
 </head>
 <body>
-<a class="kofi-float" href="https://ko-fi.com/imtotallymeh" target="_blank" rel="noopener noreferrer" title="Support Brewlist on Ko-fi">
-  <img src="https://storage.ko-fi.com/cdn/kofi5.png?v=3" alt="Support me on Ko-fi" loading="lazy">
-</a>
 <main>
+  <div class="kofi-top">
+    <a href="https://ko-fi.com/imtotallymeh" target="_blank" rel="noopener noreferrer" title="Support Brewlist on Ko-fi">
+      <img src="https://storage.ko-fi.com/cdn/kofi5.png?v=3" alt="Support me on Ko-fi" loading="lazy">
+    </a>
+  </div>
   <div class="page-header">
     <div>
       <h1>Brewlist</h1>
