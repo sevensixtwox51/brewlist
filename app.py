@@ -260,6 +260,8 @@ input[type="text"], input[type="url"], input[type="file"] {
 .progress-track { height: 8px; background: var(--card-border); border-radius: 4px; overflow: hidden; }
 .progress-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--owned), var(--accent)); transition: width 0.2s ease; }
 #progress-label { color: var(--text-dim); font-size: 0.85rem; margin-top: 8px; }
+.ai-disclosure { display: flex; justify-content: center; align-items: center; gap: 14px; margin-top: 32px; }
+.ai-disclosure img { height: 24px; width: auto; display: block; }
 """
 
 
@@ -385,6 +387,14 @@ def render_home_page(error: str | None = None, prefill_url: str = "") -> str:
     <div class="hint" style="margin-top:-8px;margin-bottom:8px;">Pulls the latest Brewlist code from GitHub -- only works if this was installed with 'git clone'.</div>
     <button type="button" class="btn ghost small" id="check-updates-btn">&#8635; Check for Updates</button>
     <div id="update-label" class="hint" style="margin-top:8px;"></div>
+  </div>
+  <div class="ai-disclosure">
+    <a href="https://github.com/sevensixtwox51/brewlist/blob/main/AI-DECLARATION.md" target="_blank" rel="noopener noreferrer" title="Brewlist is built almost entirely by AI (Claude Code) -- see AI-DECLARATION.md">
+      <img src="https://img.shields.io/badge/%E4%B7%BC%20AI--DECLARATION-auto-ede9fe?labelColor=ede9fe" alt="AI-DECLARATION: auto">
+    </a>
+    <a href="https://www.realgoodai.org/real-rating" target="_blank" rel="noopener noreferrer" title="REAL Rating: Level 5, Full AI">
+      <img src="https://images.squarespace-cdn.com/content/v1/677c1269fe60517a0976d6fc/fbf2122d-5b3f-474d-8466-bc18298c15e2/5+REAL+rating%404x.png" alt="REAL Rating: Level 5, Full AI">
+    </a>
   </div>
 </main>
 <script>
