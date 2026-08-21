@@ -224,8 +224,8 @@ input[type="text"], input[type="url"], input[type="file"] {
 .btn:disabled { opacity: 0.6; cursor: default; }
 .btn.small { padding: 7px 14px; font-size: 0.85rem; }
 .btn.danger {
-  background: transparent; color: var(--text-dim);
-  border: 1px solid var(--card-border); font-weight: 500;
+  background: transparent; color: color-mix(in srgb, var(--missing) 55%, var(--text-dim));
+  border: 1px solid color-mix(in srgb, var(--missing) 45%, var(--card-border)); font-weight: 500;
 }
 .btn.danger:hover { color: var(--missing); border-color: var(--missing); filter: none; }
 .btn.ghost {
@@ -238,13 +238,10 @@ input[type="text"], input[type="url"], input[type="file"] {
   position: sticky; top: 0; z-index: 50; background: var(--bg);
   margin: 0 -24px; padding: 40px 24px 4px;
 }
-.kofi-top { display: flex; justify-content: center; margin: 0 0 20px; }
-.kofi-top a {
-  display: block; border-radius: 8px; overflow: hidden;
-  box-shadow: var(--shadow); transition: transform 0.15s ease;
-}
-.kofi-top a:hover { transform: scale(1.05); }
-.kofi-top img { display: block; height: 36px; width: auto; }
+.header-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.kofi-link { display: flex; align-items: center; border-radius: 8px; overflow: hidden; }
+.kofi-link img { display: block; height: 30px; width: auto; }
+.kofi-link:hover { opacity: 0.85; }
 .collection-status { font-size: 0.85rem; color: var(--text-dim); margin-bottom: 12px; }
 .collection-status b { color: var(--owned); }
 .project-list { list-style: none; padding: 0; margin: 0; }
@@ -344,17 +341,17 @@ def render_home_page(error: str | None = None, prefill_url: str = "") -> str:
 <body>
 <main>
   <div class="sticky-top">
-    <div class="kofi-top">
-      <a href="https://ko-fi.com/imtotallymeh" target="_blank" rel="noopener noreferrer" title="Support Brewlist on Ko-fi">
-        <img src="https://storage.ko-fi.com/cdn/kofi5.png?v=3" alt="Support me on Ko-fi" loading="lazy">
-      </a>
-    </div>
     <div class="page-header">
       <div>
         <h1>Brewlist</h1>
         <p class="subtitle">Compare a decklist against your collection, with live pricing.</p>
       </div>
-      <button type="button" class="btn small danger" id="shutdown-btn" title="Stops the local server">&#9209; Shut Down</button>
+      <div class="header-actions">
+        <a class="kofi-link" href="https://ko-fi.com/imtotallymeh" target="_blank" rel="noopener noreferrer" title="Support Brewlist on Ko-fi">
+          <img src="https://storage.ko-fi.com/cdn/kofi5.png?v=3" alt="Support me on Ko-fi" loading="lazy">
+        </a>
+        <button type="button" class="btn small danger" id="shutdown-btn" title="Stops the local server">&#9209; Shut Down</button>
+      </div>
     </div>
     {update_banner_html}
     <div id="error-box" class="error" style="display:{"block" if error else "none"};">{_esc(error) if error else ""}</div>

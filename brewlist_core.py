@@ -2029,7 +2029,6 @@ header {{
   gap: 8px;
 }}
 .home-link, .shutdown-btn {{
-  color: var(--text-dim);
   font-size: 0.85rem;
   text-decoration: none;
   white-space: nowrap;
@@ -2039,6 +2038,11 @@ header {{
   background: transparent;
   cursor: pointer;
   font-family: inherit;
+}}
+.home-link {{ color: var(--text-dim); }}
+.shutdown-btn {{
+  color: color-mix(in srgb, var(--missing) 55%, var(--text-dim));
+  border-color: color-mix(in srgb, var(--missing) 45%, var(--card-border));
 }}
 .home-link:hover {{ color: var(--accent); border-color: var(--accent); }}
 .shutdown-btn:hover {{ color: var(--missing); border-color: var(--missing); }}
