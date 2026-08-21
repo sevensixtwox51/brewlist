@@ -197,7 +197,7 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   line-height: 1.5;
 }
-main { max-width: 640px; margin: 0 auto; padding: 40px 24px 80px; }
+main { max-width: 640px; margin: 0 auto; padding: 0 24px 80px; }
 h1 { font-size: 1.5rem; margin-bottom: 4px; }
 p.subtitle { color: var(--text-dim); margin-top: 0; }
 .card {
@@ -234,6 +234,10 @@ input[type="text"], input[type="url"], input[type="file"] {
 }
 .btn.ghost:hover { color: var(--accent); border-color: var(--accent); filter: none; }
 .page-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.sticky-top {
+  position: sticky; top: 0; z-index: 50; background: var(--bg);
+  margin: 0 -24px; padding: 40px 24px 4px;
+}
 .kofi-top { display: flex; justify-content: center; margin: 0 0 20px; }
 .kofi-top a {
   display: block; border-radius: 8px; overflow: hidden;
@@ -339,20 +343,22 @@ def render_home_page(error: str | None = None, prefill_url: str = "") -> str:
 </head>
 <body>
 <main>
-  <div class="kofi-top">
-    <a href="https://ko-fi.com/imtotallymeh" target="_blank" rel="noopener noreferrer" title="Support Brewlist on Ko-fi">
-      <img src="https://storage.ko-fi.com/cdn/kofi5.png?v=3" alt="Support me on Ko-fi" loading="lazy">
-    </a>
-  </div>
-  <div class="page-header">
-    <div>
-      <h1>Brewlist</h1>
-      <p class="subtitle">Compare a decklist against your collection, with live pricing.</p>
+  <div class="sticky-top">
+    <div class="kofi-top">
+      <a href="https://ko-fi.com/imtotallymeh" target="_blank" rel="noopener noreferrer" title="Support Brewlist on Ko-fi">
+        <img src="https://storage.ko-fi.com/cdn/kofi5.png?v=3" alt="Support me on Ko-fi" loading="lazy">
+      </a>
     </div>
-    <button type="button" class="btn small danger" id="shutdown-btn" title="Stops the local server">&#9209; Shut Down</button>
+    <div class="page-header">
+      <div>
+        <h1>Brewlist</h1>
+        <p class="subtitle">Compare a decklist against your collection, with live pricing.</p>
+      </div>
+      <button type="button" class="btn small danger" id="shutdown-btn" title="Stops the local server">&#9209; Shut Down</button>
+    </div>
+    {update_banner_html}
+    <div id="error-box" class="error" style="display:{"block" if error else "none"};">{_esc(error) if error else ""}</div>
   </div>
-  {update_banner_html}
-  <div id="error-box" class="error" style="display:{"block" if error else "none"};">{_esc(error) if error else ""}</div>
   {projects_html}
   <form class="card" id="compare-form">
     <label for="moxfield_url">Moxfield or Archidekt deck URL</label>
