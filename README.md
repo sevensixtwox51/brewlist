@@ -1,6 +1,8 @@
 # Brewlist
 
-[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/imtotallymeh)
+<p align="center">
+  <a href="https://ko-fi.com/imtotallymeh"><img src="https://ko-fi.com/img/githubbutton_sm.svg" alt="ko-fi"></a>
+</p>
 
 Compare a [Moxfield](https://moxfield.com) or [Archidekt](https://archidekt.com)
 decklist against your [ManaBox](https://manabox.app) card collection: see what
@@ -241,3 +243,13 @@ appreciated!
 | `Brewlist.command` | macOS double-click launcher for the web app. |
 | `Brewlist.bat` | Windows double-click launcher for the web app. |
 | `brewlist.sh` | Linux/other-POSIX launcher for the web app (run from a terminal). |
+
+## AI disclosure
+
+This project is built almost entirely by AI (Claude Code) — see
+[AI-DECLARATION.md](AI-DECLARATION.md) for what that means in practice.
+
+<p align="center">
+  <a href="AI-DECLARATION.md"><img src="https://img.shields.io/badge/%E4%B7%BC%20AI--DECLARATION-auto-ede9fe?labelColor=ede9fe" alt="AI-DECLARATION: auto" height="28"></a>
+  <a href="https://www.realgoodai.org/real-rating"><img src="https://images.squarespace-cdn.com/content/v1/677c1269fe60517a0976d6fc/fbf2122d-5b3f-474d-8466-bc18298c15e2/5+REAL+rating%404x.png" alt="REAL Rating: Level 5, Full AI" height="28"></a>
+</p>
