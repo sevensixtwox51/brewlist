@@ -439,6 +439,8 @@ class OwnedPrinting:
     foil: bool
     etched: bool
     quantity: int
+    set_code: str = ""
+    collector_number: str = ""
 
 
 @dataclass
@@ -495,7 +497,11 @@ def load_collection(source) -> dict[str, OwnedCard]:
                         p.quantity += qty
                         break
                 else:
-                    card.printings.append(OwnedPrinting(scryfall_id, is_foil, is_etched, qty))
+                    card.printings.append(OwnedPrinting(
+                        scryfall_id, is_foil, is_etched, qty,
+                        set_code=(row.get("Set code") or "").strip(),
+                        collector_number=(row.get("Collector number") or "").strip(),
+                    ))
 
     if isinstance(source, (str, os.PathLike)):
         with open(source, newline="", encoding="utf-8-sig") as f:

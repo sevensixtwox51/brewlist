@@ -18,18 +18,64 @@ from __future__ import annotations
 from brewlist_core import (
     CardEntry,
     OwnedCard,
+    WOTC_BRACKET_GAME_CHANGER_MAX,
+    budget_alt_data_in_index,
     categorize,
     find_deck_combos,
     game_changers_in_index,
     normalize_name,
 )
 
+# WOTC_BRACKET_GAME_CHANGER_MAX is keyed 1/2/3 (brackets 1-2 share a cap
+# of 0 per WotC's own rules; 4-5 have no cap at all -- see its definition
+# in brewlist_core.py). "1-2"/"3"/"4+" here match the same three buckets
+# estimate_wotc_bracket() itself reports, since 1-vs-2 and 4-vs-5 aren't
+# distinguishable from a decklist alone.
+_INTENDED_BRACKET_GC_CAP = {"1-2": WOTC_BRACKET_GAME_CHANGER_MAX[2], "3": WOTC_BRACKET_GAME_CHANGER_MAX[3]}
+
 # Rough target shape used only to steer which category the fill-the-gaps
 # suggester reaches for next -- not a hard rule, just a heuristic so
-# suggestions don't pile up entirely in one category. Fractions of the
-# non-commander deck size.
-COMMANDER_LAND_FRACTION = 0.37
+# suggestions don't pile up entirely in one category.
 CONSTRUCTED_LAND_FRACTION = 0.40
+
+# The well-known community-standard EDH deck shape (Command Zone-style
+# ratios: ~38 lands, ~10 ramp, ~10 card draw, ~10-12 interaction/removal,
+# the remaining ~30 "Synergy" slots being the deck's actual creatures/
+# win-cons/theme pieces) -- raw counts since a Commander deck is always
+# 100 cards (partner/background commanders aren't supported yet, see
+# deck_builder.py's module docstring scope). User-overridable per brew
+# (see suggest_builder_cards's mix_targets param and the builder UI) --
+# this is our default assumption, not a rule anyone has to follow.
+DEFAULT_COMMANDER_MIX = {"Lands": 38, "Ramp": 10, "Draw": 10, "Interaction": 11}
+
+# Maps each non-land role bucket to the Oracle Tag label(s) that indicate
+# it -- reuses the exact same tag_by_name selection already computed for
+# budget-alternative suggestions (see _compute_budget_alt_groups in
+# brewlist_core.py), which already prioritizes picking one of these exact
+# labels as a card's "role" tag when applicable (BUDGET_ALT_PREFERRED_TAGS
+# there overlaps by design). Anything not matching one of these buckets
+# falls into "Synergy" -- the deck's actual engine pieces/win-cons.
+_ROLE_TAG_LABELS = {
+    "Ramp": {"mana rock", "ramp"},
+    "Draw": {"draw", "pure draw"},
+    "Interaction": {"removal-exile", "spot removal", "sweeper", "counterspell", "counterspell-soft"},
+}
+
+
+def _card_role(name: str, category: str, tag_by_name: dict, tag_labels: dict) -> str:
+    """Buckets a card into the standard EDH deck-shape roles (Lands/Ramp/
+    Draw/Interaction, else "Synergy" for everything else -- creatures,
+    other spells, win conditions, theme pieces). Not a full archetype
+    classifier, just enough to keep Suggest roughly on-shape for
+    DEFAULT_COMMANDER_MIX."""
+    if category in ("Lands", "Basic Lands"):
+        return "Lands"
+    tag_id = tag_by_name.get(normalize_name(name))
+    label = tag_labels.get(tag_id) if tag_id else None
+    for role, labels in _ROLE_TAG_LABELS.items():
+        if label in labels:
+            return role
+    return "Synergy"
 
 
 def _is_basic_land(type_line: str) -> bool:
@@ -41,15 +87,19 @@ def owned_collection_gameplay_view(owned: dict[str, OwnedCard], gameplay: dict[s
     gameplay_data_in_index()'s type/color/legality data into flat,
     JSON-ready dicts for the builder's collection browser: {name,
     quantity, type_line, cmc, mana_cost, color_identity, category,
-    scryfall_id, legalities}. Owned cards with no gameplay match (tokens,
-    Un-cards, anything MTGJSON doesn't carry) are skipped -- there's
-    nothing to build a real deck with for those anyway."""
+    scryfall_id, set_code, collector_number, legalities}. Owned cards with
+    no gameplay match (tokens, Un-cards, anything MTGJSON doesn't carry)
+    are skipped -- there's nothing to build a real deck with for those
+    anyway. set_code/collector_number identify the *exact* printing you
+    own (from the ManaBox export itself, see OwnedPrinting) -- carried
+    through so an exported decklist can request that exact printing back
+    on import instead of whatever a site defaults to."""
     view = []
     for name, owned_card in owned.items():
         gp = gameplay.get(name)
         if not gp:
             continue
-        scryfall_id = owned_card.printings[0].scryfall_id if owned_card.printings else None
+        printing = owned_card.printings[0] if owned_card.printings else None
         view.append({
             "name": gp.get("name") or name,
             "quantity": owned_card.total,
@@ -58,7 +108,9 @@ def owned_collection_gameplay_view(owned: dict[str, OwnedCard], gameplay: dict[s
             "cmc": gp.get("cmc") or 0,
             "color_identity": gp.get("color_identity") or [],
             "category": categorize(gp.get("type_line") or ""),
-            "scryfall_id": scryfall_id,
+            "scryfall_id": printing.scryfall_id if printing else None,
+            "set_code": printing.set_code if printing else "",
+            "collector_number": printing.collector_number if printing else "",
             "legalities": gp.get("legalities") or {},
         })
     view.sort(key=lambda c: c["name"])
@@ -77,12 +129,14 @@ def brew_to_card_entries(brew: dict) -> list[CardEntry]:
             name=commander["name"], quantity=1, type_line=commander.get("type_line", ""),
             is_foil=False, section="commander", scryfall_id=commander.get("scryfall_id"),
             color_identity=commander.get("color_identity") or [],
+            set_code=commander.get("set_code", ""), collector_number=commander.get("collector_number", ""),
         ))
     for c in brew.get("cards") or []:
         entries.append(CardEntry(
             name=c["name"], quantity=c.get("quantity", 1), type_line=c.get("type_line", ""),
             is_foil=False, section="mainboard", scryfall_id=c.get("scryfall_id"),
             color_identity=c.get("color_identity") or [],
+            set_code=c.get("set_code", ""), collector_number=c.get("collector_number", ""),
         ))
     return entries
 
@@ -95,13 +149,24 @@ def suggest_builder_cards(
     target_size: int,
     commander_color_identity: list[str] | None,
     max_suggestions: int = 15,
+    mix_targets: dict[str, int] | None = None,
+    intended_bracket: str | None = None,
 ) -> list[dict]:
     """Fill-the-gaps auto-suggest: proposes owned, legal, color-correct
     cards to fill the remaining slots in a work-in-progress deck. This is
-    a heuristic ranking (combo pieces first, then whichever category is
-    most under a rough target shape, then Game Changers/price as a power
-    tiebreak) -- not an AI guess, same "no AI-generated guesses" approach
-    the existing budget-alternative suggestions use."""
+    a heuristic ranking (combo pieces first, then a shared-theme signal,
+    then whichever category is most under a rough target shape, then Game
+    Changers/price as a power tiebreak) -- not an AI guess, same "no
+    AI-generated guesses" approach the existing budget-alternative
+    suggestions use (in fact the exact same Scryfall Oracle Tags data,
+    see budget_alt_data_in_index).
+
+    `intended_bracket` ("1-2"/"3"/"4+"/None), if given, is purely a self-
+    declared target -- if the WIP deck's Game Changers count is already
+    at or above what WotC's own published bracket rules allow for that
+    bracket (see WOTC_BRACKET_GAME_CHANGER_MAX), Game Changer candidates
+    are excluded outright rather than suggested and then flagged later.
+    None (no preference) suggests freely, same as before this existed."""
     used_names = {normalize_name(e.name) for e in wip_entries}
     remaining = max(0, target_size - sum(e.quantity for e in wip_entries if e.section != "commander"))
     if remaining <= 0:
@@ -115,9 +180,18 @@ def suggest_builder_cards(
             used_colors.update(e.color_identity or [])
         colors_allowed = used_colors or None  # no colors committed yet -> no color filter
 
+    game_changers = game_changers_in_index() if deck_format == "commander" else set()
+    gc_cap = _INTENDED_BRACKET_GC_CAP.get(intended_bracket or "")
+    gc_at_cap = False
+    if deck_format == "commander" and gc_cap is not None:
+        current_gc_count = sum(e.quantity for e in wip_entries if normalize_name(e.name) in game_changers)
+        gc_at_cap = current_gc_count >= gc_cap
+
     candidates = []
     for c in owned_view:
         if normalize_name(c["name"]) in used_names:
+            continue
+        if gc_at_cap and normalize_name(c["name"]) in game_changers:
             continue
         if colors_allowed is not None and not set(c["color_identity"]).issubset(colors_allowed):
             continue
@@ -154,26 +228,132 @@ def suggest_builder_cards(
                     nm = normalize_name(missing_name)
                     reason_by_name.setdefault(nm, f"completes a combo with {', '.join(combo['uses'][:2])}")
 
-    land_fraction = COMMANDER_LAND_FRACTION if deck_format == "commander" else CONSTRUCTED_LAND_FRACTION
-    target_lands = round((target_size) * land_fraction)
-    current_lands = sum(e.quantity for e in wip_entries if categorize(e.type_line) in ("Lands", "Basic Lands"))
-    want_lands = current_lands < target_lands
+    # Theme/synergy signal -- reuses the exact same Oracle Tags data the
+    # budget-alternative suggestions already use (one representative
+    # "role" tag per card, e.g. "mana rock"/"ramp"/"tokens matter"; see
+    # _compute_budget_alt_groups). Whichever tags are already well-
+    # represented in the WIP deck (2+ cards sharing one) are treated as
+    # this deck's emerging theme, and owned candidates carrying that same
+    # tag get called out -- not a full archetype/EDHREC-style detector,
+    # just "what is this deck already doing, and what else you own does
+    # the same thing."
+    theme_reason_by_name: dict[str, str] = {}
+    budget_alt = budget_alt_data_in_index()
+    tag_by_name = budget_alt.get("tag_by_name") or {}
+    tag_labels = budget_alt.get("tag_labels") or {}
+    if tag_by_name:
+        wip_tag_counts: dict[str, int] = {}
+        for e in wip_entries:
+            tag_id = tag_by_name.get(normalize_name(e.name))
+            if tag_id:
+                wip_tag_counts[tag_id] = wip_tag_counts.get(tag_id, 0) + e.quantity
+        deck_theme_tags = {tag_id: n for tag_id, n in wip_tag_counts.items() if n >= 2}
+        if deck_theme_tags:
+            for c in candidates:
+                tag_id = tag_by_name.get(normalize_name(c["name"]))
+                if tag_id in deck_theme_tags:
+                    label = tag_labels.get(tag_id, tag_id)
+                    count = deck_theme_tags[tag_id]
+                    theme_reason_by_name[normalize_name(c["name"])] = (
+                        f'shares the "{label}" theme with {count} card(s) already in your deck'
+                    )
 
-    game_changers = game_changers_in_index() if deck_format == "commander" else set()
-
-    def sort_key(c: dict):
+    def rank_key(c: dict):
         nm = normalize_name(c["name"])
-        has_combo_reason = nm in reason_by_name
-        is_land = c["category"] in ("Lands", "Basic Lands")
-        matches_need = is_land == want_lands
-        is_game_changer = nm in game_changers
-        return (not has_combo_reason, not matches_need, not is_game_changer, c["name"])
+        return (nm not in reason_by_name, nm not in theme_reason_by_name, nm not in game_changers, c["name"])
 
-    candidates.sort(key=sort_key)
+    # Deck-shape roles: Commander gets the full Lands/Ramp/Draw/
+    # Interaction/Synergy breakdown (see DEFAULT_COMMANDER_MIX and its
+    # user-supplied override, mix_targets); constructed keeps the
+    # simpler land-only target it always had, since there's no single
+    # community-standard ramp/draw/removal ratio across constructed
+    # formats/archetypes the way there is for EDH. "Synergy" (the deck's
+    # actual creatures/win-cons/theme pieces) is always whatever's left
+    # of target_size after the tracked roles -- the single biggest bucket
+    # in the standard EDH shape (~31/100), so it's sized like every other
+    # role below, never treated as a mere leftover.
+    if deck_format == "commander":
+        role_targets = dict(DEFAULT_COMMANDER_MIX)
+        if mix_targets:
+            for role in role_targets:
+                if role in mix_targets and mix_targets[role] is not None:
+                    role_targets[role] = max(0, int(mix_targets[role]))
+    else:
+        role_targets = {"Lands": round(target_size * CONSTRUCTED_LAND_FRACTION)}
+    role_targets["Synergy"] = max(0, target_size - sum(role_targets.values()))
+
+    def role_of(name: str, category: str) -> str:
+        if deck_format != "commander":
+            return "Lands" if category in ("Lands", "Basic Lands") else "Synergy"
+        return _card_role(name, category, tag_by_name, tag_labels)
+
+    current_role_counts: dict[str, int] = {}
+    for e in wip_entries:
+        r = role_of(e.name, categorize(e.type_line))
+        current_role_counts[r] = current_role_counts.get(r, 0) + e.quantity
+    role_needed = {role: max(0, target - current_role_counts.get(role, 0)) for role, target in role_targets.items()}
+
+    role_candidates: dict[str, list[dict]] = {}
+    for c in candidates:
+        role_candidates.setdefault(role_of(c["name"], c["category"]), []).append(c)
+    for pool in role_candidates.values():
+        pool.sort(key=rank_key)
+
+    # Slot allocation: split the batch across roles proportional to how
+    # much each still needs, so a Suggest click always reflects the
+    # target deck shape instead of whichever single category happens to
+    # be most short by raw count (the bug that made an early-build
+    # Suggest click return nothing but lands -- 0/38 lands always beats
+    # 0/10 ramp on raw need, so a plain "most needed first" sort starved
+    # every other role until lands alone hit target). Uses a largest-
+    # remainder apportionment (floor the proportional share per role,
+    # then hand out the few leftover slots to whichever roles had the
+    # biggest fractional remainder) rather than rounding each role
+    # independently -- independent rounding can overshoot max_suggestions
+    # and silently starve whichever role happens to be computed last
+    # (this cost Synergy -- the actual creatures/win-cons -- its entire
+    # share the first time this was tried).
+    eligible = {
+        role: needed for role, needed in role_needed.items()
+        if needed > 0 and role_candidates.get(role)
+    }
+    role_slots: dict[str, int] = {}
+    if eligible:
+        total_needed = sum(eligible.values())
+        raw_shares = {role: max_suggestions * needed / total_needed for role, needed in eligible.items()}
+        for role, share in raw_shares.items():
+            role_slots[role] = min(int(share), len(role_candidates[role]), eligible[role])
+        leftover = max_suggestions - sum(role_slots.values())
+        for role in sorted(eligible, key=lambda r: raw_shares[r] - int(raw_shares[r]), reverse=True):
+            if leftover <= 0:
+                break
+            cap = min(len(role_candidates[role]), eligible[role])
+            if role_slots[role] < cap:
+                role_slots[role] += 1
+                leftover -= 1
+
+    # Round-robin across roles rather than role-by-role so even a short
+    # list reads as a mix, not a wall of one role followed by another.
+    ordered: list[dict] = []
+    indices = {role: 0 for role in role_slots}
+    active_roles = [r for r in role_slots if role_slots[r] > 0]
+    while len(ordered) < max_suggestions and active_roles:
+        for role in list(active_roles):
+            if len(ordered) >= max_suggestions:
+                break
+            i = indices[role]
+            pool = role_candidates.get(role) or []
+            if i >= role_slots[role] or i >= len(pool):
+                active_roles.remove(role)
+                continue
+            ordered.append(pool[i])
+            indices[role] = i + 1
 
     suggestions = []
-    for c in candidates[:max_suggestions]:
+    for c in ordered:
         nm = normalize_name(c["name"])
+        role = role_of(c["name"], c["category"])
+        fallback_reason = f"fills out {role}" if deck_format == "commander" else f"fills out {c['category']}"
         suggestions.append({
             "name": c["name"],
             "scryfall_id": c["scryfall_id"],
@@ -181,6 +361,9 @@ def suggest_builder_cards(
             "type_line": c["type_line"],
             "color_identity": c["color_identity"],
             "cmc": c["cmc"],
-            "reason": reason_by_name.get(nm, f"fills out {c['category']}"),
+            "mana_cost": c["mana_cost"],
+            "set_code": c["set_code"],
+            "collector_number": c["collector_number"],
+            "reason": reason_by_name.get(nm) or theme_reason_by_name.get(nm) or fallback_reason,
         })
     return suggestions

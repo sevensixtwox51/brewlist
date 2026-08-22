@@ -1,0 +1,19 @@
+# Your ManaBox collection + local price index -- must come from the
+# volume mount at runtime, not get baked into the image.
+data/
+
+.git/
+.claude/
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.DS_Store
+
+# Generated report output (script output, not source)
+*_comparison.html
+*_comparison.md
+*_missing.csv
+*_overrides.json
+*_shopping_list.csv

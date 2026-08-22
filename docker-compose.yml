@@ -1,0 +1,11 @@
+services:
+  brewlist:
+    build: .
+    ports:
+      - "5050:5050"
+    volumes:
+      - brewlist-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  brewlist-data:

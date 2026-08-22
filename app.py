@@ -663,14 +663,30 @@ def _esc(s) -> str:
 
 BUILDER_STYLE = """
 main.builder { max-width: 1400px; }
-.builder-top { display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; }
+body::before {
+  content: ""; position: fixed; inset: -40px;
+  background-image: var(--commander-bg-url, none);
+  background-size: cover; background-position: center top; background-repeat: no-repeat;
+  filter: blur(16px); z-index: -2; pointer-events: none;
+}
+body::after {
+  content: ""; position: fixed; inset: 0;
+  background: color-mix(in srgb, var(--bg) 68%, transparent);
+  z-index: -1; pointer-events: none;
+}
+.builder-top { display:flex; flex-direction:column; gap:14px; }
+.builder-top-row { display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; }
+.builder-top-row.builder-settings { justify-content:space-between; }
+.builder-top-row.builder-actions { align-items:center; }
+.builder-utility-actions { align-self:flex-start; }
 .builder-top .field { display:flex; flex-direction:column; gap:4px; }
 .builder-top label { margin:0; }
 .builder-top input[type=text], .builder-top select {
   padding:8px 10px; border-radius:8px; border:1px solid var(--card-border);
   background:var(--bg); color:var(--text); font-size:0.9rem; margin:0; min-width:160px;
 }
-.builder-layout { display:grid; grid-template-columns: 1.3fr 1fr; gap:20px; align-items:start; margin-top:20px; }
+.action-group { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.builder-layout { display:grid; grid-template-columns: 1.8fr 1fr; gap:20px; align-items:start; margin-top:20px; }
 .builder-filters { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
 .builder-filters input[type=text] { flex:1; min-width:160px; margin:0; }
 .builder-filters select {
@@ -681,13 +697,18 @@ main.builder { max-width: 1400px; }
   display:grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap:10px; max-height:75vh; overflow-y:auto; padding-right:4px;
 }
-.builder-tile { background:var(--bg-elevated); border:1px solid var(--card-border); border-radius:10px; padding:10px; font-size:0.82rem; display:flex; gap:10px; }
+.builder-tile { background:var(--bg-elevated); border:1px solid var(--card-border); border-radius:10px; padding:10px; font-size:0.82rem; display:flex; gap:10px; position:relative; }
 .builder-tile .tile-body { flex:1; min-width:0; }
-.builder-tile .name { font-weight:600; margin-bottom:2px; }
-.builder-tile .meta { color:var(--text-dim); font-size:0.75rem; margin-bottom:8px; }
-.builder-tile .warn { color: var(--missing); font-size:0.72rem; margin-bottom:6px; }
-.builder-tile .tile-actions { display:flex; gap:6px; flex-wrap:wrap; }
+.builder-tile .name { font-weight:600; margin-bottom:2px; padding-right:60px; }
+.builder-tile .meta { color:var(--text-dim); font-size:0.75rem; }
+.builder-tile .warn { color: var(--missing); font-size:0.72rem; margin-top:4px; }
 .builder-tile.hidden { display:none; }
+.tile-corner-actions { position:absolute; top:6px; right:6px; display:flex; align-items:flex-end; gap:4px; }
+.tile-icon-stack { display:flex; flex-direction:column; gap:3px; }
+.tile-icon-btn {
+  width:22px; height:22px; padding:0; display:flex; align-items:center; justify-content:center;
+  border-radius:50%; font-size:0.8rem; line-height:1; flex-shrink:0;
+}
 .card-thumb {
   width: 48px; height: 67px; border-radius: 5px; object-fit: cover;
   flex-shrink: 0; background: var(--card-border); cursor: zoom-in;
@@ -695,29 +716,31 @@ main.builder { max-width: 1400px; }
 .card-thumb.small { width: 32px; height: 44px; border-radius: 3.5px; }
 .color-icons { display: inline-flex; gap: 2px; align-items: center; flex-shrink: 0; }
 .mana-icon { width: 14px; height: 14px; display: block; }
+.mana-cost-pips { display: inline-flex; align-items: center; gap: 1px; flex-shrink: 0; }
+.mana-cost-pips .mana-icon { width: 13px; height: 13px; }
 #hover-preview {
   position: fixed; pointer-events: none; z-index: 100; display: none;
   width: 240px; border-radius: 4.75% / 3.5%;
   box-shadow: 0 12px 32px rgba(0,0,0,0.5), 0 0 0 1px var(--card-border);
 }
 #hover-preview.show { display: block; }
-.deck-panel { position:sticky; top:20px; }
-.deck-stats { display:flex; gap:14px; flex-wrap:wrap; color:var(--text-dim); font-size:0.85rem; margin-bottom:12px; }
+.deck-panel { position:sticky; top:20px; padding:14px 16px; }
+.deck-stats { display:flex; gap:14px; flex-wrap:wrap; color:var(--text-dim); font-size:0.85rem; margin-bottom:10px; }
 .deck-stats b { color: var(--text); }
 .commander-slot {
-  border:1px dashed var(--card-border); border-radius:10px; padding:10px;
-  margin-bottom:14px; font-size:0.85rem; display:flex; justify-content:space-between; align-items:center; gap:8px;
+  border:1px dashed var(--card-border); border-radius:10px; padding:8px 10px;
+  margin-bottom:10px; font-size:0.85rem; display:flex; justify-content:space-between; align-items:center; gap:8px;
 }
 .commander-slot .commander-info { display:flex; align-items:center; gap:8px; }
-.deck-group { margin-bottom:14px; }
-.deck-group h4 { margin: 0 0 6px; font-size:0.75rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.03em; }
-.deck-row { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:4px 0; border-bottom:1px solid var(--card-border); font-size:0.85rem; }
+.deck-group { margin-bottom:10px; }
+.deck-group h4 { margin: 0 0 4px; font-size:0.75rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.03em; }
+.deck-row { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:3px 0; border-bottom:1px solid var(--card-border); font-size:0.85rem; }
 .deck-row:last-child { border-bottom:none; }
 .deck-row .row-name { display:flex; align-items:center; gap:8px; min-width:0; }
 .deck-row .row-name span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .deck-row .qty-controls { display:flex; align-items:center; gap:6px; flex-shrink:0; }
 .deck-row .qty-controls .qty-btn { width:22px; height:22px; padding:0; line-height:1; }
-#suggestions-panel { margin-top:16px; }
+#suggestions-panel { margin-top:10px; }
 #suggestions-panel .suggestion-row { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid var(--card-border); font-size:0.82rem; }
 #suggestions-panel .row-name { display:flex; align-items:center; gap:8px; min-width:0; }
 #suggestions-panel .reason { color:var(--text-dim); font-size:0.72rem; }
@@ -728,7 +751,7 @@ main.builder { max-width: 1400px; }
 }
 .segmented .seg-btn:first-child { border-right:1px solid var(--card-border); }
 .segmented .seg-btn.active { background:var(--gold); color:#241f00; font-weight:600; }
-.deck-analysis { margin-top:16px; border-top:1px solid var(--card-border); padding-top:14px; }
+.deck-analysis { margin-top:10px; border-top:1px solid var(--card-border); padding-top:10px; }
 .analysis-heading { margin:0 0 8px; font-size:0.85rem; }
 .analysis-stat-line { color:var(--text-dim); font-size:0.78rem; margin:0 0 8px; }
 .curve-chart { display:flex; align-items:flex-end; gap:4px; height:90px; }
@@ -738,24 +761,41 @@ main.builder { max-width: 1400px; }
 .curve-bar.permanents { background:var(--accent); }
 .curve-bar.spells { background:var(--gold); }
 .curve-label { font-size:0.68rem; color:var(--text-dim); margin-top:3px; }
-.chart-legend { display:flex; gap:12px; font-size:0.72rem; color:var(--text-dim); margin:6px 0 12px; flex-wrap:wrap; }
+.chart-legend { display:flex; gap:12px; font-size:0.72rem; color:var(--text-dim); margin:6px 0 8px; flex-wrap:wrap; }
 .chart-legend .swatch { width:9px; height:9px; border-radius:2px; display:inline-block; margin-right:4px; }
 .chart-legend .swatch.permanents { background:var(--accent); }
 .chart-legend .swatch.spells { background:var(--gold); }
 .chart-legend .swatch.pips { background:var(--accent); }
-.color-breakdown { display:flex; flex-direction:column; gap:6px; margin-bottom:12px; }
+.color-breakdown { display:flex; flex-direction:column; gap:6px; margin-bottom:8px; }
 .color-row { display:flex; align-items:center; gap:8px; }
 .color-row .mana-icon { width:16px; height:16px; flex-shrink:0; }
 .color-bar-track { flex:1; height:7px; border-radius:4px; background:var(--card-border); overflow:hidden; }
 .color-bar { height:100%; border-radius:4px; background:var(--accent); }
 .sample-hand-cards { display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
 .sample-hand-thumb { width:64px; height:89px; border-radius:5px; object-fit:cover; background:var(--card-border); cursor:zoom-in; }
-body.compact .builder-tile { padding:4px 10px; }
+body.compact .builder-tile { padding:4px 10px; min-height:36px; align-items:center; }
 body.compact .builder-tile .card-thumb { display:none; }
 body.compact .builder-tile .meta { display:none; }
-body.compact .builder-tile .tile-actions { margin-top:2px; }
-body.compact .collection-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+body.compact .builder-tile .name { margin-bottom:0; padding-right:0; }
+body.compact .builder-tile .name-text { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+body.compact .tile-corner-actions { position:static; flex-shrink:0; }
+body.compact .collection-grid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
 body.compact .deck-row .card-thumb { display:none; }
+.mix-targets-field { border:1px solid var(--card-border); border-radius:8px; padding:2px 12px; }
+.mix-targets-field summary { cursor:pointer; padding:6px 10px; font-size:0.85rem; color:var(--text-dim); white-space:nowrap; }
+.mix-targets-field[open] { position:relative; z-index:5; }
+.mix-targets-grid { display:flex; gap:16px; flex-wrap:wrap; align-items:flex-end; padding:2px 0 12px; }
+.mix-targets-grid label { display:flex; flex-direction:column; gap:3px; font-size:0.78rem; color:var(--text-dim); }
+.mix-targets-grid input[type=number] {
+  width:60px; padding:6px 8px; border-radius:6px; border:1px solid var(--card-border);
+  background:var(--bg); color:var(--text); font-size:0.85rem; margin:0;
+}
+.bracket-value-panel { margin-bottom:10px; }
+#bracket-value-results { margin-top:8px; font-size:0.82rem; color:var(--text-dim); }
+#bracket-value-results:empty { margin-top:0; }
+#bracket-value-results .bv-stat { margin-bottom:4px; }
+#bracket-value-results .bv-stat b { color:var(--text); }
+#bracket-value-results .bv-warn { color:var(--missing); }
 @media (max-width: 900px) { .builder-layout { grid-template-columns: 1fr; } .deck-panel { position:static; } }
 """
 
@@ -767,12 +807,16 @@ def render_builder_page(deck_id: str | None = None) -> str:
     if deck_id and brew.get("type") != "brew":
         brew = {}
         deck_id = None
+    default_mix = {"Lands": 38, "Ramp": 10, "Draw": 10, "Interaction": 11}
+    saved_mix = brew.get("mix_targets") or {}
     brew_state = {
         "deck_name": brew.get("deck_name") or "",
         "format": brew.get("format") or "commander",
         "target_format": brew.get("target_format") or "standard",
         "commander": brew.get("commander"),
         "cards": brew.get("cards") or [],
+        "mix_targets": {role: saved_mix.get(role, default_mix[role]) for role in default_mix},
+        "intended_bracket": brew.get("intended_bracket") or "",
     }
 
     category_options = "".join(f'<option value="{_esc(b)}">{_esc(b)}</option>' for b in BUCKET_ORDER)
@@ -802,34 +846,63 @@ def render_builder_page(deck_id: str | None = None) -> str:
   <div id="error-box" class="error" style="display:none;"></div>
 
   <div class="card builder-top">
-    <div class="field"><label for="deck-name">Deck name</label>
-      <input type="text" id="deck-name" placeholder="Untitled brew">
+    <div class="builder-top-row builder-settings">
+      <div class="action-group">
+        <div class="field"><label for="deck-name">Deck name</label>
+          <input type="text" id="deck-name" placeholder="Untitled brew">
+        </div>
+        <div class="field"><label for="deck-format">Format</label>
+          <select id="deck-format">
+            <option value="commander">Commander</option>
+            <option value="constructed">60-card constructed</option>
+          </select>
+        </div>
+        <div class="field" id="target-format-field">
+          <label for="target-format">Target format (legality)</label>
+          <select id="target-format">
+            <option value="standard">Standard</option>
+            <option value="pioneer">Pioneer</option>
+            <option value="modern">Modern</option>
+            <option value="legacy">Legacy</option>
+            <option value="vintage">Vintage</option>
+            <option value="pauper">Pauper</option>
+          </select>
+        </div>
+        <div class="field" id="intended-bracket-field">
+          <label for="intended-bracket" title="Optional -- if set, Suggest avoids Game Changers beyond what WotC's own bracket rules allow. Leave as No preference to build freely; the estimated bracket is always shown either way.">Intended bracket</label>
+          <select id="intended-bracket">
+            <option value="">No preference (build freely)</option>
+            <option value="1-2">1-2 (Exhibition / Core)</option>
+            <option value="3">3 (Upgraded)</option>
+            <option value="4+">4+ (Optimized / cEDH)</option>
+          </select>
+        </div>
+      </div>
+      <div class="action-group builder-utility-actions">
+        <button type="button" class="btn ghost small" id="report-btn">View full report</button>
+        <button type="button" class="btn ghost small" id="copy-decklist-btn" title="Copies a plain-text decklist (with your exact printings) you can paste into Moxfield or Archidekt to import">&#128203; Copy Decklist</button>
+        <button type="button" class="btn ghost small" id="export-csv-btn" title="Downloads a CSV grouped like a physical store's binders, so you can find these cards in your own collection">&#128190; Export CSV</button>
+      </div>
     </div>
-    <div class="field"><label for="deck-format">Format</label>
-      <select id="deck-format">
-        <option value="commander">Commander</option>
-        <option value="constructed">60-card constructed</option>
-      </select>
+    <div class="builder-top-row builder-actions">
+      <div class="action-group">
+        <button type="button" class="btn" id="save-btn">Save</button>
+        <span id="save-label" class="hint" style="margin:0;display:none;"></span>
+      </div>
+      <div class="action-group">
+        <button type="button" class="btn ghost" id="suggest-btn">Suggest cards</button>
+        <details class="mix-targets-field" id="mix-targets-field">
+          <summary>Deck mix targets</summary>
+          <div class="mix-targets-grid">
+            <label>Lands <input type="number" id="mix-lands" min="0" max="100"></label>
+            <label>Ramp <input type="number" id="mix-ramp" min="0" max="100"></label>
+            <label>Draw <input type="number" id="mix-draw" min="0" max="100"></label>
+            <label>Interaction <input type="number" id="mix-interaction" min="0" max="100"></label>
+            <span class="hint" id="mix-synergy-readout" style="margin:0;"></span>
+          </div>
+        </details>
+      </div>
     </div>
-    <div class="field" id="target-format-field">
-      <label for="target-format">Target format (legality)</label>
-      <select id="target-format">
-        <option value="standard">Standard</option>
-        <option value="pioneer">Pioneer</option>
-        <option value="modern">Modern</option>
-        <option value="legacy">Legacy</option>
-        <option value="vintage">Vintage</option>
-        <option value="pauper">Pauper</option>
-      </select>
-    </div>
-    <button type="button" class="btn small" id="save-btn">Save</button>
-    <button type="button" class="btn ghost small" id="suggest-btn">Suggest cards</button>
-    <button type="button" class="btn ghost small" id="report-btn">View full report</button>
-    <div class="segmented" id="view-density-toggle" title="Switches between full tiles and a compact text list with mana-cost pips">
-      <button type="button" class="seg-btn active" data-value="cards">Cards</button>
-      <button type="button" class="seg-btn" data-value="compact">Compact</button>
-    </div>
-    <div id="save-label" class="hint" style="margin:0;display:none;"></div>
   </div>
 
   <div class="builder-layout">
@@ -838,11 +911,19 @@ def render_builder_page(deck_id: str | None = None) -> str:
         <input type="text" id="search" placeholder="Search your collection...">
         <select id="filter-category"><option value="">All types</option><option value="Commander">Commander</option>{category_options}</select>
         <select id="filter-color"><option value="">Any color</option><option value="C">Colorless</option>{color_options}</select>
+        <div class="segmented" id="view-density-toggle" title="Switches between full tiles and a compact text list with mana-cost pips">
+          <button type="button" class="seg-btn active" data-value="cards">Cards</button>
+          <button type="button" class="seg-btn" data-value="compact">Compact</button>
+        </div>
       </div>
       <div class="collection-grid" id="collection-grid"><div class="hint">Loading your collection&hellip;</div></div>
     </div>
     <div class="card deck-panel">
       <div class="deck-stats" id="deck-stats"></div>
+      <div class="bracket-value-panel" id="bracket-value-panel">
+        <button type="button" class="btn ghost small" id="check-bracket-btn">&#128202; Check Bracket &amp; Value</button>
+        <div id="bracket-value-results"></div>
+      </div>
       <div id="commander-slot-wrap"></div>
       <div id="deck-list"></div>
       <div id="suggestions-panel"></div>
@@ -873,11 +954,26 @@ function showError(message) {{ errorBox.textContent = message; errorBox.style.di
 document.getElementById('deck-name').value = brew.deck_name;
 document.getElementById('deck-format').value = brew.format;
 document.getElementById('target-format').value = brew.target_format;
+document.getElementById('intended-bracket').value = brew.intended_bracket || '';
+document.getElementById('mix-lands').value = brew.mix_targets.Lands;
+document.getElementById('mix-ramp').value = brew.mix_targets.Ramp;
+document.getElementById('mix-draw').value = brew.mix_targets.Draw;
+document.getElementById('mix-interaction').value = brew.mix_targets.Interaction;
 
 function targetSize() {{ return brew.format === 'commander' ? 100 : 60; }}
 
+function updateSynergyReadout() {{
+  const t = brew.mix_targets;
+  const synergy = Math.max(0, 100 - (t.Lands + t.Ramp + t.Draw + t.Interaction));
+  document.getElementById('mix-synergy-readout').textContent = `Synergy (remainder): ${{synergy}}`;
+}}
+updateSynergyReadout();
+
 function updateFormatUI() {{
-  document.getElementById('target-format-field').style.display = brew.format === 'commander' ? 'none' : 'flex';
+  const isCommander = brew.format === 'commander';
+  document.getElementById('target-format-field').style.display = isCommander ? 'none' : 'flex';
+  document.getElementById('intended-bracket-field').style.display = isCommander ? 'flex' : 'none';
+  document.getElementById('mix-targets-field').style.display = isCommander ? 'block' : 'none';
 }}
 updateFormatUI();
 
@@ -888,7 +984,15 @@ document.getElementById('deck-format').addEventListener('change', (e) => {{
   renderAll();
 }});
 document.getElementById('target-format').addEventListener('change', (e) => {{ brew.target_format = e.target.value; }});
+document.getElementById('intended-bracket').addEventListener('change', (e) => {{ brew.intended_bracket = e.target.value; }});
 document.getElementById('deck-name').addEventListener('input', (e) => {{ brew.deck_name = e.target.value; }});
+['lands', 'ramp', 'draw', 'interaction'].forEach(role => {{
+  document.getElementById('mix-' + role).addEventListener('input', (e) => {{
+    const key = role.charAt(0).toUpperCase() + role.slice(1);
+    brew.mix_targets[key] = Math.max(0, parseInt(e.target.value, 10) || 0);
+    updateSynergyReadout();
+  }});
+}});
 
 function normalizeName(name) {{ return name.trim().toLowerCase(); }}
 
@@ -907,6 +1011,18 @@ function colorIconsHtml(colorIdentity) {{
   if (!colors.length) return '';
   return '<span class="color-icons">' + colors.map(c =>
     `<img class="mana-icon" src="https://svgs.scryfall.io/card-symbols/${{c}}.svg" alt="${{c}}" loading="lazy">`
+  ).join('') + '</span>';
+}}
+
+// Full ordered mana-cost pip sequence (not just color identity) -- hidden
+// in Cards view (colorIconsHtml above already shows color there), shown
+// instead of it in Compact view, same convention as the compare report's
+// card tiles (see mana_cost_pips_html in brewlist_core.py's render_html).
+function manaCostPipsHtml(manaCost) {{
+  const pips = parseManaPips(manaCost);
+  if (!pips.length) return '';
+  return '<span class="mana-cost-pips">' + pips.map(p =>
+    `<img class="mana-icon" src="${{manaPipSymbolUrl(p)}}" alt="${{p}}" loading="lazy">`
   ).join('') + '</span>';
 }}
 
@@ -964,6 +1080,7 @@ function setCommander(card) {{
   brew.commander = {{
     name: card.name, scryfall_id: card.scryfall_id, type_line: card.type_line, color_identity: card.color_identity,
     cmc: card.cmc, mana_cost: card.mana_cost, category: card.category, quantity: 1,
+    set_code: card.set_code, collector_number: card.collector_number,
   }};
   renderAll();
 }}
@@ -977,6 +1094,7 @@ function addCard(card) {{
     brew.cards.push({{
       name: card.name, quantity: 1, scryfall_id: card.scryfall_id, cmc: card.cmc, mana_cost: card.mana_cost,
       type_line: card.type_line, color_identity: card.color_identity, category: card.category,
+      set_code: card.set_code, collector_number: card.collector_number,
     }});
   }} else {{
     const ownedQty = card.quantity || 4;
@@ -986,6 +1104,7 @@ function addCard(card) {{
       brew.cards.push({{
         name: card.name, quantity: 1, scryfall_id: card.scryfall_id, cmc: card.cmc, mana_cost: card.mana_cost,
         type_line: card.type_line, color_identity: card.color_identity, category: card.category,
+        set_code: card.set_code, collector_number: card.collector_number,
       }});
     }}
   }}
@@ -1035,36 +1154,50 @@ function renderGrid() {{
     const legality = legalityFor(card);
     const warnHtml = (legality && legality !== 'Legal') ? `<div class="warn">&#9888; ${{legality}} in ${{brew.format === 'commander' ? 'Commander' : brew.target_format}}</div>` : '';
     const inDeck = findCard(card.name);
-    const addLabel = brew.format === 'commander' && inDeck ? 'In deck' : '+ Add';
     tile.innerHTML = `
       ${{thumbHtml(card.scryfall_id, 'card-thumb')}}
       <div class="tile-body">
-        <div class="name">${{card.name}}</div>
-        <div class="meta">${{card.type_line || 'Unknown type'}} &middot; CMC ${{card.cmc}} &middot; own ${{card.quantity}} ${{colorIconsHtml(card.color_identity)}}</div>
+        <div class="name"><span class="name-text">${{card.name}}</span></div>
+        <div class="meta">${{card.type_line || 'Unknown type'}} &middot; CMC ${{card.cmc}} &middot; own ${{card.quantity}}</div>
         ${{warnHtml}}
-        <div class="tile-actions"></div>
+      </div>
+      <div class="tile-corner-actions">
+        ${{manaCostPipsHtml(card.mana_cost)}}
+        <div class="tile-icon-stack"></div>
       </div>
     `;
-    const actions = tile.querySelector('.tile-actions');
-    const addBtn = document.createElement('button');
-    addBtn.type = 'button'; addBtn.className = 'btn ghost small';
-    addBtn.textContent = addLabel;
-    addBtn.disabled = brew.format === 'commander' && !!inDeck;
-    addBtn.addEventListener('click', () => addCard(card));
-    actions.appendChild(addBtn);
+    const actions = tile.querySelector('.tile-icon-stack');
     if (brew.format === 'commander' && isCommanderEligible(card)) {{
       const cmdBtn = document.createElement('button');
-      cmdBtn.type = 'button'; cmdBtn.className = 'btn ghost small';
-      cmdBtn.textContent = '\\u2605 Commander';
+      cmdBtn.type = 'button'; cmdBtn.className = 'btn ghost tile-icon-btn';
+      cmdBtn.textContent = '\\u2605';
+      cmdBtn.title = 'Set as Commander';
       cmdBtn.addEventListener('click', () => setCommander(card));
       actions.appendChild(cmdBtn);
     }}
+    const addBtn = document.createElement('button');
+    addBtn.type = 'button'; addBtn.className = 'btn ghost tile-icon-btn';
+    addBtn.textContent = (brew.format === 'commander' && inDeck) ? '\\u2713' : '+';
+    addBtn.title = (brew.format === 'commander' && inDeck) ? 'Already in deck' : 'Add to deck';
+    addBtn.disabled = brew.format === 'commander' && !!inDeck;
+    addBtn.addEventListener('click', () => addCard(card));
+    actions.appendChild(addBtn);
     frag.appendChild(tile);
   }});
   grid.appendChild(frag);
 }}
 
+function updateCommanderBackdrop() {{
+  const bg = (brew.format === 'commander' && brew.commander) ? scryfallImg(brew.commander.scryfall_id, 'large') : null;
+  if (bg) {{
+    document.body.style.setProperty('--commander-bg-url', `url('${{bg}}')`);
+  }} else {{
+    document.body.style.removeProperty('--commander-bg-url');
+  }}
+}}
+
 function renderCommanderSlot() {{
+  updateCommanderBackdrop();
   const wrap = document.getElementById('commander-slot-wrap');
   if (brew.format !== 'commander') {{ wrap.innerHTML = ''; return; }}
   if (!brew.commander) {{
@@ -1258,6 +1391,7 @@ suggestBtn.addEventListener('click', () => {{
     method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
     body: JSON.stringify({{
       cards: brew.cards, commander: brew.commander, format: brew.format, target_format: brew.target_format,
+      mix_targets: brew.mix_targets, intended_bracket: brew.intended_bracket,
     }}),
   }})
     .then(r => r.json())
@@ -1267,7 +1401,13 @@ suggestBtn.addEventListener('click', () => {{
       panel.innerHTML = '<h4 style="font-size:0.8rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.03em;">Suggestions</h4>';
       if (!data.suggestions.length) {{
         panel.innerHTML += '<div class="hint" style="margin:0;">No suggestions -- your deck may already be full, or nothing left fits the color/legality filters.</div>';
+        return;
       }}
+      const addAllBtn = Object.assign(document.createElement('button'), {{
+        className: 'btn ghost small', textContent: `+ Add All (${{data.suggestions.length}})`, style: 'margin-bottom:8px;',
+        onclick: () => {{ data.suggestions.forEach(addCard); panel.innerHTML = ''; }},
+      }});
+      panel.appendChild(addAllBtn);
       data.suggestions.forEach(s => {{
         const row = document.createElement('div');
         row.className = 'suggestion-row';
@@ -1282,6 +1422,132 @@ suggestBtn.addEventListener('click', () => {{
     }})
     .catch(() => showError('Could not reach the server.'))
     .finally(() => {{ suggestBtn.disabled = false; }});
+}});
+
+// Confirmed live against Moxfield's and Archidekt's own decklist-import
+// UI: both accept plain "qty Name" lines, and both accept an optional
+// "(SET) CollectorNumber" suffix to pin the exact printing rather than
+// defaulting to whichever one the site prefers. Neither needs the
+// commander marked in the pasted text -- Moxfield sets it via its own
+// separate "Commander" search field on the new-deck form, and Archidekt
+// lets you flag it after import -- so this is one plain list, commander
+// included, with a callout telling you its name to set manually.
+function decklistLine(c) {{
+  const printing = (c.set_code && c.collector_number) ? ` (${{c.set_code.toUpperCase()}}) ${{c.collector_number}}` : '';
+  return `${{c.quantity}} ${{c.name}}${{printing}}`;
+}}
+
+function buildDecklistText() {{
+  const lines = [];
+  if (brew.commander) lines.push(decklistLine(brew.commander));
+  brew.cards.forEach(c => lines.push(decklistLine(c)));
+  return lines.join('\\n');
+}}
+
+const copyDecklistBtn = document.getElementById('copy-decklist-btn');
+copyDecklistBtn.addEventListener('click', () => {{
+  if (!brew.cards.length && !brew.commander) {{ showError('Add some cards first.'); return; }}
+  const text = buildDecklistText();
+  const label = document.getElementById('save-label');
+  const finish = () => {{
+    label.textContent = brew.commander
+      ? `Copied ${{brew.cards.length + 1}} cards. Paste into Moxfield/Archidekt, then set your commander to: ${{brew.commander.name}}.`
+      : `Copied ${{brew.cards.length}} cards. Paste into Moxfield/Archidekt to import.`;
+    label.style.display = 'block';
+    setTimeout(() => {{ label.style.display = 'none'; }}, 6000);
+  }};
+  if (navigator.clipboard && navigator.clipboard.writeText) {{
+    navigator.clipboard.writeText(text).then(finish).catch(() => showError('Could not copy to clipboard.'));
+  }} else {{
+    showError('Clipboard access is not available in this browser.');
+  }}
+}});
+
+// Same "Group, Subgroup" binning as the compare report's In-Store CSV
+// (see shopping_group() in brewlist_core.py -- ported here since this
+// runs entirely client-side off brew.cards, no server round trip), but
+// listing what you *own* (set/collector number) rather than what to buy.
+function shoppingGroupOf(c) {{
+  if ((c.type_line || '').includes('Land')) return ['Lands', ''];
+  if ((c.type_line || '').includes('Artifact')) return ['Artifacts', ''];
+  const names = {{ W: 'White', U: 'Blue', B: 'Black', R: 'Red', G: 'Green' }};
+  const colors = WUBRG.filter(col => (c.color_identity || []).includes(col));
+  const subgroup = colors.length === 0 ? 'Colorless' : colors.length === 1 ? names[colors[0]] : 'Multicolor';
+  return ['Colors', subgroup];
+}}
+
+function csvEscape(value) {{
+  const s = String(value ?? '');
+  if (/["\\n,]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+  return s;
+}}
+
+const exportCsvBtn = document.getElementById('export-csv-btn');
+exportCsvBtn.addEventListener('click', () => {{
+  const all = brew.commander ? [brew.commander, ...brew.cards] : brew.cards;
+  if (!all.length) {{ showError('Add some cards first.'); return; }}
+  const groupRank = {{ Colors: 0, Artifacts: 1, Lands: 2 }};
+  const subgroupRank = {{ Multicolor: 0, White: 1, Blue: 2, Black: 3, Red: 4, Green: 5, Colorless: 99 }};
+  const rows = all.map(c => {{
+    const [group, subgroup] = shoppingGroupOf(c);
+    return {{
+      group, subgroup, qty: c.quantity, name: c.name, type: c.type_line || '',
+      setCode: (c.set_code || '').toUpperCase(), cn: c.collector_number || '',
+    }};
+  }});
+  rows.sort((a, b) => {{
+    const ra = (groupRank[a.group] ?? 9) * 1000 + (subgroupRank[a.subgroup] ?? 50);
+    const rb = (groupRank[b.group] ?? 9) * 1000 + (subgroupRank[b.subgroup] ?? 50);
+    return ra - rb || a.name.localeCompare(b.name);
+  }});
+  const header = ['Group', 'Subgroup', 'Qty', 'Name', 'Type', 'Set Code', 'Collector #'];
+  const lines = [header.map(csvEscape).join(',')];
+  rows.forEach(r => lines.push([r.group, r.subgroup, r.qty, r.name, r.type, r.setCode, r.cn].map(csvEscape).join(',')));
+  const csv = lines.join('\\r\\n');
+  const blob = new Blob([csv], {{ type: 'text/csv;charset=utf-8;' }});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = (brew.deck_name || 'deck').replace(/[^A-Za-z0-9_-]+/g, '_') + '_cards.csv';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}});
+
+const BRACKET_TAG_LABELS = {{ E: 'Exhibition', C: 'Core', P: 'Powerful', O: 'Oddball', S: 'Spicy', R: 'Ruthless', B: 'Banned' }};
+
+const checkBracketBtn = document.getElementById('check-bracket-btn');
+checkBracketBtn.addEventListener('click', () => {{
+  if (!brew.cards.length && !brew.commander) {{ showError('Add some cards first.'); return; }}
+  checkBracketBtn.disabled = true;
+  const results = document.getElementById('bracket-value-results');
+  results.innerHTML = '<div class="hint" style="margin:0;">Checking\\u2026 (this calls Commander Spellbook live, may take a few seconds)</div>';
+  fetch('/builder/stats', {{
+    method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
+    body: JSON.stringify({{ cards: brew.cards, commander: brew.commander, format: brew.format }}),
+  }})
+    .then(r => r.json())
+    .then(data => {{
+      if (data.error) {{ results.innerHTML = ''; showError(data.error); return; }}
+      let html = `<div class="bv-stat">Deck value (today's market): <b>$${{data.deck_value.toFixed(2)}}</b></div>`;
+      if (data.is_commander_format) {{
+        html += `<div class="bv-stat">Game Changers: <b>${{data.game_changers}}</b>${{data.game_changers_names.length ? ' (' + data.game_changers_names.join(', ') + ')' : ''}}</div>`;
+        html += data.banned_count
+          ? `<div class="bv-stat bv-warn">&#9940; Not legal in Commander: <b>${{data.banned_count}}</b></div>`
+          : '<div class="bv-stat">&#10003; No Commander-banned cards found</div>';
+        if (data.bracket_tag) {{
+          html += `<div class="bv-stat">Commander Spellbook rating: <b>${{BRACKET_TAG_LABELS[data.bracket_tag] || data.bracket_tag}}</b></div>`;
+        }}
+        if (data.wotc_bracket) {{
+          html += `<div class="bv-stat">Estimated Bracket: <b>${{data.wotc_bracket[0]}}</b> (${{data.wotc_bracket[1]}})</div>`;
+        }}
+        html += `<div class="bv-stat">Combos: <b>${{data.combos_included}}</b> in deck, <b>${{data.combos_almost}}</b> one card away</div>`;
+      }}
+      results.innerHTML = html;
+    }})
+    .catch(() => {{ results.innerHTML = ''; showError('Could not reach the server.'); }})
+    .finally(() => {{ checkBracketBtn.disabled = false; }});
 }});
 
 function pollReportProgress(jobId) {{
@@ -1379,6 +1645,8 @@ def builder_save():
         target_format=body.get("target_format") or "standard",
         commander=body.get("commander"),
         cards=cards,
+        mix_targets=body.get("mix_targets") or {},
+        intended_bracket=body.get("intended_bracket") or "",
     )
     return jsonify(deck_id=deck_id)
 
@@ -1396,12 +1664,55 @@ def builder_suggest():
     owned_view = owned_collection_gameplay_view(owned, gameplay_data_in_index())
     wip_entries = brew_to_card_entries({"commander": body.get("commander"), "cards": body.get("cards") or []})
     commander = body.get("commander") or {}
+    raw_mix = body.get("mix_targets") or {}
+    mix_targets = {
+        role: int(raw_mix[role]) for role in ("Lands", "Ramp", "Draw", "Interaction")
+        if role in raw_mix and isinstance(raw_mix[role], (int, float))
+    } or None
     suggestions = suggest_builder_cards(
         wip_entries, owned_view, deck_format, body.get("target_format"),
         target_size=100 if deck_format == "commander" else 60,
         commander_color_identity=commander.get("color_identity") if deck_format == "commander" else None,
+        mix_targets=mix_targets,
+        intended_bracket=body.get("intended_bracket") or None,
     )
     return jsonify(suggestions=suggestions)
+
+
+@app.route("/builder/stats", methods=["POST"])
+def builder_stats():
+    """Live Game Changers/legality/bracket/combos/deck-value summary for
+    the current work-in-progress brew, reusing build_comparison() exactly
+    like a saved brew's full report does (see _run_brew_report_job) --
+    every card in a brew is owned by construction, so this is really just
+    "what would the compare-flow header stats say about this list right
+    now," without paying for the full HTML render. On-demand (a button),
+    not run on every card add/remove, since it makes a live Commander
+    Spellbook call (combos/bracket) each time."""
+    body = request.get_json(silent=True) or {}
+    deck_format = body.get("format") if body.get("format") in ("commander", "constructed") else "commander"
+    entries = brew_to_card_entries({"commander": body.get("commander"), "cards": body.get("cards") or []})
+    if not entries:
+        return jsonify(error="Add some cards first."), 400
+    try:
+        owned = load_collection(COLLECTION_PATH)
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+
+    is_commander_format = deck_format == "commander"
+    _, _, totals = build_comparison(entries, owned, ignore_basics=False, is_commander_format=is_commander_format)
+    combos = totals.get("combos") or {}
+    return jsonify(
+        deck_value=totals["deck_value"],
+        game_changers=totals["game_changers"],
+        game_changers_names=totals["game_changers_names"],
+        banned_count=totals["banned_count"],
+        bracket_tag=totals.get("bracket_tag"),
+        wotc_bracket=totals.get("wotc_bracket"),
+        combos_included=len(combos.get("included") or []),
+        combos_almost=combos.get("almost_total") or 0,
+        is_commander_format=is_commander_format,
+    )
 
 
 @app.route("/builder/report/start", methods=["POST"])
@@ -1652,11 +1963,21 @@ def _open_browser_when_ready(url: str, timeout: float = 15.0) -> None:
 if __name__ == "__main__":
     explicit_port = os.environ.get("PORT")
     port = int(explicit_port) if explicit_port else _find_free_port()
-    threading.Thread(target=_open_browser_when_ready, args=(f"http://localhost:{port}",), daemon=True).start()
+    # NO_BROWSER: set by the Docker image (no browser to open in a
+    # container) -- webbrowser.open() can raise on a truly headless system
+    # with no known browser command, which would otherwise print a scary
+    # traceback to the container logs on every launch for no benefit.
+    if not os.environ.get("NO_BROWSER"):
+        threading.Thread(target=_open_browser_when_ready, args=(f"http://localhost:{port}",), daemon=True).start()
     threading.Thread(target=_check_for_updates_on_launch, daemon=True).start()
     # use_reloader=False: the reloader runs the app in a child process and
     # respawns it on exit, which would silently undo the /shutdown route above.
     # debug=True is kept for friendly in-browser tracebacks if something breaks.
     # threaded=True: the progress-polling requests need to be served while a
     # background thread is doing the actual (slow) Scryfall pricing work.
-    app.run(debug=True, use_reloader=False, threaded=True, port=port)
+    # HOST: defaults to loopback-only (matches this being a personal local
+    # app you double-click, not something meant reachable on the network by
+    # default) -- the Docker image sets HOST=0.0.0.0 so the container's
+    # published port actually works, since 127.0.0.1 inside a container
+    # isn't reachable from outside it.
+    app.run(debug=True, use_reloader=False, threaded=True, port=port, host=os.environ.get("HOST", "127.0.0.1"))

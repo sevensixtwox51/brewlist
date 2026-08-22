@@ -7,11 +7,15 @@
 Compare a [Moxfield](https://moxfield.com) or [Archidekt](https://archidekt.com)
 decklist against your [ManaBox](https://manabox.app) card collection: see what
 you already own, what's missing, and what it'll cost to finish the deck at
-today's market prices — sorted, filtered, and priced automatically.
+today's market prices — sorted, filtered, and priced automatically. Or skip
+the decklist entirely and use the built-in **Deck Builder** to build a
+brand-new Commander or 60-card deck straight from what you already own, with
+fill-the-gaps suggestions and a one-click export back to Moxfield or
+Archidekt.
 
 Available two ways: a **web app** (paste a URL, upload a CSV, done — no
 terminal needed) and the original **CLI** (menu-driven, generates
-Markdown/HTML/CSV reports on disk).
+Markdown/HTML/CSV reports on disk) — the Deck Builder is web-app only.
 
 ![Comparison results — pricing, Game Changers, Commander legality, deck completion](screenshots/results.png)
 
@@ -69,6 +73,13 @@ Markdown/HTML/CSV reports on disk).
   distinguishable from a decklist alone per WotC's own text, so those
   report as a range rather than guessing
 - Total deck value at today's market price, plus the owned portion
+- A **Deck Analysis** panel on every report: a mana curve chart (split
+  Permanents vs. Instants/Sorceries), a color and mana-source breakdown, and
+  a Draw / Deal Another Hand sample-hand tool with an average-lands-in-
+  opening-hand stat
+- A **Compact** view toggle for the card grid — swaps big card-image tiles
+  for a dense text list with each card's full mana-cost pips, for scanning
+  a large deck quickly
 - A **Shopping List** button opens a plain-text, alphabetized list of
   what's still missing (quantity + name), pre-selected and one click away
   from your clipboard
@@ -81,6 +92,55 @@ Markdown/HTML/CSV reports on disk).
   own but have committed to a different build still shows as needed here —
   persisted so you don't have to re-mark it every time
 - A blurred commander-art backdrop, because why not
+
+## Deck Builder
+
+Building a new deck instead of checking an existing one? Skip typing out a
+want list and build straight from what you already own, at `/builder` in
+the web app (or the **+ New deck** link next to Recent decks on the home
+page).
+
+![Deck Builder](screenshots/deck-builder.png)
+
+- Pick **Commander** (100-card singleton) or **60-card constructed**, then
+  search/filter your ManaBox collection by name, card type, color, or
+  "Commander" (legendary creatures eligible to lead a Commander deck)
+- **★** on an eligible card sets it as your commander; **+** adds any card
+  to the deck — both live right on the card tile
+- **Suggest cards** fills empty slots from what you own, ranked by: cards
+  that complete a known combo you're one card away from (via Commander
+  Spellbook), then cards sharing a theme/synergy tag with what's already in
+  the deck (the same Scryfall Oracle Tags used for the budget-alternative
+  suggestions above — not an AI guess), then whichever part of the deck's
+  shape is furthest from target. Defaults to the well-known Command
+  Zone-style EDH ratios (38 lands / 10 ramp / 10 draw / 11 interaction / 31
+  synergy pieces out of 100), adjustable under **Deck mix targets**
+- An optional **Intended bracket** (1-2 / 3 / 4+) keeps Suggest from
+  recommending more Game Changers than WotC's own published bracket rules
+  allow for that bracket; leave it on "No preference" to build freely — the
+  estimated bracket is shown either way
+- **Check Bracket & Value** shows the same Game Changers count, Commander
+  legality, Commander Spellbook rating, estimated WotC bracket, known
+  combos, and total deck value the compare flow computes — live, for
+  whatever's in the deck right now
+- The same mana curve, color/mana-source breakdown, and sample-hand draw
+  tools from the Deck Analysis panel update live as you build, not just on
+  the finished report
+- **Save** remembers the brew as a project, same as a compared deck — it
+  shows up in Recent decks on the home page and picks up right where you
+  left off
+- **View full report** runs the finished brew through the exact same
+  report a compared deck gets (pricing, Game Changers, legality, bracket,
+  combos) — since everything in it is owned by construction, it always
+  shows 100% complete
+- **Copy Decklist** copies a plain-text list — one line per card, with your
+  *exact* owned printing's set code and collector number — ready to paste
+  into Moxfield's or Archidekt's own deck-import box
+- **Export CSV** downloads the same Lands/Artifacts/Colors binder
+  organization as the compare flow's In-Store CSV, but for what you're
+  building — useful for physically pulling the cards from your own binders
+- A blurred commander-art backdrop here too, updating live as you pick or
+  clear a commander
 
 ## Requirements
 
@@ -164,7 +224,10 @@ macOS's AirPlay Receiver often squats on 5000) and opens your browser to
 it -- same behavior on macOS, Windows, and Linux. Closing the terminal
 window (or the "Shut Down" button in the page itself) stops the server.
 Set `PORT` (e.g. `PORT=6000 python3 app.py`) to force a specific port
-instead of auto-picking one.
+instead of auto-picking one. `HOST` (default `127.0.0.1`, local machine
+only) and `NO_BROWSER=1` (skip auto-opening a browser) are also available
+if you want to run it somewhere unusual -- both are set automatically by
+the Docker image below.
 
 From there:
 
@@ -185,6 +248,49 @@ The app remembers each deck you've looked at as a "project": any
 "reserved for another deck" overrides you save, plus your last-used
 options, are recalled automatically the next time you paste that same URL
 — no re-uploading, no re-checking boxes.
+
+## Usage: Docker
+
+A `Dockerfile` and `docker-compose.yml` are included for the web app (the
+CLI isn't containerized). There's no published image — Docker builds it
+from source, so you still need the repo on your machine first:
+
+1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+   (macOS/Windows) or Docker Engine + the Compose plugin (Linux), and make
+   sure it's running.
+2. Clone the repo (same as the [Install](#install) step above — no need
+   for the `pip3 install` part, the container handles its own
+   dependencies):
+   ```bash
+   git clone https://github.com/sevensixtwox51/brewlist.git
+   cd brewlist
+   ```
+3. Build and start it:
+   ```bash
+   docker compose up -d
+   ```
+
+Then open `http://localhost:5050`. Your ManaBox collection, saved
+decks/brews, and the local MTGJSON price index live in a named Docker
+volume (`brewlist-data`), so they survive `docker compose down` and
+rebuilds — remove that volume if you ever want a clean slate.
+
+To use a different host port, edit the `ports:` line in
+`docker-compose.yml` (e.g. `"6000:5050"`), or without Compose:
+
+```bash
+docker build -t brewlist .
+docker run -p 5050:5050 -v brewlist-data:/app/data brewlist
+```
+
+The in-app **Check for Updates** button won't find a git checkout inside
+the container, so it won't offer anything there — to update, pull the
+latest code on the host and rebuild the image instead:
+
+```bash
+git pull
+docker compose up -d --build
+```
 
 ## Usage: CLI
 
@@ -226,6 +332,27 @@ from version control
 Archidekt's, Scryfall's, MTGJSON's, and (for Commander decks) Commander
 Spellbook's public APIs needed to fetch decklists, prices, and combos.
 
+## Uninstalling
+
+**Non-Docker:** stop the app (the **Shut Down** button, or close the
+terminal window), then delete the folder you cloned into. Everything
+Brewlist stores — your collection, saved decks, the price index — lives
+inside that same folder under `data/`, so deleting it removes everything
+in one step. The `flask`/`rich`/`pyfiglet` packages `pip3 install`d
+earlier are small, shared Python libraries other tools may also use, so
+there's no need to remove them separately unless you want to
+(`pip3 uninstall flask rich pyfiglet`).
+
+**Docker:**
+
+```bash
+docker compose down --rmi all -v
+```
+
+Stops and removes the container, the image Docker built, and the
+`brewlist-data` volume (your collection, price index, saved decks) in one
+step. Then delete the cloned folder the same way as above.
+
 ## Support
 
 Brewlist is a free, personal project — if it's saved you time or money
@@ -238,7 +365,8 @@ appreciated!
 | File | Purpose |
 | --- | --- |
 | `brewlist_core.py` | Shared logic: Moxfield/Archidekt/Scryfall/MTGJSON fetching, ManaBox parsing, price comparison, HTML report rendering. No UI dependencies — imported by both entry points below. |
-| `app.py` | Flask web app. |
+| `deck_builder.py` | Deck Builder logic: owned-collection browsing data, the fill-the-gaps Suggest heuristic, brew-to-report conversion. No UI dependencies — imported by `app.py` only (the Deck Builder is web-app only). |
+| `app.py` | Flask web app, including the Deck Builder (`/builder`). |
 | `brewlist_cli.py` | Terminal CLI (interactive menu or scriptable flags). |
 | `Brewlist.command` | macOS double-click launcher for the web app. |
 | `Brewlist.bat` | Windows double-click launcher for the web app. |
