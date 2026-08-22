@@ -29,6 +29,7 @@ from datetime import datetime, timezone
 from flask import Flask, Response, abort, jsonify, request
 
 from brewlist_core import (
+    BUCKET_ORDER,
     PICKABLE_STORE_LABELS,
     STORE_DISPLAY_NAMES,
     build_comparison,
@@ -37,6 +38,7 @@ from brewlist_core import (
     ensure_price_index,
     extract_entries,
     fetch_deck,
+    gameplay_data_in_index,
     load_collection,
     load_store_prefs,
     normalize_name,
@@ -45,6 +47,11 @@ from brewlist_core import (
     render_html,
     save_store_prefs,
     update_from_git,
+)
+from deck_builder import (
+    brew_to_card_entries,
+    owned_collection_gameplay_view,
+    suggest_builder_cards,
 )
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -174,6 +181,43 @@ def _run_compare_job(job_id, entries, owned, break_out_basics, reserved,
                 job["error"] = str(e)
 
 
+def _run_brew_report_job(job_id, entries, owned, deck_id, deck_name, is_commander_format):
+    """Same job shape as _run_compare_job, for the deck builder's "View
+    full report" button -- reuses the exact same /compare/progress and
+    /compare/result polling routes, so a brew's report is a saved decklist
+    with 100% ownership (every card in `entries` is, by construction, one
+    the builder only let you add because you own it)."""
+    def _on_progress(done, total, stage=None):
+        with _JOBS_LOCK:
+            job = JOBS.get(job_id)
+            if job:
+                job["done"] = done
+                job["total"] = total
+                job["stage"] = stage
+
+    try:
+        bucket_names, buckets, totals = build_comparison(
+            entries, owned, ignore_basics=False, on_progress=_on_progress,
+            is_commander_format=is_commander_format,
+        )
+        html_report = render_html(
+            deck_name, "", deck_id, bucket_names, buckets, totals,
+            overrides_endpoint=f"/api/overrides/{deck_id}",
+            is_commander_format=is_commander_format,
+        )
+        with _JOBS_LOCK:
+            job = JOBS.get(job_id)
+            if job:
+                job["status"] = "done"
+                job["html"] = html_report
+    except Exception as e:  # noqa: BLE001 -- surface any failure to the polling client
+        with _JOBS_LOCK:
+            job = JOBS.get(job_id)
+            if job:
+                job["status"] = "error"
+                job["error"] = str(e)
+
+
 # --------------------------------------------------------------------------
 # Home page
 # --------------------------------------------------------------------------
@@ -279,16 +323,30 @@ def render_home_page(error: str | None = None, prefill_url: str = "") -> str:
         collection_html = '<div class="collection-status">No collection uploaded yet &mdash; required the first time.</div>'
 
     projects = list_projects()
-    if projects:
-        items = "".join(
-            f'<li><a href="#" class="recent-deck-link" data-url="{_esc(p.get("deck_url", p.get("deck_id", "")))}">'
-            f'{_esc(p.get("deck_name", p.get("deck_id", "unknown")))}</a>'
+
+    def _project_item(p: dict) -> str:
+        is_brew = p.get("type") == "brew"
+        label = _esc(p.get("deck_name", p.get("deck_id", "unknown")))
+        if is_brew:
+            href = f'/builder?id={_esc(p.get("deck_id", ""))}'
+            data_attrs = 'data-type="brew"'
+            label += ' <span class="hint-inline">(brew)</span>'
+        else:
+            href = "#"
+            data_attrs = f'data-type="compare" data-url="{_esc(p.get("deck_url", p.get("deck_id", "")))}"'
+        return (
+            f'<li><a href="{href}" class="recent-deck-link" {data_attrs}>{label}</a>'
             f'<span class="when">{_esc((p.get("updated") or "")[:16].replace("T", " "))}</span></li>'
-            for p in projects[:15]
         )
-        projects_html = f'<div class="card"><label>Recent decks</label><ul class="project-list">{items}</ul></div>'
-    else:
-        projects_html = ""
+
+    items = "".join(_project_item(p) for p in projects[:15])
+    projects_list_html = f'<ul class="project-list">{items}</ul>' if items else '<div class="hint" style="margin:0;">No decks yet.</div>'
+    projects_html = (
+        '<div class="card"><div class="page-header" style="margin-bottom:12px;">'
+        '<label style="margin:0;">Recent decks</label>'
+        '<a href="/builder" class="btn ghost small">&#43; New deck</a>'
+        f'</div>{projects_list_html}</div>'
+    )
 
     error_html = f'<div class="error">{_esc(error)}</div>' if error else ""
 
@@ -413,6 +471,7 @@ const moxfieldUrlInput = document.getElementById('moxfield_url');
 
 document.querySelectorAll('.recent-deck-link').forEach(link => {{
   link.addEventListener('click', (e) => {{
+    if (link.dataset.type === 'brew') return; // real navigation to /builder?id=...
     e.preventDefault();
     moxfieldUrlInput.value = link.dataset.url;
     moxfieldUrlInput.focus();
@@ -593,6 +652,692 @@ def _esc(s) -> str:
 
 
 # --------------------------------------------------------------------------
+# Deck builder page -- build a brand-new deck (Commander or generic 60-card
+# constructed) using only cards already in the ManaBox collection. See
+# deck_builder.py for the non-UI logic (gameplay-data merge, fill-the-gaps
+# suggestions, brew -> CardEntry conversion). A saved brew is just another
+# project file (see save_project/load_project above), distinguished by
+# "type": "brew" -- the home page's Recent decks list already picks it up
+# for free.
+# --------------------------------------------------------------------------
+
+BUILDER_STYLE = """
+main.builder { max-width: 1400px; }
+.builder-top { display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; }
+.builder-top .field { display:flex; flex-direction:column; gap:4px; }
+.builder-top label { margin:0; }
+.builder-top input[type=text], .builder-top select {
+  padding:8px 10px; border-radius:8px; border:1px solid var(--card-border);
+  background:var(--bg); color:var(--text); font-size:0.9rem; margin:0; min-width:160px;
+}
+.builder-layout { display:grid; grid-template-columns: 1.3fr 1fr; gap:20px; align-items:start; margin-top:20px; }
+.builder-filters { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
+.builder-filters input[type=text] { flex:1; min-width:160px; margin:0; }
+.builder-filters select {
+  padding:8px 10px; border-radius:8px; border:1px solid var(--card-border);
+  background:var(--bg); color:var(--text); font-size:0.85rem;
+}
+.collection-grid {
+  display:grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap:10px; max-height:75vh; overflow-y:auto; padding-right:4px;
+}
+.builder-tile { background:var(--bg-elevated); border:1px solid var(--card-border); border-radius:10px; padding:10px; font-size:0.82rem; display:flex; gap:10px; }
+.builder-tile .tile-body { flex:1; min-width:0; }
+.builder-tile .name { font-weight:600; margin-bottom:2px; }
+.builder-tile .meta { color:var(--text-dim); font-size:0.75rem; margin-bottom:8px; }
+.builder-tile .warn { color: var(--missing); font-size:0.72rem; margin-bottom:6px; }
+.builder-tile .tile-actions { display:flex; gap:6px; flex-wrap:wrap; }
+.builder-tile.hidden { display:none; }
+.card-thumb {
+  width: 48px; height: 67px; border-radius: 5px; object-fit: cover;
+  flex-shrink: 0; background: var(--card-border); cursor: zoom-in;
+}
+.card-thumb.small { width: 32px; height: 44px; border-radius: 3.5px; }
+.color-icons { display: inline-flex; gap: 2px; align-items: center; flex-shrink: 0; }
+.mana-icon { width: 14px; height: 14px; display: block; }
+#hover-preview {
+  position: fixed; pointer-events: none; z-index: 100; display: none;
+  width: 240px; border-radius: 4.75% / 3.5%;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.5), 0 0 0 1px var(--card-border);
+}
+#hover-preview.show { display: block; }
+.deck-panel { position:sticky; top:20px; }
+.deck-stats { display:flex; gap:14px; flex-wrap:wrap; color:var(--text-dim); font-size:0.85rem; margin-bottom:12px; }
+.deck-stats b { color: var(--text); }
+.commander-slot {
+  border:1px dashed var(--card-border); border-radius:10px; padding:10px;
+  margin-bottom:14px; font-size:0.85rem; display:flex; justify-content:space-between; align-items:center; gap:8px;
+}
+.commander-slot .commander-info { display:flex; align-items:center; gap:8px; }
+.deck-group { margin-bottom:14px; }
+.deck-group h4 { margin: 0 0 6px; font-size:0.75rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.03em; }
+.deck-row { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:4px 0; border-bottom:1px solid var(--card-border); font-size:0.85rem; }
+.deck-row:last-child { border-bottom:none; }
+.deck-row .row-name { display:flex; align-items:center; gap:8px; min-width:0; }
+.deck-row .row-name span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.deck-row .qty-controls { display:flex; align-items:center; gap:6px; flex-shrink:0; }
+.deck-row .qty-controls .qty-btn { width:22px; height:22px; padding:0; line-height:1; }
+#suggestions-panel { margin-top:16px; }
+#suggestions-panel .suggestion-row { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid var(--card-border); font-size:0.82rem; }
+#suggestions-panel .row-name { display:flex; align-items:center; gap:8px; min-width:0; }
+#suggestions-panel .reason { color:var(--text-dim); font-size:0.72rem; }
+.segmented { display:flex; border:1px solid var(--card-border); border-radius:8px; overflow:hidden; }
+.segmented .seg-btn {
+  border:none; background:var(--bg); color:var(--text-dim); padding:8px 14px;
+  font-size:0.85rem; font-family:inherit; cursor:pointer;
+}
+.segmented .seg-btn:first-child { border-right:1px solid var(--card-border); }
+.segmented .seg-btn.active { background:var(--gold); color:#241f00; font-weight:600; }
+.deck-analysis { margin-top:16px; border-top:1px solid var(--card-border); padding-top:14px; }
+.analysis-heading { margin:0 0 8px; font-size:0.85rem; }
+.analysis-stat-line { color:var(--text-dim); font-size:0.78rem; margin:0 0 8px; }
+.curve-chart { display:flex; align-items:flex-end; gap:4px; height:90px; }
+.curve-col { flex:1; display:flex; flex-direction:column; align-items:center; height:100%; }
+.curve-bar-wrap { flex:1; width:100%; display:flex; flex-direction:column-reverse; align-items:stretch; min-height:0; }
+.curve-bar { width:100%; }
+.curve-bar.permanents { background:var(--accent); }
+.curve-bar.spells { background:var(--gold); }
+.curve-label { font-size:0.68rem; color:var(--text-dim); margin-top:3px; }
+.chart-legend { display:flex; gap:12px; font-size:0.72rem; color:var(--text-dim); margin:6px 0 12px; flex-wrap:wrap; }
+.chart-legend .swatch { width:9px; height:9px; border-radius:2px; display:inline-block; margin-right:4px; }
+.chart-legend .swatch.permanents { background:var(--accent); }
+.chart-legend .swatch.spells { background:var(--gold); }
+.chart-legend .swatch.pips { background:var(--accent); }
+.color-breakdown { display:flex; flex-direction:column; gap:6px; margin-bottom:12px; }
+.color-row { display:flex; align-items:center; gap:8px; }
+.color-row .mana-icon { width:16px; height:16px; flex-shrink:0; }
+.color-bar-track { flex:1; height:7px; border-radius:4px; background:var(--card-border); overflow:hidden; }
+.color-bar { height:100%; border-radius:4px; background:var(--accent); }
+.sample-hand-cards { display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
+.sample-hand-thumb { width:64px; height:89px; border-radius:5px; object-fit:cover; background:var(--card-border); cursor:zoom-in; }
+body.compact .builder-tile { padding:4px 10px; }
+body.compact .builder-tile .card-thumb { display:none; }
+body.compact .builder-tile .meta { display:none; }
+body.compact .builder-tile .tile-actions { margin-top:2px; }
+body.compact .collection-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+body.compact .deck-row .card-thumb { display:none; }
+@media (max-width: 900px) { .builder-layout { grid-template-columns: 1fr; } .deck-panel { position:static; } }
+"""
+
+COLOR_LABELS = {"W": "White", "U": "Blue", "B": "Black", "R": "Red", "G": "Green"}
+
+
+def render_builder_page(deck_id: str | None = None) -> str:
+    brew = load_project(deck_id) if deck_id else {}
+    if deck_id and brew.get("type") != "brew":
+        brew = {}
+        deck_id = None
+    brew_state = {
+        "deck_name": brew.get("deck_name") or "",
+        "format": brew.get("format") or "commander",
+        "target_format": brew.get("target_format") or "standard",
+        "commander": brew.get("commander"),
+        "cards": brew.get("cards") or [],
+    }
+
+    category_options = "".join(f'<option value="{_esc(b)}">{_esc(b)}</option>' for b in BUCKET_ORDER)
+    color_options = "".join(f'<option value="{code}">{_esc(label)}</option>' for code, label in COLOR_LABELS.items())
+
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/svg+xml" href="https://svgs.scryfall.io/card-symbols/PW.svg">
+<title>Brewlist -- Deck Builder</title>
+<style>{PAGE_STYLE}{BUILDER_STYLE}</style>
+</head>
+<body>
+<img id="hover-preview" alt="">
+<main class="builder">
+  <div class="page-header">
+    <div>
+      <h1>Deck Builder</h1>
+      <p class="subtitle">Build a new deck using only cards you already own.</p>
+    </div>
+    <div class="header-actions">
+      <a href="/" class="btn ghost small">&larr; Home</a>
+    </div>
+  </div>
+  <div id="error-box" class="error" style="display:none;"></div>
+
+  <div class="card builder-top">
+    <div class="field"><label for="deck-name">Deck name</label>
+      <input type="text" id="deck-name" placeholder="Untitled brew">
+    </div>
+    <div class="field"><label for="deck-format">Format</label>
+      <select id="deck-format">
+        <option value="commander">Commander</option>
+        <option value="constructed">60-card constructed</option>
+      </select>
+    </div>
+    <div class="field" id="target-format-field">
+      <label for="target-format">Target format (legality)</label>
+      <select id="target-format">
+        <option value="standard">Standard</option>
+        <option value="pioneer">Pioneer</option>
+        <option value="modern">Modern</option>
+        <option value="legacy">Legacy</option>
+        <option value="vintage">Vintage</option>
+        <option value="pauper">Pauper</option>
+      </select>
+    </div>
+    <button type="button" class="btn small" id="save-btn">Save</button>
+    <button type="button" class="btn ghost small" id="suggest-btn">Suggest cards</button>
+    <button type="button" class="btn ghost small" id="report-btn">View full report</button>
+    <div class="segmented" id="view-density-toggle" title="Switches between full tiles and a compact text list with mana-cost pips">
+      <button type="button" class="seg-btn active" data-value="cards">Cards</button>
+      <button type="button" class="seg-btn" data-value="compact">Compact</button>
+    </div>
+    <div id="save-label" class="hint" style="margin:0;display:none;"></div>
+  </div>
+
+  <div class="builder-layout">
+    <div>
+      <div class="builder-filters">
+        <input type="text" id="search" placeholder="Search your collection...">
+        <select id="filter-category"><option value="">All types</option><option value="Commander">Commander</option>{category_options}</select>
+        <select id="filter-color"><option value="">Any color</option><option value="C">Colorless</option>{color_options}</select>
+      </div>
+      <div class="collection-grid" id="collection-grid"><div class="hint">Loading your collection&hellip;</div></div>
+    </div>
+    <div class="card deck-panel">
+      <div class="deck-stats" id="deck-stats"></div>
+      <div id="commander-slot-wrap"></div>
+      <div id="deck-list"></div>
+      <div id="suggestions-panel"></div>
+      <div class="deck-analysis" id="deck-analysis">
+        <h4 class="analysis-heading">&#128202; Deck Analysis</h4>
+        <div class="analysis-stat-line" id="analysis-stat-line"></div>
+        <div class="curve-chart" id="curve-chart"></div>
+        <div class="chart-legend">
+          <span><span class="swatch permanents"></span>Permanents</span>
+          <span><span class="swatch spells"></span>Instants/Sorceries</span>
+        </div>
+        <div class="color-breakdown" id="color-breakdown"></div>
+        <div class="analysis-stat-line" id="sample-hand-stat"></div>
+        <button type="button" class="btn ghost small" id="draw-hand-btn">&#127183; Draw / Deal Another Hand</button>
+        <div class="sample-hand-cards" id="sample-hand-cards"></div>
+      </div>
+    </div>
+  </div>
+</main>
+<script>
+let deckId = {json.dumps(deck_id)};
+let brew = {json.dumps(brew_state)};
+let collection = [];
+
+const errorBox = document.getElementById('error-box');
+function showError(message) {{ errorBox.textContent = message; errorBox.style.display = 'block'; }}
+
+document.getElementById('deck-name').value = brew.deck_name;
+document.getElementById('deck-format').value = brew.format;
+document.getElementById('target-format').value = brew.target_format;
+
+function targetSize() {{ return brew.format === 'commander' ? 100 : 60; }}
+
+function updateFormatUI() {{
+  document.getElementById('target-format-field').style.display = brew.format === 'commander' ? 'none' : 'flex';
+}}
+updateFormatUI();
+
+document.getElementById('deck-format').addEventListener('change', (e) => {{
+  brew.format = e.target.value;
+  if (brew.format !== 'commander') brew.commander = null;
+  updateFormatUI();
+  renderAll();
+}});
+document.getElementById('target-format').addEventListener('change', (e) => {{ brew.target_format = e.target.value; }});
+document.getElementById('deck-name').addEventListener('input', (e) => {{ brew.deck_name = e.target.value; }});
+
+function normalizeName(name) {{ return name.trim().toLowerCase(); }}
+
+// Same direct Scryfall CDN hotlink pattern as scryfall_image_url() in
+// brewlist_core.py -- no API call needed, just the card's own Scryfall ID.
+function scryfallImg(scryfallId, size) {{
+  if (!scryfallId) return null;
+  return `https://cards.scryfall.io/${{size}}/front/${{scryfallId[0]}}/${{scryfallId[1]}}/${{scryfallId}}.jpg`;
+}}
+
+// Same convention as the compare report's card tiles: one icon per color-
+// identity letter (not a full parse of the mana cost string's pip counts).
+const WUBRG = ['W', 'U', 'B', 'R', 'G'];
+function colorIconsHtml(colorIdentity) {{
+  const colors = WUBRG.filter(c => (colorIdentity || []).includes(c));
+  if (!colors.length) return '';
+  return '<span class="color-icons">' + colors.map(c =>
+    `<img class="mana-icon" src="https://svgs.scryfall.io/card-symbols/${{c}}.svg" alt="${{c}}" loading="lazy">`
+  ).join('') + '</span>';
+}}
+
+function thumbHtml(scryfallId, cssClass) {{
+  const small = scryfallImg(scryfallId, 'small');
+  const full = scryfallImg(scryfallId, 'normal');
+  if (!small) return `<div class="${{cssClass}}"></div>`;
+  return `<img class="${{cssClass}}" src="${{small}}" data-full="${{full}}" alt="" loading="lazy" decoding="async">`;
+}}
+
+const hoverPreview = document.getElementById('hover-preview');
+function setupHoverPreview(container) {{
+  container.addEventListener('mousemove', (e) => {{
+    const img = e.target.closest('.card-thumb[data-full]');
+    if (!img) {{ hoverPreview.classList.remove('show'); return; }}
+    hoverPreview.src = img.dataset.full;
+    hoverPreview.classList.add('show');
+    const pad = 18, w = 240, h = Math.round(w * 1.4);
+    let x = e.clientX + pad;
+    let y = e.clientY + pad;
+    if (x + w > window.innerWidth) x = e.clientX - w - pad;
+    if (y + h > window.innerHeight) y = window.innerHeight - h - pad;
+    hoverPreview.style.left = x + 'px';
+    hoverPreview.style.top = Math.max(0, y) + 'px';
+  }});
+  container.addEventListener('mouseleave', () => hoverPreview.classList.remove('show'));
+}}
+setupHoverPreview(document.getElementById('collection-grid'));
+setupHoverPreview(document.getElementById('commander-slot-wrap'));
+setupHoverPreview(document.getElementById('deck-list'));
+setupHoverPreview(document.getElementById('suggestions-panel'));
+setupHoverPreview(document.getElementById('sample-hand-cards'));
+
+document.getElementById('draw-hand-btn').addEventListener('click', drawSampleHand);
+
+const viewDensityBtns = document.querySelectorAll('#view-density-toggle .seg-btn');
+viewDensityBtns.forEach(btn => {{
+  btn.addEventListener('click', () => {{
+    viewDensityBtns.forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.body.classList.toggle('compact', btn.dataset.value === 'compact');
+  }});
+}});
+
+function findCard(name) {{
+  const nm = normalizeName(name);
+  return brew.cards.find(c => normalizeName(c.name) === nm);
+}}
+
+function isCommanderEligible(card) {{
+  return card.type_line.includes('Legendary') && card.type_line.includes('Creature');
+}}
+
+function setCommander(card) {{
+  brew.commander = {{
+    name: card.name, scryfall_id: card.scryfall_id, type_line: card.type_line, color_identity: card.color_identity,
+    cmc: card.cmc, mana_cost: card.mana_cost, category: card.category, quantity: 1,
+  }};
+  renderAll();
+}}
+
+function clearCommander() {{ brew.commander = null; renderAll(); }}
+
+function addCard(card) {{
+  const existing = findCard(card.name);
+  if (brew.format === 'commander') {{
+    if (existing) return;
+    brew.cards.push({{
+      name: card.name, quantity: 1, scryfall_id: card.scryfall_id, cmc: card.cmc, mana_cost: card.mana_cost,
+      type_line: card.type_line, color_identity: card.color_identity, category: card.category,
+    }});
+  }} else {{
+    const ownedQty = card.quantity || 4;
+    if (existing) {{
+      if (existing.quantity < Math.min(4, ownedQty)) existing.quantity += 1;
+    }} else {{
+      brew.cards.push({{
+        name: card.name, quantity: 1, scryfall_id: card.scryfall_id, cmc: card.cmc, mana_cost: card.mana_cost,
+        type_line: card.type_line, color_identity: card.color_identity, category: card.category,
+      }});
+    }}
+  }}
+  renderAll();
+}}
+
+function removeCard(name) {{
+  brew.cards = brew.cards.filter(c => normalizeName(c.name) !== normalizeName(name));
+  renderAll();
+}}
+
+function adjustQty(name, delta) {{
+  const c = findCard(name);
+  if (!c) return;
+  c.quantity = Math.max(1, c.quantity + delta);
+  if (c.quantity <= 0) removeCard(name);
+  renderAll();
+}}
+
+function legalityFor(card) {{
+  // MTGJSON omits a format entirely when a card was never printed into
+  // that format's pool (e.g. Sol Ring has no "standard" key at all)
+  // rather than saying "Not Legal" -- so a missing entry means "not
+  // legal" for a target constructed format. Commander is the exception:
+  // it's explicitly "Legal" for essentially every real paper card, so a
+  // missing entry there just means untracked, not banned.
+  if (brew.format === 'commander') return (card.legalities || {{}})['commander'] || null;
+  return (card.legalities || {{}})[brew.target_format] || 'Not Legal';
+}}
+
+function renderGrid() {{
+  const search = document.getElementById('search').value.trim().toLowerCase();
+  const category = document.getElementById('filter-category').value;
+  const color = document.getElementById('filter-color').value;
+  const grid = document.getElementById('collection-grid');
+  grid.innerHTML = '';
+  const frag = document.createDocumentFragment();
+  collection.forEach(card => {{
+    if (search && !card.name.toLowerCase().includes(search)) return;
+    if (category === 'Commander' && !isCommanderEligible(card)) return;
+    if (category && category !== 'Commander' && card.category !== category) return;
+    if (color === 'C' && card.color_identity.length > 0) return;
+    if (color && color !== 'C' && !card.color_identity.includes(color)) return;
+
+    const tile = document.createElement('div');
+    tile.className = 'builder-tile';
+    const legality = legalityFor(card);
+    const warnHtml = (legality && legality !== 'Legal') ? `<div class="warn">&#9888; ${{legality}} in ${{brew.format === 'commander' ? 'Commander' : brew.target_format}}</div>` : '';
+    const inDeck = findCard(card.name);
+    const addLabel = brew.format === 'commander' && inDeck ? 'In deck' : '+ Add';
+    tile.innerHTML = `
+      ${{thumbHtml(card.scryfall_id, 'card-thumb')}}
+      <div class="tile-body">
+        <div class="name">${{card.name}}</div>
+        <div class="meta">${{card.type_line || 'Unknown type'}} &middot; CMC ${{card.cmc}} &middot; own ${{card.quantity}} ${{colorIconsHtml(card.color_identity)}}</div>
+        ${{warnHtml}}
+        <div class="tile-actions"></div>
+      </div>
+    `;
+    const actions = tile.querySelector('.tile-actions');
+    const addBtn = document.createElement('button');
+    addBtn.type = 'button'; addBtn.className = 'btn ghost small';
+    addBtn.textContent = addLabel;
+    addBtn.disabled = brew.format === 'commander' && !!inDeck;
+    addBtn.addEventListener('click', () => addCard(card));
+    actions.appendChild(addBtn);
+    if (brew.format === 'commander' && isCommanderEligible(card)) {{
+      const cmdBtn = document.createElement('button');
+      cmdBtn.type = 'button'; cmdBtn.className = 'btn ghost small';
+      cmdBtn.textContent = '\\u2605 Commander';
+      cmdBtn.addEventListener('click', () => setCommander(card));
+      actions.appendChild(cmdBtn);
+    }}
+    frag.appendChild(tile);
+  }});
+  grid.appendChild(frag);
+}}
+
+function renderCommanderSlot() {{
+  const wrap = document.getElementById('commander-slot-wrap');
+  if (brew.format !== 'commander') {{ wrap.innerHTML = ''; return; }}
+  if (!brew.commander) {{
+    wrap.innerHTML = '<div class="commander-slot"><span class="hint" style="margin:0;">No commander chosen -- click &#9733; Commander on an eligible card.</span></div>';
+    return;
+  }}
+  wrap.innerHTML = `<div class="commander-slot"><span class="commander-info">${{thumbHtml(brew.commander.scryfall_id, 'card-thumb small')}}<span><b>Commander:</b> ${{brew.commander.name}} ${{colorIconsHtml(brew.commander.color_identity)}}</span></span></div>`;
+  wrap.querySelector('.commander-slot').appendChild(Object.assign(document.createElement('button'), {{
+    type: 'button', className: 'btn ghost small', textContent: 'Clear',
+    onclick: clearCommander,
+  }}));
+}}
+
+function renderDeckList() {{
+  const list = document.getElementById('deck-list');
+  list.innerHTML = '';
+  const groups = {{}};
+  brew.cards.forEach(c => {{
+    const g = c.category || 'Other';
+    (groups[g] = groups[g] || []).push(c);
+  }});
+  Object.keys(groups).sort().forEach(g => {{
+    const div = document.createElement('div');
+    div.className = 'deck-group';
+    div.innerHTML = `<h4>${{g}} (${{groups[g].reduce((s, c) => s + c.quantity, 0)}})</h4>`;
+    groups[g].sort((a, b) => a.name.localeCompare(b.name)).forEach(c => {{
+      const row = document.createElement('div');
+      row.className = 'deck-row';
+      row.innerHTML = `<span class="row-name">${{thumbHtml(c.scryfall_id, 'card-thumb small')}}<span>${{c.name}}</span>${{colorIconsHtml(c.color_identity)}}</span>`;
+      const controls = document.createElement('div');
+      controls.className = 'qty-controls';
+      if (brew.format !== 'commander') {{
+        const minus = Object.assign(document.createElement('button'), {{ className: 'btn ghost small qty-btn', textContent: '\\u2212', onclick: () => adjustQty(c.name, -1) }});
+        const qty = Object.assign(document.createElement('span'), {{ textContent: c.quantity }});
+        const plus = Object.assign(document.createElement('button'), {{ className: 'btn ghost small qty-btn', textContent: '+', onclick: () => adjustQty(c.name, 1) }});
+        controls.append(minus, qty, plus);
+      }}
+      const removeBtn = Object.assign(document.createElement('button'), {{ className: 'btn danger small', textContent: 'Remove', onclick: () => removeCard(c.name) }});
+      controls.appendChild(removeBtn);
+      row.appendChild(controls);
+      div.appendChild(row);
+    }});
+    list.appendChild(div);
+  }});
+}}
+
+function renderStats() {{
+  const total = brew.cards.reduce((s, c) => s + c.quantity, 0);
+  const lands = brew.cards.filter(c => (c.category || '').includes('Land')).reduce((s, c) => s + c.quantity, 0);
+  const avgCmc = brew.cards.length
+    ? (brew.cards.reduce((s, c) => s + (c.cmc || 0) * c.quantity, 0) / Math.max(1, total)).toFixed(2)
+    : '0.00';
+  document.getElementById('deck-stats').innerHTML =
+    `<span><b>${{total}}</b> / ${{targetSize()}} cards</span><span><b>${{lands}}</b> lands</span><span>avg CMC <b>${{avgCmc}}</b></span>`;
+}}
+
+function parseManaPips(manaCost) {{
+  const matches = (manaCost || '').match(/\\{{[^}}]+\\}}/g) || [];
+  return matches.map(m => m.slice(1, -1));
+}}
+
+function manaPipSymbolUrl(token) {{
+  return `https://svgs.scryfall.io/card-symbols/${{token.replace('/', '').toUpperCase()}}.svg`;
+}}
+
+function libraryCards() {{
+  // The commander never gets drawn/shuffled (starts in the command zone) --
+  // curve/pips/sample-hand should reflect what's actually in the 99/60-card
+  // library, same reasoning as brewlist_core.py's render_html.
+  return brew.cards;
+}}
+
+function manaCurveData(cards) {{
+  const buckets = {{}};
+  for (let i = 0; i <= 7; i++) buckets[i] = {{ permanents: 0, spells: 0 }};
+  cards.forEach(c => {{
+    if (c.category === 'Lands' || c.category === 'Basic Lands') return;
+    const b = Math.min(Math.round(c.cmc || 0), 7);
+    if (c.category === 'Instants' || c.category === 'Sorceries') buckets[b].spells += c.quantity;
+    else buckets[b].permanents += c.quantity;
+  }});
+  return Object.keys(buckets).map(k => ({{
+    label: k === '7' ? '7+' : k, permanents: buckets[k].permanents, spells: buckets[k].spells,
+  }}));
+}}
+
+function colorPipCounts(cards) {{
+  const counts = {{ W: 0, U: 0, B: 0, R: 0, G: 0 }};
+  cards.forEach(c => {{
+    if (c.category === 'Lands' || c.category === 'Basic Lands') return;
+    parseManaPips(c.mana_cost).forEach(p => {{
+      WUBRG.forEach(col => {{ if (p.includes(col)) counts[col] += c.quantity; }});
+    }});
+  }});
+  return counts;
+}}
+
+function renderDeckAnalysis() {{
+  const cards = libraryCards();
+  const total = cards.reduce((s, c) => s + c.quantity, 0);
+  document.getElementById('deck-analysis').style.display = total ? 'block' : 'none';
+  if (!total) return;
+
+  const allCmcs = cards.flatMap(c => Array(c.quantity).fill(c.cmc || 0));
+  const avgCmc = allCmcs.reduce((s, v) => s + v, 0) / allCmcs.length;
+  document.getElementById('analysis-stat-line').textContent = `Average mana value: ${{avgCmc.toFixed(2)}}`;
+
+  const curve = manaCurveData(cards);
+  const maxCount = Math.max(1, ...curve.map(b => b.permanents + b.spells));
+  document.getElementById('curve-chart').innerHTML = curve.map(b => `
+    <div class="curve-col" title="Mana value ${{b.label}}: ${{b.permanents + b.spells}} card(s)">
+      <div class="curve-bar-wrap">
+        <div class="curve-bar spells" style="height:${{b.spells / maxCount * 100}}%"></div>
+        <div class="curve-bar permanents" style="height:${{b.permanents / maxCount * 100}}%"></div>
+      </div>
+      <div class="curve-label">${{b.label}}</div>
+    </div>`).join('');
+
+  const pips = colorPipCounts(cards);
+  const totalPips = Math.max(1, Object.values(pips).reduce((s, v) => s + v, 0));
+  document.getElementById('color-breakdown').innerHTML = WUBRG.map(c => `
+    <div class="color-row">
+      <img class="mana-icon" src="https://svgs.scryfall.io/card-symbols/${{c}}.svg" alt="${{c}}" loading="lazy">
+      <div class="color-bar-track" title="${{pips[c]}} pip(s) &middot; ${{Math.round(pips[c] / totalPips * 100)}}% of all symbols">
+        <div class="color-bar" style="width:${{pips[c] / totalPips * 100}}%"></div>
+      </div>
+    </div>`).join('');
+
+  const lands = cards.filter(c => c.category === 'Lands' || c.category === 'Basic Lands').reduce((s, c) => s + c.quantity, 0);
+  const avgLandsInHand = 7 * lands / total;
+  document.getElementById('sample-hand-stat').textContent = `Average number of lands in opening hand: ${{avgLandsInHand.toFixed(2)}}`;
+}}
+
+function drawSampleHand() {{
+  const pool = [];
+  libraryCards().forEach(c => {{ for (let i = 0; i < c.quantity; i++) pool.push(c); }});
+  for (let i = pool.length - 1; i > 0; i--) {{
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = pool[i]; pool[i] = pool[j]; pool[j] = tmp;
+  }}
+  document.getElementById('sample-hand-cards').innerHTML =
+    pool.slice(0, 7).map(c => thumbHtml(c.scryfall_id, 'sample-hand-thumb card-thumb')).join('');
+}}
+
+function renderAll() {{
+  renderGrid();
+  renderCommanderSlot();
+  renderDeckList();
+  renderStats();
+  renderDeckAnalysis();
+}}
+
+fetch('/builder/collection-data')
+  .then(r => r.json())
+  .then(data => {{
+    if (data.error) {{ showError(data.error); return; }}
+    collection = data.cards;
+    renderAll();
+  }})
+  .catch(() => showError('Could not load your collection.'));
+
+document.getElementById('search').addEventListener('input', renderGrid);
+document.getElementById('filter-category').addEventListener('change', renderGrid);
+document.getElementById('filter-color').addEventListener('change', renderGrid);
+
+const saveBtn = document.getElementById('save-btn');
+const saveLabel = document.getElementById('save-label');
+saveBtn.addEventListener('click', () => {{
+  saveBtn.disabled = true;
+  fetch('/builder/save', {{
+    method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
+    body: JSON.stringify({{ deck_id: deckId, ...brew }}),
+  }})
+    .then(r => r.json())
+    .then(data => {{
+      if (data.error) {{ showError(data.error); return; }}
+      deckId = data.deck_id;
+      window.history.replaceState(null, '', '/builder?id=' + encodeURIComponent(deckId));
+      saveLabel.textContent = 'Saved.';
+      saveLabel.style.display = 'block';
+      setTimeout(() => {{ saveLabel.style.display = 'none'; }}, 2000);
+    }})
+    .catch(() => showError('Could not reach the server.'))
+    .finally(() => {{ saveBtn.disabled = false; }});
+}});
+
+const suggestBtn = document.getElementById('suggest-btn');
+suggestBtn.addEventListener('click', () => {{
+  suggestBtn.disabled = true;
+  fetch('/builder/suggest', {{
+    method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
+    body: JSON.stringify({{
+      cards: brew.cards, commander: brew.commander, format: brew.format, target_format: brew.target_format,
+    }}),
+  }})
+    .then(r => r.json())
+    .then(data => {{
+      if (data.error) {{ showError(data.error); return; }}
+      const panel = document.getElementById('suggestions-panel');
+      panel.innerHTML = '<h4 style="font-size:0.8rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.03em;">Suggestions</h4>';
+      if (!data.suggestions.length) {{
+        panel.innerHTML += '<div class="hint" style="margin:0;">No suggestions -- your deck may already be full, or nothing left fits the color/legality filters.</div>';
+      }}
+      data.suggestions.forEach(s => {{
+        const row = document.createElement('div');
+        row.className = 'suggestion-row';
+        row.innerHTML = `<span class="row-name">${{thumbHtml(s.scryfall_id, 'card-thumb small')}}<span>${{s.name}} ${{colorIconsHtml(s.color_identity)}}<div class="reason">${{s.reason}}</div></span></span>`;
+        const addBtn = Object.assign(document.createElement('button'), {{
+          className: 'btn ghost small', textContent: '+ Add',
+          onclick: () => {{ addCard(s); row.remove(); }},
+        }});
+        row.appendChild(addBtn);
+        panel.appendChild(row);
+      }});
+    }})
+    .catch(() => showError('Could not reach the server.'))
+    .finally(() => {{ suggestBtn.disabled = false; }});
+}});
+
+function pollReportProgress(jobId) {{
+  fetch('/compare/progress/' + jobId)
+    .then(r => r.json())
+    .then(data => {{
+      if (data.status === 'running') {{
+        setTimeout(() => pollReportProgress(jobId), 400);
+      }} else if (data.status === 'done') {{
+        window.location.href = '/compare/result/' + jobId;
+      }} else {{
+        showError(data.error || 'Something went wrong building the report.');
+        document.getElementById('report-btn').disabled = false;
+      }}
+    }})
+    .catch(() => {{
+      showError('Lost contact with the server.');
+      document.getElementById('report-btn').disabled = false;
+    }});
+}}
+
+const reportBtn = document.getElementById('report-btn');
+reportBtn.addEventListener('click', () => {{
+  if (!brew.cards.length) {{ showError('Add some cards first.'); return; }}
+  reportBtn.disabled = true;
+  fetch('/builder/save', {{
+    method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
+    body: JSON.stringify({{ deck_id: deckId, ...brew }}),
+  }})
+    .then(r => r.json())
+    .then(data => {{
+      if (data.error) {{ throw new Error(data.error); }}
+      deckId = data.deck_id;
+      window.history.replaceState(null, '', '/builder?id=' + encodeURIComponent(deckId));
+      return fetch('/builder/report/start', {{
+        method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
+        body: JSON.stringify({{ deck_id: deckId }}),
+      }});
+    }})
+    .then(r => r.json())
+    .then(data => {{
+      if (data.error) {{ throw new Error(data.error); }}
+      pollReportProgress(data.job_id);
+    }})
+    .catch((e) => {{
+      showError(e.message || 'Could not reach the server.');
+      reportBtn.disabled = false;
+    }});
+}});
+</script>
+</body>
+</html>
+"""
+
+
+# --------------------------------------------------------------------------
 # Routes
 # --------------------------------------------------------------------------
 
@@ -600,6 +1345,94 @@ def _esc(s) -> str:
 def home():
     prefill = request.args.get("deck", "")
     return render_home_page(prefill_url=prefill)
+
+
+@app.route("/builder", methods=["GET"])
+def builder():
+    return render_builder_page(deck_id=request.args.get("id"))
+
+
+@app.route("/builder/collection-data", methods=["GET"])
+def builder_collection_data():
+    if not os.path.isfile(COLLECTION_PATH):
+        return jsonify(error="No ManaBox collection on file yet -- upload one from the home page first."), 400
+    try:
+        owned = load_collection(COLLECTION_PATH)
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+    cards = owned_collection_gameplay_view(owned, gameplay_data_in_index())
+    return jsonify(cards=cards)
+
+
+@app.route("/builder/save", methods=["POST"])
+def builder_save():
+    body = request.get_json(silent=True) or {}
+    cards = body.get("cards")
+    if not isinstance(cards, list):
+        abort(400)
+    deck_id = body.get("deck_id") or f"brew-{uuid.uuid4().hex[:12]}"
+    save_project(
+        deck_id,
+        type="brew",
+        deck_name=body.get("deck_name") or "Untitled brew",
+        format=body.get("format") if body.get("format") in ("commander", "constructed") else "commander",
+        target_format=body.get("target_format") or "standard",
+        commander=body.get("commander"),
+        cards=cards,
+    )
+    return jsonify(deck_id=deck_id)
+
+
+@app.route("/builder/suggest", methods=["POST"])
+def builder_suggest():
+    body = request.get_json(silent=True) or {}
+    deck_format = body.get("format") if body.get("format") in ("commander", "constructed") else "commander"
+    if not os.path.isfile(COLLECTION_PATH):
+        return jsonify(error="No ManaBox collection on file yet -- upload one from the home page first."), 400
+    try:
+        owned = load_collection(COLLECTION_PATH)
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+    owned_view = owned_collection_gameplay_view(owned, gameplay_data_in_index())
+    wip_entries = brew_to_card_entries({"commander": body.get("commander"), "cards": body.get("cards") or []})
+    commander = body.get("commander") or {}
+    suggestions = suggest_builder_cards(
+        wip_entries, owned_view, deck_format, body.get("target_format"),
+        target_size=100 if deck_format == "commander" else 60,
+        commander_color_identity=commander.get("color_identity") if deck_format == "commander" else None,
+    )
+    return jsonify(suggestions=suggestions)
+
+
+@app.route("/builder/report/start", methods=["POST"])
+def builder_report_start():
+    body = request.get_json(silent=True) or {}
+    deck_id = body.get("deck_id")
+    if not deck_id:
+        return jsonify(error="Save the deck first."), 400
+    brew = load_project(deck_id)
+    if not brew or brew.get("type") != "brew":
+        return jsonify(error="That brew could not be found."), 404
+    entries = brew_to_card_entries(brew)
+    if not entries:
+        return jsonify(error="Add some cards first."), 400
+    try:
+        owned = load_collection(COLLECTION_PATH)
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+
+    is_commander_format = brew.get("format") == "commander"
+    job_id = uuid.uuid4().hex
+    with _JOBS_LOCK:
+        JOBS[job_id] = {"status": "running", "done": 0, "total": 0, "stage": None, "html": None, "error": None}
+
+    threading.Thread(
+        target=_run_brew_report_job,
+        args=(job_id, entries, owned, deck_id, brew.get("deck_name") or "Brew", is_commander_format),
+        daemon=True,
+    ).start()
+
+    return jsonify(job_id=job_id)
 
 
 @app.route("/price-index/refresh", methods=["POST"])

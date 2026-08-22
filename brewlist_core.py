@@ -114,6 +114,13 @@ class CardEntry:
     set_name: str = ""
     set_code: str = ""
     collector_number: str = ""
+    # Backfilled by build_comparison from gameplay_data_in_index() for
+    # every entry (any format, not just Commander) -- neither Moxfield's
+    # nor Archidekt's decklist JSON reliably carries mana value, and a
+    # brew's cards never had it at all. Used for the mana curve/color
+    # breakdown/sample-hand sections in render_html.
+    cmc: float = 0.0
+    mana_cost: str = ""
     # Per-store cheapest (store, price, url) found across every paper printing
     # of this card, sorted cheapest first -- see ensure_price_index. Filled in
     # by build_comparison before pricing happens, None until then / if no
@@ -684,8 +691,10 @@ PRICE_INDEX_MAX_AGE_DAYS = 7
 # selection logic fixes with no shape change (v11: BUDGET_ALT_PREFERRED_TAGS;
 # v12: BUDGET_ALT_EXCLUDED_BRANCHES), since this is the only lever available
 # to force an immediate rebuild rather than waiting up to
-# PRICE_INDEX_MAX_AGE_DAYS for stale picks to self-heal.
-PRICE_INDEX_FORMAT_VERSION = 13
+# PRICE_INDEX_MAX_AGE_DAYS for stale picks to self-heal. v13: added the
+# "gameplay" field (type line, mana cost/CMC, color identity, oracle text,
+# full legalities dict) for the deck builder (deck_builder.py).
+PRICE_INDEX_FORMAT_VERSION = 14
 
 
 # --------------------------------------------------------------------------
@@ -1065,6 +1074,15 @@ def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[
         # scryfall_image_url), so it doesn't matter which printing; first
         # one seen wins, same as display_name_by_name.
         scryfall_id_by_name: dict[str, str] = {}
+        # Gameplay data (type line, mana cost/CMC, color identity, oracle
+        # text, and every format's legality, not just Commander's) per
+        # name -- name-level facts, first printing seen wins, same
+        # reasoning as display_name_by_name. Not used by the compare flow
+        # at all; exists so the deck builder (see deck_builder.py) can
+        # browse/filter the owned collection by color/type/curve and
+        # check legality without a live Scryfall call per card, reusing
+        # this same AllPrintings download instead of a second one.
+        gameplay_by_name: dict[str, dict] = {}
         for set_obj in all_printings.values():
             for card in set_obj.get("cards", []):
                 if "paper" not in (card.get("availability") or []):
@@ -1086,6 +1104,15 @@ def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[
                     is_land_by_name.setdefault(nm, is_land)
                     if card_scryfall_id:
                         scryfall_id_by_name.setdefault(nm, card_scryfall_id)
+                    gameplay_by_name.setdefault(nm, {
+                        "name": display_name_by_name[nm],
+                        "type_line": card.get("type") or "",
+                        "mana_cost": card.get("manaCost") or "",
+                        "cmc": card.get("manaValue", 0),
+                        "color_identity": card.get("colorIdentity") or [],
+                        "oracle_text": card.get("text") or "",
+                        "legalities": card.get("legalities") or {},
+                    })
 
                 if card.get("isGameChanger"):
                     game_changers.update(names)
@@ -1220,6 +1247,7 @@ def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[
         "prices": index,
         "game_changers": sorted(game_changers),
         "commander_legality": commander_legality,
+        "gameplay": gameplay_by_name,
         "scryfall_prices": by_scryfall_id,
         "budget_alt_tag_by_name": budget_alt_groups.get("tag_by_name") or {},
         "budget_alt_tag_labels": budget_alt_groups.get("tag_labels") or {},
@@ -1294,6 +1322,23 @@ def game_changers_in_index(path: str = PRICE_INDEX_PATH) -> set[str]:
             return set(json.load(f).get("game_changers") or [])
     except (OSError, ValueError):
         return set()
+
+
+def gameplay_data_in_index(path: str = PRICE_INDEX_PATH) -> dict[str, dict]:
+    """Returns {normalized_name: {"name", "type_line", "mana_cost", "cmc",
+    "color_identity", "oracle_text", "legalities"}}, read from the local
+    price index (see rebuild_price_index/ensure_price_index -- call that
+    first to make sure the index is actually present/fresh). Empty dict if
+    the index doesn't exist or predates this field. Used by the deck
+    builder (deck_builder.py) to browse/filter the owned collection by
+    color/type/curve and check format legality without a live Scryfall
+    call -- see gameplay_by_name in rebuild_price_index for how this is
+    populated."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f).get("gameplay") or {}
+    except (OSError, ValueError):
+        return {}
 
 
 def ensure_price_index(path: str = PRICE_INDEX_PATH, on_progress=None, force_refresh: bool = False) -> dict[str, dict]:
@@ -1541,6 +1586,110 @@ _GROUP_RANK = {"Colors": 0, "Artifacts": 1, "Lands": 2}
 _SUBGROUP_RANK = {"Multicolor": 0, "White": 1, "Blue": 2, "Black": 3, "Red": 4, "Green": 5, "Colorless": 99}
 
 
+# --------------------------------------------------------------------------
+# Deck analysis -- mana curve, color/mana-source breakdown, sample hand.
+# Pure functions over a list[CardEntry] (post-build_comparison, so
+# .cmc/.mana_cost/.color_identity are populated) -- no UI dependencies,
+# consumed by render_html.
+# --------------------------------------------------------------------------
+
+def parse_mana_pips(mana_cost: str) -> list[str]:
+    """Splits a mana cost string like "{2}{W/U}{W}" into its ordered pip
+    tokens ["2", "W/U", "W"] (braces stripped, "/" kept) -- see
+    mana_pip_symbol_url for turning one token into an actual icon URL."""
+    return re.findall(r"\{([^}]+)\}", mana_cost or "")
+
+
+def mana_pip_symbol_url(token: str) -> str:
+    """Direct Scryfall CDN hotlink for one mana-cost pip token (as
+    returned by parse_mana_pips) -- confirmed live against
+    api.scryfall.com/symbology that a symbol's SVG filename is just the
+    {...} token with "/" removed (e.g. "W/U" -> "WU.svg", "2/W" ->
+    "2W.svg"), so this is mana_symbol_url generalized from a bare WUBRG
+    letter to any pip token, not a separate lookup."""
+    return mana_symbol_url(token.replace("/", "").upper())
+
+
+def mana_curve_data(entries: list[CardEntry]) -> list[dict]:
+    """Buckets `entries` by rounded mana value (0..6, with a "7+" catch-
+    all), excluding lands, split into permanent vs instant/sorcery counts
+    per bucket -- the same "Permanents vs Spells" split Moxfield's own
+    Cost Analysis chart uses. Quantities are weighted by
+    CardEntry.quantity. Always returns all 8 buckets (0 to "7+"), zero-
+    filled, so the chart has a stable shape to render."""
+    buckets: dict[int, dict[str, int]] = {}
+    for e in entries:
+        cat = categorize(e.type_line)
+        if cat in ("Lands", "Basic Lands"):
+            continue
+        cmc_bucket = min(round(e.cmc), 7)
+        b = buckets.setdefault(cmc_bucket, {"permanents": 0, "spells": 0})
+        if cat in ("Instants", "Sorceries"):
+            b["spells"] += e.quantity
+        else:
+            b["permanents"] += e.quantity
+    return [
+        {
+            "cmc": i, "label": "7+" if i == 7 else str(i),
+            "permanents": buckets.get(i, {}).get("permanents", 0),
+            "spells": buckets.get(i, {}).get("spells", 0),
+        }
+        for i in range(8)
+    ]
+
+
+def color_pip_breakdown(entries: list[CardEntry]) -> dict[str, int]:
+    """{"W": n, "U": n, ...} counts of mana-cost pips across the deck
+    (non-land entries only, weighted by quantity) -- a hybrid symbol like
+    {W/U} counts toward both colors, same caveat Moxfield's own Color
+    Analysis states ("the percentages will not add up to 100% if you
+    have multi-color cards")."""
+    counts = {c: 0 for c in WUBRG}
+    for e in entries:
+        if categorize(e.type_line) in ("Lands", "Basic Lands"):
+            continue
+        for token in parse_mana_pips(e.mana_cost):
+            for c in WUBRG:
+                if c in token:
+                    counts[c] += e.quantity
+    return counts
+
+
+_MANA_SOURCE_RE = {c: re.compile(r"Add(?:[^.]*?)\{" + c + r"\}") for c in WUBRG}
+_MANA_SOURCE_ANY_COLOR_RE = re.compile(r"add one mana of any color", re.IGNORECASE)
+
+
+def mana_source_counts(entries: list[CardEntry], gameplay: dict[str, dict]) -> dict[str, int]:
+    """Best-effort heuristic count of "mana sources" per color -- lands
+    whose color_identity includes that color (color_identity for a land
+    is itself derived from its actual mana abilities, so this is reliable
+    for lands specifically), plus any other permanent whose oracle text
+    (from gameplay_data_in_index) contains an "Add {X}"-style mana
+    ability for that color. Cards worded as "add one mana of any color"
+    (Command Tower, Arcane Signet, City of Brass, ...) -- extremely common
+    in Commander and NOT caught by a literal {X} search -- are special-
+    cased to count as a source for every color actually in the deck
+    (color_identity across all entries). This is a heuristic, not a
+    rules-accurate mana-base analyzer -- it won't catch every unusual
+    wording -- same non-AI-guess framing already used for budget-
+    alternative suggestions and the deck builder's suggest engine."""
+    deck_colors: set[str] = set()
+    for e in entries:
+        deck_colors.update(e.color_identity or [])
+
+    counts = {c: 0 for c in WUBRG}
+    for e in entries:
+        is_land = categorize(e.type_line) in ("Lands", "Basic Lands")
+        oracle_text = (gameplay.get(normalize_name(e.name)) or {}).get("oracle_text") or ""
+        colors = {c for c in WUBRG if is_land and c in (e.color_identity or [])}
+        colors |= {c for c in WUBRG if _MANA_SOURCE_RE[c].search(oracle_text)}
+        if _MANA_SOURCE_ANY_COLOR_RE.search(oracle_text):
+            colors |= deck_colors
+        for c in colors:
+            counts[c] += e.quantity
+    return counts
+
+
 def shopping_group(entry: CardEntry) -> tuple[str, str]:
     """Groups a card the way a physical store organizes its binders: Lands and
     Artifacts are their own top-level groups; everything else falls under
@@ -1706,6 +1855,12 @@ def build_comparison(
     # (and misleading) outside that format, so both are gated on it.
     game_changers = game_changers_in_index() if is_commander_format else set()
     commander_legality = commander_legality_in_index() if is_commander_format else {}
+    # Mana value/cost, unlike the above, is meaningful for every format --
+    # used by render_html's mana curve/color breakdown/sample-hand
+    # sections regardless of is_commander_format. Neither Moxfield's nor
+    # Archidekt's decklist JSON reliably carries this, and a brew's cards
+    # never had it at all, so it always comes from here.
+    gameplay = gameplay_data_in_index()
     for e in entries:
         hit = by_name.get(normalize_name(e.name)) or {}
         nonfoil_list = [tuple(t) for t in hit["nonfoil"]] if hit.get("nonfoil") else []
@@ -1717,6 +1872,12 @@ def build_comparison(
         if "CM" in selected_stores:
             e.cardmarket_nonfoil = tuple(hit["cardmarket_nonfoil"]) if hit.get("cardmarket_nonfoil") else None
             e.cardmarket_foil = tuple(hit["cardmarket_foil"]) if hit.get("cardmarket_foil") else None
+        gp = gameplay.get(normalize_name(e.name))
+        if gp:
+            e.cmc = gp.get("cmc") or 0.0
+            e.mana_cost = gp.get("mana_cost") or ""
+            if not e.color_identity:
+                e.color_identity = gp.get("color_identity") or []
         if is_commander_format:
             e.is_game_changer = normalize_name(e.name) in game_changers
             if e.is_game_changer:
@@ -2392,6 +2553,54 @@ a.badge:hover {{ text-decoration: underline; }}
 }}
 .combo-toggle input {{ margin-right: 6px; cursor: pointer; }}
 #almost-combos-list {{ display: none; }}
+
+.deck-analysis-body {{ padding: 4px 16px 16px; display: grid; gap: 20px; }}
+@media (min-width: 900px) {{ .deck-analysis-body {{ grid-template-columns: 1.3fr 1fr; }} }}
+.analysis-stat-line {{ color: var(--text-dim); font-size: 0.85rem; margin: 0 0 10px; }}
+.curve-chart {{ display: flex; align-items: flex-end; gap: 6px; height: 140px; }}
+.curve-col {{ flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%; }}
+.curve-bar-wrap {{ flex: 1; width: 100%; display: flex; flex-direction: column-reverse; align-items: stretch; min-height: 0; }}
+.curve-bar {{ width: 100%; }}
+.curve-bar.permanents {{ background: var(--accent); }}
+.curve-bar.spells {{ background: var(--gold); }}
+.curve-label {{ font-size: 0.75rem; color: var(--text-dim); margin-top: 4px; }}
+.chart-legend {{ display: flex; gap: 14px; font-size: 0.75rem; color: var(--text-dim); margin-top: 8px; flex-wrap: wrap; }}
+.chart-legend span {{ display: inline-flex; align-items: center; gap: 5px; }}
+.chart-legend .swatch {{ width: 10px; height: 10px; border-radius: 2px; display: inline-block; }}
+.chart-legend .swatch.permanents {{ background: var(--accent); }}
+.chart-legend .swatch.spells {{ background: var(--gold); }}
+.chart-legend .swatch.pips {{ background: var(--accent); }}
+.chart-legend .swatch.sources {{ background: var(--owned); }}
+
+.color-breakdown {{ display: flex; flex-direction: column; gap: 8px; }}
+.color-row {{ display: flex; align-items: center; gap: 10px; }}
+.color-row .mana-icon {{ width: 18px; height: 18px; flex-shrink: 0; }}
+.color-bars {{ flex: 1; display: flex; flex-direction: column; gap: 3px; }}
+.color-bar-track {{ height: 8px; border-radius: 4px; background: var(--card-border); overflow: hidden; }}
+.color-bar {{ height: 100%; border-radius: 4px; }}
+.color-bar.pips {{ background: var(--accent); }}
+.color-bar.sources {{ background: var(--owned); }}
+
+.sample-hand {{ grid-column: 1 / -1; }}
+.sample-hand-cards {{ display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }}
+.sample-hand-thumb {{ width: 100px; height: 140px; border-radius: 6px; object-fit: cover; background: var(--card-border); cursor: zoom-in; }}
+.sample-hand-actions {{ display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }}
+
+.mana-cost-pips {{ display: none; align-items: center; gap: 1px; }}
+.mana-cost-pips .mana-icon {{ width: 13px; height: 13px; }}
+
+body.compact .card {{ padding: 4px 10px; gap: 0; }}
+body.compact .card .card-thumb {{ display: none; }}
+body.compact .override-toggle {{ display: none; }}
+body.compact .qty {{ display: none; }}
+body.compact .budget-alt-note {{ display: none; }}
+body.compact .card-main {{ align-items: center; gap: 8px; }}
+body.compact .card-body {{ align-items: center; }}
+body.compact .card-name {{ font-size: 0.85rem; }}
+body.compact .color-icons {{ display: none; }}
+body.compact .mana-cost-pips {{ display: inline-flex; }}
+body.compact .card-prices {{ flex-direction: row; max-width: none; }}
+body.compact .grid {{ grid-template-columns: 1fr; }}
 .qty {{
   color: var(--text-dim);
   font-size: 0.8rem;
@@ -2563,6 +2772,10 @@ footer {{
       <button type="button" class="seg-btn active" data-value="nonfoil">Non-foil</button>
       <button type="button" class="seg-btn" data-value="foil">Foil</button>
     </div>
+    <div class="segmented" id="view-density-toggle" title="Switches between full card tiles and a compact text list with mana-cost pips">
+      <button type="button" class="seg-btn active" data-value="cards">Cards</button>
+      <button type="button" class="seg-btn" data-value="compact">Compact</button>
+    </div>
     <div class="price-filter" title="Hide missing cards above this price (uses whichever finish is currently shown)">
       <label for="price-filter">Max price <span id="price-filter-value">${slider_max}</span></label>
       <input type="range" id="price-filter" min="0" max="{slider_max}" step="1" value="{slider_max}">
@@ -2575,6 +2788,7 @@ footer {{
 </header>
 <main>
 {combos_html}
+{deck_analysis_html}
 {buckets_html}
 </main>
 <footer>Generated {generated} &middot; {deck_name}</footer>
@@ -2724,8 +2938,17 @@ priceSegBtns.forEach(btn => {{
   }});
 }});
 
+const viewDensityBtns = document.querySelectorAll('#view-density-toggle .seg-btn');
+viewDensityBtns.forEach(btn => {{
+  btn.addEventListener('click', () => {{
+    viewDensityBtns.forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.body.classList.toggle('compact', btn.dataset.value === 'compact');
+  }});
+}});
+
 const hoverPreview = document.getElementById('hover-preview');
-document.querySelectorAll('.card-thumb[data-full], .alt-link[data-full]').forEach(img => {{
+function bindHoverPreview(img) {{
   img.addEventListener('mouseenter', () => {{
     hoverPreview.src = img.dataset.full;
     hoverPreview.classList.add('show');
@@ -2742,7 +2965,36 @@ document.querySelectorAll('.card-thumb[data-full], .alt-link[data-full]').forEac
   img.addEventListener('mouseleave', () => {{
     hoverPreview.classList.remove('show');
   }});
-}});
+}}
+document.querySelectorAll('.card-thumb[data-full], .alt-link[data-full]').forEach(bindHoverPreview);
+
+const SAMPLE_HAND_LIBRARY = {sample_hand_json};
+function scryfallImg(id, size) {{
+  if (!id) return null;
+  return 'https://cards.scryfall.io/' + size + '/front/' + id[0] + '/' + id[1] + '/' + id + '.jpg';
+}}
+function drawSampleHand() {{
+  const pool = SAMPLE_HAND_LIBRARY.slice();
+  for (let i = pool.length - 1; i > 0; i--) {{
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = pool[i]; pool[i] = pool[j]; pool[j] = tmp;
+  }}
+  const container = document.getElementById('sample-hand-cards');
+  if (!container) return;
+  container.innerHTML = pool.slice(0, 7).map(c => {{
+    const small = scryfallImg(c.scryfall_id, 'small');
+    const full = scryfallImg(c.scryfall_id, 'normal');
+    return small
+      ? `<img class="sample-hand-thumb card-thumb" src="${{small}}" data-full="${{full}}" alt="${{c.name}}" loading="lazy">`
+      : `<div class="sample-hand-thumb" title="${{c.name}}"></div>`;
+  }}).join('');
+  container.querySelectorAll('.card-thumb[data-full]').forEach(bindHoverPreview);
+}}
+const drawHandBtn = document.getElementById('draw-hand-btn');
+if (drawHandBtn) {{
+  drawHandBtn.addEventListener('click', drawSampleHand);
+  if (SAMPLE_HAND_LIBRARY.length) drawSampleHand();
+}}
 
 document.querySelectorAll('.card.foil').forEach(card => {{
   card.addEventListener('mousemove', (e) => {{
@@ -3097,6 +3349,108 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
         if bg_url:
             body_attrs = f' style="--commander-bg-url: url(\'{html.escape(bg_url)}\');"'
 
+    # ----------------------------------------------------------------
+    # Deck analysis -- mana curve, color/mana-source breakdown, sample
+    # hand. Meaningful for any format, not gated on is_commander_format.
+    # See mana_curve_data/color_pip_breakdown/mana_source_counts.
+    # ----------------------------------------------------------------
+    all_results = [r for cards in buckets.values() for r in cards]
+    all_entries = [r.entry for r in all_results]
+    gameplay = gameplay_data_in_index()
+
+    def _median(values: list[float]) -> float:
+        if not values:
+            return 0.0
+        s = sorted(values)
+        n = len(s)
+        mid = n // 2
+        return s[mid] if n % 2 else (s[mid - 1] + s[mid]) / 2
+
+    all_cmcs = [e.cmc for e in all_entries for _ in range(e.quantity)]
+    nonland_cmcs = [
+        e.cmc for e in all_entries if categorize(e.type_line) not in ("Lands", "Basic Lands")
+        for _ in range(e.quantity)
+    ]
+    total_mana_value = sum(e.cmc * e.quantity for e in all_entries)
+    avg_with_lands = (sum(all_cmcs) / len(all_cmcs)) if all_cmcs else 0.0
+    avg_without_lands = (sum(nonland_cmcs) / len(nonland_cmcs)) if nonland_cmcs else 0.0
+    median_with_lands = _median(all_cmcs)
+    median_without_lands = _median(nonland_cmcs)
+
+    curve = mana_curve_data(all_entries)
+    max_curve_count = max((b["permanents"] + b["spells"] for b in curve), default=0) or 1
+    curve_bars_html = "".join(
+        f'<div class="curve-col" title="Mana value {b["label"]}: {b["permanents"] + b["spells"]} card(s)">'
+        f'<div class="curve-bar-wrap">'
+        f'<div class="curve-bar spells" style="height:{b["spells"] / max_curve_count * 100:.1f}%"></div>'
+        f'<div class="curve-bar permanents" style="height:{b["permanents"] / max_curve_count * 100:.1f}%"></div>'
+        f'</div><div class="curve-label">{b["label"]}</div></div>'
+        for b in curve
+    )
+
+    pip_counts = color_pip_breakdown(all_entries)
+    source_counts = mana_source_counts(all_entries, gameplay)
+    total_pips = sum(pip_counts.values()) or 1
+    total_sources = sum(source_counts.values()) or 1
+    color_rows_html = "".join(
+        f'<div class="color-row">'
+        f'<img class="mana-icon" src="{html.escape(mana_symbol_url(c))}" alt="{c}" loading="lazy">'
+        f'<div class="color-bars">'
+        f'<div class="color-bar-track" title="{pip_counts[c]} pip(s) &middot; '
+        f'{pip_counts[c] / total_pips * 100:.0f}% of all symbols">'
+        f'<div class="color-bar pips" style="width:{pip_counts[c] / total_pips * 100:.1f}%"></div></div>'
+        f'<div class="color-bar-track" title="{source_counts[c]} source(s) &middot; '
+        f'{source_counts[c] / total_sources * 100:.0f}% of mana sources">'
+        f'<div class="color-bar sources" style="width:{source_counts[c] / total_sources * 100:.1f}%"></div></div>'
+        f'</div></div>'
+        for c in WUBRG
+    )
+
+    library_results = [r for r in all_results if r.entry.section != "commander"]
+    library_size = sum(r.entry.quantity for r in library_results)
+    land_count = sum(
+        r.entry.quantity for r in library_results
+        if categorize(r.entry.type_line) in ("Lands", "Basic Lands")
+    )
+    avg_lands_in_hand = (7 * land_count / library_size) if library_size else 0.0
+    sample_hand_pool = [
+        {"name": r.entry.name, "scryfall_id": _display_scryfall_id(r)}
+        for r in library_results for _ in range(r.entry.quantity)
+    ]
+    sample_hand_json = json.dumps(sample_hand_pool)
+
+    deck_analysis_html = f"""<details class="combos-panel" open>
+<summary>&#128202; Deck Analysis</summary>
+<div class="deck-analysis-body">
+  <div>
+    <div class="analysis-stat-line">
+      Average mana value: <b>{avg_with_lands:.2f}</b> with lands / <b>{avg_without_lands:.2f}</b> without &middot;
+      Median: <b>{median_with_lands:.2f}</b> with lands / <b>{median_without_lands:.2f}</b> without &middot;
+      Total mana value: <b>{total_mana_value:.0f}</b>
+    </div>
+    <div class="curve-chart">{curve_bars_html}</div>
+    <div class="chart-legend">
+      <span><span class="swatch permanents"></span>Permanents</span>
+      <span><span class="swatch spells"></span>Instants/Sorceries</span>
+    </div>
+  </div>
+  <div>
+    <div class="color-breakdown">{color_rows_html}</div>
+    <div class="chart-legend">
+      <span><span class="swatch pips"></span>% of mana-cost symbols</span>
+      <span><span class="swatch sources"></span>% of mana sources (heuristic)</span>
+    </div>
+  </div>
+  <div class="sample-hand">
+    <div class="analysis-stat-line">Average number of lands in opening hand: <b>{avg_lands_in_hand:.2f}</b></div>
+    <div class="sample-hand-actions">
+      <button type="button" class="btn ghost" id="draw-hand-btn">&#127183; Draw / Deal Another Hand</button>
+    </div>
+    <div class="sample-hand-cards" id="sample-hand-cards"></div>
+  </div>
+</div>
+</details>""" if library_size else ""
+
     def _trend_span(label, trend):
         pct = (trend or {}).get(label)
         if pct is None or abs(pct) < 2:
@@ -3169,6 +3523,18 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
                 color_icons_html = '<span class="color-icons">' + "".join(
                     f'<img class="mana-icon" src="{html.escape(mana_symbol_url(c))}" alt="{c}" loading="lazy">'
                     for c in card_colors
+                ) + '</span>'
+
+            # Hidden in the normal card-tile view (color_icons_html above
+            # already shows color identity there); shown instead of it in
+            # Compact view (see body.compact CSS), where the full ordered
+            # mana-cost pip sequence reads better than just color letters.
+            mana_pips = parse_mana_pips(e.mana_cost)
+            mana_cost_pips_html = ""
+            if mana_pips:
+                mana_cost_pips_html = '<span class="mana-cost-pips">' + "".join(
+                    f'<img class="mana-icon" src="{html.escape(mana_pip_symbol_url(p))}" alt="{html.escape(p)}" loading="lazy">'
+                    for p in mana_pips
                 ) + '</span>'
 
             thumb_html = _thumb_html(_display_scryfall_id(r))
@@ -3269,7 +3635,7 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
       <div class="card-info">
         <div class="card-name">
           <span class="icon icon-owned">&#10003;</span><span class="icon icon-missing">&#10007;</span>
-          {name_esc}{color_icons_html}{badges}
+          {name_esc}{color_icons_html}{mana_cost_pips_html}{badges}
         </div>
         <div class="qty qty-owned">need {e.quantity} &middot; have {r.have}{reserved_note}</div>
         <div class="qty qty-missing">need {e.quantity} more &middot; marked as used in another deck</div>
@@ -3289,7 +3655,7 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
     {thumb_html}
     <div class="card-body">
       <div class="card-info">
-        <div class="card-name"><span class="icon">&#10007;</span>{name_esc}{color_icons_html}{badges}</div>
+        <div class="card-name"><span class="icon">&#10007;</span>{name_esc}{color_icons_html}{mana_cost_pips_html}{badges}</div>
         <div class="qty">need {r.shortfall} more &middot; deck wants {e.quantity}{have_str}</div>
       </div>
       <div class="card-prices">
@@ -3366,6 +3732,8 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
         bracket_tag_html=bracket_tag_html,
         wotc_bracket_html=wotc_bracket_html,
         combos_html=combos_html,
+        deck_analysis_html=deck_analysis_html,
+        sample_hand_json=sample_hand_json,
         pct=pct,
         buckets_html="\n".join(bucket_blocks),
         generated=datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
