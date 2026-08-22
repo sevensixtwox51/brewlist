@@ -724,6 +724,18 @@ def update_from_git(path: str = _CORE_DIR) -> dict:
       modules), so the app needs restarting to actually use them.
     """
     if not os.path.isdir(os.path.join(path, ".git")):
+        if os.environ.get("BREWLIST_DOCKER"):
+            # .dockerignore deliberately excludes .git from the image (see
+            # its own comment), so this branch always triggers in Docker --
+            # the generic "you downloaded a ZIP" message below would be
+            # actively wrong here (a Docker user did run git clone), so a
+            # Docker-specific message with the actual fix is worth this
+            # one extra check.
+            return {
+                "ok": False, "updated": False,
+                "message": "Running in Docker -- update from the host instead: 'git pull' in the "
+                           "cloned repo folder, then 'docker compose up -d --build'.",
+            }
         return {
             "ok": False, "updated": False,
             "message": "This doesn't look like a git checkout -- if you downloaded a ZIP instead of "

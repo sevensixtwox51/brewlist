@@ -20,9 +20,15 @@ COPY . .
 # HOST=0.0.0.0: 127.0.0.1 (the app's own default, since it's normally a
 # local double-clicked app) isn't reachable from outside the container.
 # NO_BROWSER: no browser to auto-open inside a container.
+# BREWLIST_DOCKER: .dockerignore excludes .git from the image on purpose
+# (see its own comment), so update_from_git() always fails its "is this a
+# git checkout" check in here -- this lets it tell a Docker user the real
+# fix (update the host + rebuild) instead of the generic "you downloaded a
+# ZIP" message meant for a plain, non-Docker install.
 ENV HOST=0.0.0.0 \
     PORT=5050 \
-    NO_BROWSER=1
+    NO_BROWSER=1 \
+    BREWLIST_DOCKER=1
 
 EXPOSE 5050
 VOLUME ["/app/data"]

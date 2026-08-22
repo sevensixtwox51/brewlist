@@ -305,9 +305,10 @@ docker build -t brewlist .
 docker run -p 5050:5050 -v brewlist-data:/app/data brewlist
 ```
 
-The in-app **Check for Updates** button won't find a git checkout inside
-the container, so it won't offer anything there — to update, pull the
-latest code on the host and rebuild the image instead:
+The in-app **Check for Updates** button can't pull updates from inside the
+container itself (there's no git checkout in there to pull), so clicking
+it just tells you to update from the host instead — same two commands
+either way:
 
 ```bash
 git pull
