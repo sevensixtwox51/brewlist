@@ -1153,6 +1153,23 @@ function legalityFor(card) {{
   return (card.legalities || {{}})[brew.target_format] || 'Not Legal';
 }}
 
+// Appends a "(count)" to each type-filter option based on the loaded
+// collection, so e.g. "Planeswalkers (0)" is visible before clicking into
+// an empty grid, instead of only "Planeswalkers" with no hint it's empty.
+function annotateFilterCounts() {{
+  const counts = {{}};
+  let commanderCount = 0;
+  collection.forEach(card => {{
+    counts[card.category] = (counts[card.category] || 0) + 1;
+    if (isCommanderEligible(card)) commanderCount++;
+  }});
+  document.querySelectorAll('#filter-category option[value]').forEach(opt => {{
+    if (!opt.value) return;
+    const n = opt.value === 'Commander' ? commanderCount : (counts[opt.value] || 0);
+    opt.textContent = `${{opt.value}} (${{n}})`;
+  }});
+}}
+
 function renderGrid() {{
   const search = document.getElementById('search').value.trim().toLowerCase();
   const category = document.getElementById('filter-category').value;
@@ -1378,6 +1395,7 @@ fetch('/builder/collection-data')
   .then(data => {{
     if (data.error) {{ showError(data.error); return; }}
     collection = data.cards;
+    annotateFilterCounts();
     renderAll();
   }})
   .catch(() => showError('Could not load your collection.'));
