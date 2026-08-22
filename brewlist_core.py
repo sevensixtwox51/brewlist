@@ -1918,11 +1918,16 @@ def build_comparison(
     # from combos) -- if either failed, we don't have a full enough signal
     # to estimate responsibly, so this stays None rather than risk an
     # under-informed (and likely too-low) guess.
+    # Computed unconditionally (default False/0 when the Spellbook calls
+    # above didn't succeed, matching CardEntry.mass_land_denial/extra_turn's
+    # own defaults) so the builder's Analyze modal can show these as plain
+    # rule-0 facts even on the rare request where wotc_bracket itself stays
+    # None -- see totals below.
+    has_mass_land_denial = any(e.mass_land_denial for e in entries)
+    extra_turn_count = sum(1 for e in entries if e.extra_turn)
     wotc_bracket = None
     if is_commander_format and bracket_estimate and combos is not None:
         has_two_card_combo = any(len(c.get("uses") or []) <= 2 for c in (combos.get("included") or []))
-        has_mass_land_denial = any(e.mass_land_denial for e in entries)
-        extra_turn_count = sum(1 for e in entries if e.extra_turn)
         wotc_bracket = estimate_wotc_bracket(game_changers_count, has_two_card_combo, has_mass_land_denial, extra_turn_count)
 
     budget_alt = budget_alt_data_in_index()
@@ -1939,6 +1944,8 @@ def build_comparison(
         "combos": combos,  # {"included": [...], "almost_included": [...], "almost_total": N} or None
         "bracket_tag": bracket_estimate["tag"] if bracket_estimate else None,
         "wotc_bracket": wotc_bracket,  # (short_label, full_name) e.g. ("3", "Upgraded"), or None
+        "mass_land_denial": has_mass_land_denial,  # only meaningful when is_commander_format was set
+        "extra_turn_count": extra_turn_count,  # only meaningful when is_commander_format was set
     }
 
     for e, have, shortfall, owned_used, picks, remainder, reserved_qty in per_entry:

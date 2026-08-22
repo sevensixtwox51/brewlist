@@ -141,51 +141,20 @@ def brew_to_card_entries(brew: dict) -> list[CardEntry]:
     return entries
 
 
-def suggest_builder_cards(
+def _filter_candidates(
     wip_entries: list[CardEntry],
     owned_view: list[dict],
     deck_format: str,
     target_format: str | None,
-    target_size: int,
     commander_color_identity: list[str] | None,
-    max_suggestions: int = 15,
-    mix_targets: dict[str, int] | None = None,
-    intended_bracket: str | None = None,
+    intended_bracket: str | None,
 ) -> list[dict]:
-    """Fill-the-gaps auto-suggest: proposes owned, legal, color-correct
-    cards to fill the remaining slots in a work-in-progress deck. This is
-    a heuristic ranking (combo pieces first, then a shared-theme signal,
-    then whichever category is most under a rough target shape, then Game
-    Changers/price as a power tiebreak) -- not an AI guess, same "no
-    AI-generated guesses" approach the existing budget-alternative
-    suggestions use (in fact the exact same Scryfall Oracle Tags data,
-    see budget_alt_data_in_index).
-
-    `intended_bracket` ("1-2"/"3"/"4+"/None), if given, is purely a self-
-    declared target -- if the WIP deck's Game Changers count is already
-    at or above what WotC's own published bracket rules allow for that
-    bracket (see WOTC_BRACKET_GAME_CHANGER_MAX), Game Changer candidates
-    are excluded outright rather than suggested and then flagged later.
-    None (no preference) suggests freely, same as before this existed."""
-    # target_size is the *whole* deck (100 for Commander, matching WotC's
-    # own rules -- 99 library + 1 commander); the commander itself never
-    # counts toward the library, so the actual library target is one
-    # less. Comparing the library count straight against target_size
-    # instead would let Suggest keep filling until the library alone hit
-    # 100 (101 cards total) and skew every role's numeric target by the
-    # same one card.
-    library_target = target_size - 1 if deck_format == "commander" else target_size
+    """Owned cards that are legal, color-correct, and not already in the
+    WIP deck -- the same filtering suggest_builder_cards has always done,
+    pulled out so list_theme_options can compute "how many owned cards
+    would this theme actually add" without duplicating the legality/
+    color-identity/Game-Changer-cap rules."""
     used_names = {normalize_name(e.name) for e in wip_entries}
-    remaining = max(0, library_target - sum(e.quantity for e in wip_entries if e.section != "commander"))
-    if remaining <= 0:
-        return []
-    # Cap the batch itself to what's actually left, not just gate on
-    # remaining>0 -- a deck 3 cards from done shouldn't get handed back a
-    # full 15-card batch (every caller so far just appends everything
-    # returned, e.g. "Add All" or a repeated build-to-completion loop, so
-    # without this a deck can overshoot its target by a full batch).
-    max_suggestions = min(max_suggestions, remaining)
-
     legality_key = "commander" if deck_format == "commander" else (target_format or "")
     colors_allowed = set(commander_color_identity) if deck_format == "commander" and commander_color_identity is not None else None
     if colors_allowed is None and deck_format != "commander":
@@ -229,9 +198,96 @@ def suggest_builder_cards(
         if c["quantity"] < 1:
             continue
         candidates.append(c)
+    return candidates
 
+
+def list_theme_options(
+    wip_entries: list[CardEntry],
+    owned_view: list[dict],
+    deck_format: str,
+    target_format: str | None,
+    commander_color_identity: list[str] | None,
+) -> list[dict]:
+    """Every Oracle Tags theme (see budget_alt_data_in_index -- the same
+    community-curated tags used for budget-alternative suggestions and
+    suggest_builder_cards's own theme-sharing callouts) with at least 2
+    owned, legal, color-correct, not-yet-in-deck cards -- the pool a
+    "Preferred theme" picker offers, so every option is guaranteed to
+    actually add something if chosen. {"tag_id", "label", "count"},
+    sorted by how many owned cards carry it, most first."""
+    candidates = _filter_candidates(wip_entries, owned_view, deck_format, target_format, commander_color_identity, None)
+    budget_alt = budget_alt_data_in_index()
+    tag_by_name = budget_alt.get("tag_by_name") or {}
+    tag_labels = budget_alt.get("tag_labels") or {}
+    counts: dict[str, int] = {}
+    for c in candidates:
+        tag_id = tag_by_name.get(normalize_name(c["name"]))
+        if tag_id:
+            counts[tag_id] = counts.get(tag_id, 0) + 1
+    options = [
+        {"tag_id": tag_id, "label": tag_labels.get(tag_id, tag_id), "count": n}
+        for tag_id, n in counts.items() if n >= 2
+    ]
+    options.sort(key=lambda o: (-o["count"], o["label"]))
+    return options
+
+
+def suggest_builder_cards(
+    wip_entries: list[CardEntry],
+    owned_view: list[dict],
+    deck_format: str,
+    target_format: str | None,
+    target_size: int,
+    commander_color_identity: list[str] | None,
+    max_suggestions: int = 15,
+    mix_targets: dict[str, int] | None = None,
+    intended_bracket: str | None = None,
+    preferred_theme_tag_id: str | None = None,
+) -> list[dict]:
+    """Fill-the-gaps auto-suggest: proposes owned, legal, color-correct
+    cards to fill the remaining slots in a work-in-progress deck. This is
+    a heuristic ranking (combo pieces first, then a shared-theme signal,
+    then whichever category is most under a rough target shape, then Game
+    Changers/price as a power tiebreak) -- not an AI guess, same "no
+    AI-generated guesses" approach the existing budget-alternative
+    suggestions use (in fact the exact same Scryfall Oracle Tags data,
+    see budget_alt_data_in_index).
+
+    `preferred_theme_tag_id`, if given (a tag_id from list_theme_options),
+    is treated as this deck's theme from the very first Suggest click --
+    same priority-ordering boost the commander's own tag and any organic
+    2+-card overlap already get -- rather than only ever detecting a
+    theme after it emerges on its own.
+
+    `intended_bracket` ("1-2"/"3"/"4+"/None), if given, is purely a self-
+    declared target -- if the WIP deck's Game Changers count is already
+    at or above what WotC's own published bracket rules allow for that
+    bracket (see WOTC_BRACKET_GAME_CHANGER_MAX), Game Changer candidates
+    are excluded outright rather than suggested and then flagged later.
+    None (no preference) suggests freely, same as before this existed."""
+    # target_size is the *whole* deck (100 for Commander, matching WotC's
+    # own rules -- 99 library + 1 commander); the commander itself never
+    # counts toward the library, so the actual library target is one
+    # less. Comparing the library count straight against target_size
+    # instead would let Suggest keep filling until the library alone hit
+    # 100 (101 cards total) and skew every role's numeric target by the
+    # same one card.
+    library_target = target_size - 1 if deck_format == "commander" else target_size
+    used_names = {normalize_name(e.name) for e in wip_entries}
+    remaining = max(0, library_target - sum(e.quantity for e in wip_entries if e.section != "commander"))
+    if remaining <= 0:
+        return []
+    # Cap the batch itself to what's actually left, not just gate on
+    # remaining>0 -- a deck 3 cards from done shouldn't get handed back a
+    # full 15-card batch (every caller so far just appends everything
+    # returned, e.g. "Add All" or a repeated build-to-completion loop, so
+    # without this a deck can overshoot its target by a full batch).
+    max_suggestions = min(max_suggestions, remaining)
+
+    candidates = _filter_candidates(wip_entries, owned_view, deck_format, target_format, commander_color_identity, intended_bracket)
     if not candidates:
         return []
+    game_changers = game_changers_in_index() if deck_format == "commander" else set()
 
     reason_by_name: dict[str, str] = {}
     if deck_format == "commander" and wip_entries:
@@ -257,20 +313,39 @@ def suggest_builder_cards(
     tag_labels = budget_alt.get("tag_labels") or {}
     if tag_by_name:
         wip_tag_counts: dict[str, int] = {}
+        commander_tag_id = None
         for e in wip_entries:
             tag_id = tag_by_name.get(normalize_name(e.name))
-            if tag_id:
-                wip_tag_counts[tag_id] = wip_tag_counts.get(tag_id, 0) + e.quantity
+            if not tag_id:
+                continue
+            if e.section == "commander":
+                commander_tag_id = tag_id
+                continue
+            wip_tag_counts[tag_id] = wip_tag_counts.get(tag_id, 0) + e.quantity
         deck_theme_tags = {tag_id: n for tag_id, n in wip_tag_counts.items() if n >= 2}
+        # The commander embodies the deck's theme by definition -- surface
+        # its own tag as an emerging theme right away (distinct wording
+        # below), rather than waiting for two *other* cards to happen to
+        # share it. Without this, a brand-new deck with only a commander
+        # picked can never clear the >=2 threshold above on the very first
+        # Suggest click, since one card can only ever contribute 1.
+        if commander_tag_id and commander_tag_id not in deck_theme_tags:
+            deck_theme_tags[commander_tag_id] = 0  # sentinel: commander-only, no other cards yet
+        if preferred_theme_tag_id and preferred_theme_tag_id not in deck_theme_tags:
+            deck_theme_tags[preferred_theme_tag_id] = -1  # sentinel: explicitly chosen, not (yet) organic
         if deck_theme_tags:
             for c in candidates:
                 tag_id = tag_by_name.get(normalize_name(c["name"]))
                 if tag_id in deck_theme_tags:
                     label = tag_labels.get(tag_id, tag_id)
                     count = deck_theme_tags[tag_id]
-                    theme_reason_by_name[normalize_name(c["name"])] = (
-                        f'shares the "{label}" theme with {count} card(s) already in your deck'
-                    )
+                    if count == -1:
+                        reason = f'matches your chosen "{label}" theme'
+                    elif count == 0:
+                        reason = f'shares the "{label}" theme with your commander'
+                    else:
+                        reason = f'shares the "{label}" theme with {count} card(s) already in your deck'
+                    theme_reason_by_name[normalize_name(c["name"])] = reason
 
     def rank_key(c: dict):
         nm = normalize_name(c["name"])
@@ -361,6 +436,27 @@ def suggest_builder_cards(
             if role_slots[role] < cap:
                 role_slots[role] += 1
                 leftover -= 1
+        if leftover > 0:
+            # A role's own target genuinely can't be met (e.g. this
+            # color pair has zero owned "Draw" candidates) -- the loop
+            # above only ever tops a role up to its OWN eligible[role]
+            # target, so that role's unfillable slots would otherwise
+            # just be lost even with hundreds of untouched Synergy
+            # candidates sitting right there. Reallocate the remainder to
+            # any role with spare *pool* capacity beyond its own target,
+            # biggest pool first, repeating until nothing more fits.
+            changed = True
+            while leftover > 0 and changed:
+                changed = False
+                for role in sorted(role_candidates, key=lambda r: len(role_candidates[r]), reverse=True):
+                    if leftover <= 0:
+                        break
+                    if not role_candidates[role]:
+                        continue
+                    if role_slots.get(role, 0) < len(role_candidates[role]):
+                        role_slots[role] = role_slots.get(role, 0) + 1
+                        leftover -= 1
+                        changed = True
 
     # Round-robin across roles rather than role-by-role so even a short
     # list reads as a mix, not a wall of one role followed by another.

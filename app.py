@@ -50,6 +50,7 @@ from brewlist_core import (
 )
 from deck_builder import (
     brew_to_card_entries,
+    list_theme_options,
     owned_collection_gameplay_view,
     suggest_builder_cards,
 )
@@ -740,7 +741,8 @@ body::after {
 .deck-row .row-name span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .deck-row .qty-controls { display:flex; align-items:center; gap:6px; flex-shrink:0; }
 .deck-row .qty-controls .qty-btn { width:22px; height:22px; padding:0; line-height:1; }
-#suggestions-panel { margin-top:10px; }
+#deck-list { max-height:38vh; overflow-y:auto; padding-right:4px; }
+#suggestions-panel { margin-top:10px; max-height:38vh; overflow-y:auto; padding-right:4px; }
 #suggestions-panel .suggestion-row { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid var(--card-border); font-size:0.82rem; }
 #suggestions-panel .row-name { display:flex; align-items:center; gap:8px; min-width:0; }
 #suggestions-panel .reason { color:var(--text-dim); font-size:0.72rem; }
@@ -751,8 +753,8 @@ body::after {
 }
 .segmented .seg-btn:first-child { border-right:1px solid var(--card-border); }
 .segmented .seg-btn.active { background:var(--gold); color:#241f00; font-weight:600; }
-.deck-analysis { margin-top:10px; border-top:1px solid var(--card-border); padding-top:10px; }
-.analysis-heading { margin:0 0 8px; font-size:0.85rem; }
+.analysis-heading { margin:16px 0 8px; font-size:0.85rem; }
+.analysis-heading:first-child { margin-top:0; }
 .analysis-stat-line { color:var(--text-dim); font-size:0.78rem; margin:0 0 8px; }
 .curve-chart { display:flex; align-items:flex-end; gap:4px; height:90px; }
 .curve-col { flex:1; display:flex; flex-direction:column; align-items:center; height:100%; }
@@ -781,6 +783,18 @@ body.compact .builder-tile .name-text { overflow:hidden; text-overflow:ellipsis;
 body.compact .tile-corner-actions { position:static; flex-shrink:0; }
 body.compact .collection-grid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
 body.compact .deck-row .card-thumb { display:none; }
+.theme-picker { position:relative; }
+.theme-picker input[type=text] { width:200px; margin:0; padding:8px 12px; font-size:0.85rem; }
+.theme-dropdown {
+  display:none; position:absolute; top:100%; left:0; margin-top:4px; width:240px; max-height:240px;
+  overflow-y:auto; background:var(--bg-elevated); border:1px solid var(--card-border); border-radius:8px;
+  box-shadow:var(--shadow); z-index:30;
+}
+.theme-dropdown.show { display:block; }
+.theme-dropdown-item { display:flex; justify-content:space-between; gap:8px; padding:7px 12px; font-size:0.82rem; cursor:pointer; }
+.theme-dropdown-item:hover, .theme-dropdown-item.active { background:var(--bg); }
+.theme-dropdown-item .count { color:var(--text-dim); font-size:0.72rem; flex-shrink:0; }
+.theme-dropdown-empty { padding:8px 12px; font-size:0.78rem; color:var(--text-dim); }
 .mix-targets-field { border:1px solid var(--card-border); border-radius:8px; padding:2px 12px; }
 .mix-targets-field summary { cursor:pointer; padding:6px 10px; font-size:0.85rem; color:var(--text-dim); white-space:nowrap; }
 .mix-targets-field[open] { position:relative; z-index:5; }
@@ -790,9 +804,6 @@ body.compact .deck-row .card-thumb { display:none; }
   width:60px; padding:6px 8px; border-radius:6px; border:1px solid var(--card-border);
   background:var(--bg); color:var(--text); font-size:0.85rem; margin:0;
 }
-.bracket-value-panel { margin-bottom:10px; }
-#bracket-value-results { margin-top:8px; }
-#bracket-value-results:empty { margin-top:0; }
 .bv-badge {
   display:inline-flex; align-items:center; gap:4px; padding:4px 10px; margin:0 6px 6px 0;
   border-radius:999px; background:var(--bg); border:1px solid var(--card-border);
@@ -809,7 +820,48 @@ body.compact .deck-row .card-thumb { display:none; }
   width:max-content; max-width:260px; box-shadow:var(--shadow); z-index:20;
 }
 .bv-badge:hover .tooltip-popup { display:block; }
+.modal-overlay {
+  display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6);
+  z-index:200; align-items:center; justify-content:center; padding:20px;
+}
+.modal-overlay.show { display:flex; }
+.modal-box {
+  background:var(--bg-elevated); border:1px solid var(--card-border); border-radius:12px;
+  width:100%; max-width:640px; max-height:85vh; display:flex; flex-direction:column; overflow:hidden;
+}
+.modal-header { display:flex; align-items:center; justify-content:space-between; padding:14px 18px; border-bottom:1px solid var(--card-border); flex-shrink:0; }
+.modal-header h3 { margin:0; font-size:1.05rem; }
+.modal-close { background:none; border:none; color:var(--text-dim); font-size:1.4rem; line-height:1; cursor:pointer; padding:2px 6px; }
+.modal-close:hover { color:var(--text); }
+.modal-body { padding:16px 18px; overflow-y:auto; flex:1; }
+.modal-footer { padding:12px 18px; border-top:1px solid var(--card-border); display:flex; justify-content:flex-end; flex-shrink:0; }
+.rule0-list { margin:0 0 4px; padding-left:20px; font-size:0.85rem; color:var(--text); }
+.rule0-list li { margin-bottom:5px; }
+.combo-group { margin-bottom:10px; }
+.combo-group h5 { margin:0 0 6px; font-size:0.75rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.03em; }
+.combo-item { border:1px solid var(--card-border); border-radius:8px; padding:8px 10px; margin-bottom:6px; font-size:0.82rem; }
+.combo-item .combo-uses { font-weight:600; }
+.combo-item .combo-arrow { color:var(--text-dim); margin:0 6px; }
+.combo-item .combo-missing { color:var(--missing); font-size:0.78rem; margin-top:2px; }
+.combo-item a { color:var(--accent); }
+#battle-card { display:none; }
 @media (max-width: 900px) { .builder-layout { grid-template-columns: 1fr; } .deck-panel { position:static; } }
+@media print {
+  body * { visibility:hidden; }
+  body::before, body::after { display:none !important; }
+  #battle-card, #battle-card * { visibility:visible; }
+  #battle-card.printing {
+    display:block; position:absolute; top:0; left:0; width:100%;
+    font-family: system-ui, sans-serif; color:#111; background:#fff; padding:24px;
+  }
+  #battle-card h1 { margin:0 0 4px; font-size:1.4rem; }
+  #battle-card .bc-sub { color:#555; font-size:0.9rem; margin-bottom:14px; }
+  #battle-card h2 { font-size:0.95rem; margin:16px 0 6px; border-bottom:1px solid #ccc; padding-bottom:3px; }
+  #battle-card ul { margin:0; padding-left:20px; font-size:0.85rem; }
+  #battle-card li { margin-bottom:4px; }
+  #battle-card .bc-combo { font-size:0.82rem; margin-bottom:5px; }
+  #battle-card .bc-badges span { display:inline-block; border:1px solid #999; border-radius:999px; padding:2px 9px; margin:0 6px 6px 0; font-size:0.78rem; }
+}
 """
 
 COLOR_LABELS = {"W": "White", "U": "Blue", "B": "Black", "R": "Red", "G": "Green"}
@@ -861,6 +913,8 @@ def render_builder_page(deck_id: str | None = None) -> str:
         "cards": brew.get("cards") or [],
         "mix_targets": {role: saved_mix.get(role, default_mix[role]) for role in default_mix},
         "intended_bracket": brew.get("intended_bracket") or "",
+        "preferred_theme_tag_id": brew.get("preferred_theme_tag_id") or "",
+        "preferred_theme_label": brew.get("preferred_theme_label") or "",
     }
 
     category_options = "".join(f'<option value="{_esc(b)}">{_esc(b)}</option>' for b in BUCKET_ORDER)
@@ -941,6 +995,10 @@ def render_builder_page(deck_id: str | None = None) -> str:
       </div>
       <div class="action-group">
         <button type="button" class="btn ghost" id="suggest-btn">Suggest cards</button>
+        <div class="theme-picker">
+          <input type="text" id="theme-input" placeholder="Preferred theme (optional)" autocomplete="off">
+          <div class="theme-dropdown" id="theme-dropdown"></div>
+        </div>
         <details class="mix-targets-field" id="mix-targets-field">
           <summary>Deck mix targets</summary>
           <div class="mix-targets-grid">
@@ -970,33 +1028,56 @@ def render_builder_page(deck_id: str | None = None) -> str:
     </div>
     <div class="card deck-panel">
       <div class="deck-stats" id="deck-stats"></div>
-      <div class="bracket-value-panel" id="bracket-value-panel">
-        <button type="button" class="btn ghost small" id="check-bracket-btn">&#128202; Check Bracket &amp; Value</button>
-        <div id="bracket-value-results"></div>
-      </div>
+      <button type="button" class="btn ghost small" id="analyze-btn" style="margin-bottom:10px;">&#128269; Analyze Deck</button>
       <div id="commander-slot-wrap"></div>
       <div id="deck-list"></div>
       <div id="suggestions-panel"></div>
-      <div class="deck-analysis" id="deck-analysis">
-        <h4 class="analysis-heading">&#128202; Deck Analysis</h4>
-        <div class="analysis-stat-line" id="analysis-stat-line"></div>
-        <div class="curve-chart" id="curve-chart"></div>
-        <div class="chart-legend">
-          <span><span class="swatch permanents"></span>Permanents</span>
-          <span><span class="swatch spells"></span>Instants/Sorceries</span>
-        </div>
-        <div class="color-breakdown" id="color-breakdown"></div>
-        <div class="analysis-stat-line" id="sample-hand-stat"></div>
-        <button type="button" class="btn ghost small" id="draw-hand-btn">&#127183; Draw / Deal Another Hand</button>
-        <div class="sample-hand-cards" id="sample-hand-cards"></div>
-      </div>
     </div>
   </div>
 </main>
+
+<div class="modal-overlay" id="analyze-modal">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3 id="analyze-modal-title">Analyze Deck</h3>
+      <button type="button" class="modal-close" id="analyze-modal-close" aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div id="analyze-badges"></div>
+      <div class="hint" id="analyze-loading" style="margin:0 0 12px;">Checking&hellip; (calls Commander Spellbook live, may take a few seconds)</div>
+
+      <h4 class="analysis-heading">Rule 0 summary</h4>
+      <ul class="rule0-list" id="rule0-list"></ul>
+
+      <h4 class="analysis-heading">&#128202; Mana Curve &amp; Colors</h4>
+      <div class="analysis-stat-line" id="analysis-stat-line"></div>
+      <div class="curve-chart" id="curve-chart"></div>
+      <div class="chart-legend">
+        <span><span class="swatch permanents"></span>Permanents</span>
+        <span><span class="swatch spells"></span>Instants/Sorceries</span>
+      </div>
+      <div class="color-breakdown" id="color-breakdown"></div>
+
+      <h4 class="analysis-heading">&#127183; Sample Opening Hand</h4>
+      <div class="analysis-stat-line" id="sample-hand-stat"></div>
+      <button type="button" class="btn ghost small" id="draw-hand-btn">Draw / Deal Another Hand</button>
+      <div class="sample-hand-cards" id="sample-hand-cards"></div>
+
+      <h4 class="analysis-heading">&#128279; Combo Reference</h4>
+      <div id="combo-reference"></div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn ghost small" id="print-battle-card-btn">&#128424; Print Battle Card</button>
+    </div>
+  </div>
+</div>
+<div id="battle-card"></div>
 <script>
 let deckId = {json.dumps(deck_id)};
 let brew = {json.dumps(brew_state)};
 let collection = [];
+let themeLabelToId = {{}};
+let themeRequestId = 0;
 
 const errorBox = document.getElementById('error-box');
 function showError(message) {{ errorBox.textContent = message; errorBox.style.display = 'block'; }}
@@ -1009,6 +1090,7 @@ document.getElementById('mix-lands').value = brew.mix_targets.Lands;
 document.getElementById('mix-ramp').value = brew.mix_targets.Ramp;
 document.getElementById('mix-draw').value = brew.mix_targets.Draw;
 document.getElementById('mix-interaction').value = brew.mix_targets.Interaction;
+document.getElementById('theme-input').value = brew.preferred_theme_label || '';
 
 function targetSize() {{ return brew.format === 'commander' ? 100 : 60; }}
 
@@ -1026,12 +1108,14 @@ function updateFormatUI() {{
   document.getElementById('mix-targets-field').style.display = isCommander ? 'block' : 'none';
 }}
 updateFormatUI();
+loadThemeOptions();
 
 document.getElementById('deck-format').addEventListener('change', (e) => {{
   brew.format = e.target.value;
   if (brew.format !== 'commander') brew.commander = null;
   updateFormatUI();
   renderAll();
+  loadThemeOptions();
 }});
 document.getElementById('target-format').addEventListener('change', (e) => {{ brew.target_format = e.target.value; }});
 document.getElementById('intended-bracket').addEventListener('change', (e) => {{ brew.intended_bracket = e.target.value; }});
@@ -1138,9 +1222,10 @@ function setCommander(card) {{
     set_code: card.set_code, collector_number: card.collector_number,
   }};
   renderAll();
+  loadThemeOptions();
 }}
 
-function clearCommander() {{ brew.commander = null; renderAll(); }}
+function clearCommander() {{ brew.commander = null; renderAll(); loadThemeOptions(); }}
 
 function addCard(card) {{
   const existing = findCard(card.name);
@@ -1206,6 +1291,85 @@ function annotateFilterCounts() {{
     opt.textContent = `${{opt.value}} (${{n}})`;
   }});
 }}
+
+// Populates the "Preferred theme" picker with every Oracle Tags theme
+// that has enough owned, legal, color-correct candidates to be worth
+// picking (see list_theme_options) -- recomputed whenever the commander
+// or format changes, since that's what the color/legality filter behind
+// it depends on. A hand-rolled dropdown (not a native <datalist>) --
+// datalist's suggestion popup is positioned by the browser itself and,
+// in this embedded layout, was rendering nowhere near the input; a plain
+// absolutely-positioned div anchored to .theme-picker (position:relative)
+// is fully within our own control instead.
+let themeOptionsList = [];
+function loadThemeOptions() {{
+  const requestId = ++themeRequestId;
+  fetch('/builder/themes', {{
+    method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
+    body: JSON.stringify({{ format: brew.format, target_format: brew.target_format, commander: brew.commander, cards: brew.cards }}),
+  }})
+    .then(r => r.json())
+    .then(data => {{
+      // Guards against a race where this call's response arrives after a
+      // newer one (e.g. clicking a different commander quickly) -- without
+      // this, a slow/broader-scoped response landing last could silently
+      // overwrite the correct, more-recent theme list.
+      if (requestId !== themeRequestId) return;
+      if (data.error) return;
+      themeOptionsList = data.themes || [];
+      themeLabelToId = {{}};
+      themeOptionsList.forEach(t => {{ themeLabelToId[t.label] = t.tag_id; }});
+      // A previously-chosen theme that no longer has any owned candidates
+      // in the current colors (e.g. after switching commanders) can't be
+      // resolved back to a tag_id -- drop it rather than silently sending
+      // a stale/meaningless id with the next Suggest request.
+      if (brew.preferred_theme_label && !(brew.preferred_theme_label in themeLabelToId)) {{
+        brew.preferred_theme_tag_id = '';
+        brew.preferred_theme_label = '';
+        document.getElementById('theme-input').value = '';
+      }}
+    }})
+    .catch(() => {{}});
+}}
+
+const themeInput = document.getElementById('theme-input');
+const themeDropdown = document.getElementById('theme-dropdown');
+function renderThemeDropdown() {{
+  const filter = themeInput.value.trim().toLowerCase();
+  const matches = (filter ? themeOptionsList.filter(t => t.label.toLowerCase().includes(filter)) : themeOptionsList).slice(0, 40);
+  if (!matches.length) {{
+    themeDropdown.innerHTML = '<div class="theme-dropdown-empty">No matching themes among your owned cards</div>';
+  }} else {{
+    themeDropdown.innerHTML = matches.map(t =>
+      `<div class="theme-dropdown-item" data-label="${{t.label.replace(/"/g, '&quot;')}}"><span>${{t.label}}</span><span class="count">${{t.count}} owned</span></div>`
+    ).join('');
+  }}
+  themeDropdown.classList.add('show');
+}}
+themeInput.addEventListener('focus', renderThemeDropdown);
+themeInput.addEventListener('input', (e) => {{
+  const label = e.target.value.trim();
+  if (label in themeLabelToId) {{
+    brew.preferred_theme_tag_id = themeLabelToId[label];
+    brew.preferred_theme_label = label;
+  }} else {{
+    brew.preferred_theme_tag_id = '';
+    brew.preferred_theme_label = '';
+  }}
+  renderThemeDropdown();
+}});
+themeDropdown.addEventListener('mousedown', (e) => {{
+  // mousedown (not click) fires before the input's blur, so the
+  // dropdown is still in the DOM to read from when this runs.
+  const item = e.target.closest('.theme-dropdown-item[data-label]');
+  if (!item) return;
+  const label = item.dataset.label;
+  themeInput.value = label;
+  brew.preferred_theme_tag_id = themeLabelToId[label] || '';
+  brew.preferred_theme_label = label;
+  themeDropdown.classList.remove('show');
+}});
+themeInput.addEventListener('blur', () => {{ setTimeout(() => themeDropdown.classList.remove('show'), 150); }});
 
 // '' -> no filter. 'C' -> exactly colorless. A single WUBRG letter ->
 // "uses this color" (matches any card whose identity contains it, same
@@ -1389,8 +1553,14 @@ function colorPipCounts(cards) {{
 function renderDeckAnalysis() {{
   const cards = libraryCards();
   const total = cards.reduce((s, c) => s + c.quantity, 0);
-  document.getElementById('deck-analysis').style.display = total ? 'block' : 'none';
-  if (!total) return;
+  if (!total) {{
+    document.getElementById('analysis-stat-line').textContent = 'Add some cards first.';
+    document.getElementById('curve-chart').innerHTML = '';
+    document.getElementById('color-breakdown').innerHTML = '';
+    document.getElementById('sample-hand-stat').textContent = '';
+    document.getElementById('sample-hand-cards').innerHTML = '';
+    return;
+  }}
 
   const allCmcs = cards.flatMap(c => Array(c.quantity).fill(c.cmc || 0));
   const avgCmc = allCmcs.reduce((s, v) => s + v, 0) / allCmcs.length;
@@ -1438,7 +1608,6 @@ function renderAll() {{
   renderCommanderSlot();
   renderDeckList();
   renderStats();
-  renderDeckAnalysis();
 }}
 
 fetch('/builder/collection-data')
@@ -1484,6 +1653,7 @@ suggestBtn.addEventListener('click', () => {{
     body: JSON.stringify({{
       cards: brew.cards, commander: brew.commander, format: brew.format, target_format: brew.target_format,
       mix_targets: brew.mix_targets, intended_bracket: brew.intended_bracket,
+      preferred_theme_tag_id: brew.preferred_theme_tag_id,
     }}),
   }})
     .then(r => r.json())
@@ -1610,57 +1780,165 @@ exportCsvBtn.addEventListener('click', () => {{
 
 const BRACKET_TAG_LABELS = {{ E: 'Exhibition', C: 'Core', P: 'Powerful', O: 'Oddball', S: 'Spicy', R: 'Ruthless', B: 'Banned' }};
 
-const checkBracketBtn = document.getElementById('check-bracket-btn');
-checkBracketBtn.addEventListener('click', () => {{
+const COLOR_NAMES = {{ W: 'White', U: 'Blue', B: 'Black', R: 'Red', G: 'Green' }};
+function deckColorIdentity() {{
+  const colors = new Set();
+  if (brew.commander) (brew.commander.color_identity || []).forEach(c => colors.add(c));
+  brew.cards.forEach(c => (c.color_identity || []).forEach(x => colors.add(x)));
+  const ordered = WUBRG.filter(c => colors.has(c));
+  return ordered.length ? ordered : ['Colorless'];
+}}
+
+function statBadges(data) {{
+  const badges = [
+    {{ cls: 'highlight', label: `&#128176; $${{data.deck_value.toFixed(2)}}`, tip: "Total deck value at today's market price" }},
+  ];
+  if (data.is_commander_format) {{
+    const gcTip = data.game_changers_names.length
+      ? 'Game Changers in this deck: ' + data.game_changers_names.join(', ')
+      : 'On WotC\\'s official Commander Game Changers list -- none found in this deck';
+    badges.push({{
+      cls: data.game_changers ? 'highlight' : '',
+      label: `&#9889; ${{data.game_changers}} Game Changer${{data.game_changers === 1 ? '' : 's'}}`,
+      tip: gcTip,
+    }});
+    badges.push(data.banned_count
+      ? {{ cls: 'warn', label: `&#9940; ${{data.banned_count}} not legal`, tip: 'Cards not legal in Commander (banned/restricted)' }}
+      : {{ cls: 'good', label: '&#10003; Commander legal', tip: 'No Commander-banned or restricted cards found' }});
+    if (data.bracket_tag) {{
+      badges.push({{
+        label: BRACKET_TAG_LABELS[data.bracket_tag] || data.bracket_tag,
+        tip: "Commander Spellbook's own community power/style rating for this deck -- not the official WotC bracket system",
+      }});
+    }}
+    if (data.wotc_bracket) {{
+      badges.push({{
+        label: `Bracket ${{data.wotc_bracket[0]}}`,
+        tip: `Estimated from WotC's own published Bracket rules (Game Changers, mass land denial, combos, extra turns): ${{data.wotc_bracket[1]}}`,
+      }});
+    }}
+    badges.push({{
+      label: `&#128279; ${{data.combos_included}} combo${{data.combos_included === 1 ? '' : 's'}}, ${{data.combos_almost}} one away`,
+      tip: `${{data.combos_included}} known combo(s) already in this deck, and ${{data.combos_almost}} more you're exactly one card away from completing (via Commander Spellbook)`,
+    }});
+  }}
+  return badges;
+}}
+
+// Plain computed facts, not generated prose -- the same "no AI-generated
+// guesses" rule as everywhere else in this app (Suggest's theme signal,
+// budget alternatives). Just the objective numbers a real Rule 0 chat
+// covers, laid out as statements instead of badges.
+function rule0Items(data) {{
+  const items = [`<b>Colors:</b> ${{deckColorIdentity().map(c => COLOR_NAMES[c] || c).join(' / ')}}`];
+  if (data.is_commander_format) {{
+    if (data.wotc_bracket) {{
+      items.push(`<b>Estimated Bracket ${{data.wotc_bracket[0]}}</b> (${{data.wotc_bracket[1]}}) -- WotC's own published rules, from this deck's Game Changers/combos/extra-turns/land-denial`);
+    }}
+    items.push(`<b>Game Changers (${{data.game_changers}}):</b> ${{data.game_changers_names.length ? data.game_changers_names.join(', ') : 'none'}}`);
+    items.push(`<b>Mass land denial:</b> ${{data.mass_land_denial ? 'Yes' : 'No'}}`);
+    items.push(`<b>Extra-turn effects:</b> ${{data.extra_turn_count}}`);
+    items.push(`<b>Combos:</b> ${{data.combos_included}} already assembled, ${{data.combos_almost}} one card away`);
+  }}
+  items.push(`<b>Deck value:</b> $${{data.deck_value.toFixed(2)}} (today's market)`);
+  return items;
+}}
+
+function renderComboReference(data) {{
+  const included = data.combos_included_list || [];
+  const almost = data.combos_almost_list || [];
+  let html = '';
+  const comboLine = c => `${{c.uses.join(' + ')}}<span class="combo-arrow">&rarr;</span>${{c.produces.join(', ')}}`;
+  if (included.length) {{
+    html += '<div class="combo-group"><h5>Already in your deck</h5>' + included.map(c => `
+      <div class="combo-item"><span class="combo-uses">${{comboLine(c)}}</span>${{c.url ? ` <a href="${{c.url}}" target="_blank" rel="noopener">(details)</a>` : ''}}</div>
+    `).join('') + '</div>';
+  }}
+  if (almost.length) {{
+    html += '<div class="combo-group"><h5>One card away</h5>' + almost.map(c => `
+      <div class="combo-item">
+        <span class="combo-uses">${{comboLine(c)}}</span>
+        <div class="combo-missing">Missing: ${{(c.missing || []).join(', ') || '?'}}</div>
+      </div>
+    `).join('') + '</div>';
+  }}
+  document.getElementById('combo-reference').innerHTML = html || '<div class="hint" style="margin:0;">No known combos detected (via Commander Spellbook).</div>';
+}}
+
+let lastAnalyzeData = null;
+const analyzeModal = document.getElementById('analyze-modal');
+const analyzeBtn = document.getElementById('analyze-btn');
+const printBattleCardBtn = document.getElementById('print-battle-card-btn');
+
+function closeAnalyzeModal() {{ analyzeModal.classList.remove('show'); }}
+document.getElementById('analyze-modal-close').addEventListener('click', closeAnalyzeModal);
+analyzeModal.addEventListener('click', (e) => {{ if (e.target === analyzeModal) closeAnalyzeModal(); }});
+document.addEventListener('keydown', (e) => {{ if (e.key === 'Escape' && analyzeModal.classList.contains('show')) closeAnalyzeModal(); }});
+
+analyzeBtn.addEventListener('click', () => {{
   if (!brew.cards.length && !brew.commander) {{ showError('Add some cards first.'); return; }}
-  checkBracketBtn.disabled = true;
-  const results = document.getElementById('bracket-value-results');
-  results.innerHTML = '<div class="hint" style="margin:0;">Checking\\u2026 (this calls Commander Spellbook live, may take a few seconds)</div>';
+  lastAnalyzeData = null;
+  analyzeModal.classList.add('show');
+  document.getElementById('analyze-modal-title').textContent = brew.deck_name || document.getElementById('deck-name').value || 'Analyze Deck';
+  renderDeckAnalysis();
+  drawSampleHand();
+  document.getElementById('analyze-badges').innerHTML = '';
+  document.getElementById('rule0-list').innerHTML = '';
+  document.getElementById('combo-reference').innerHTML = '';
+  document.getElementById('analyze-loading').style.display = 'block';
+  printBattleCardBtn.disabled = true;
   fetch('/builder/stats', {{
     method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
     body: JSON.stringify({{ cards: brew.cards, commander: brew.commander, format: brew.format }}),
   }})
     .then(r => r.json())
     .then(data => {{
-      if (data.error) {{ results.innerHTML = ''; showError(data.error); return; }}
-      const badges = [
-        {{ cls: 'highlight', label: `&#128176; $${{data.deck_value.toFixed(2)}}`, tip: "Total deck value at today's market price" }},
-      ];
-      if (data.is_commander_format) {{
-        const gcTip = data.game_changers_names.length
-          ? 'Game Changers in this deck: ' + data.game_changers_names.join(', ')
-          : 'On WotC\\'s official Commander Game Changers list -- none found in this deck';
-        badges.push({{
-          cls: data.game_changers ? 'highlight' : '',
-          label: `&#9889; ${{data.game_changers}} Game Changer${{data.game_changers === 1 ? '' : 's'}}`,
-          tip: gcTip,
-        }});
-        badges.push(data.banned_count
-          ? {{ cls: 'warn', label: `&#9940; ${{data.banned_count}} not legal`, tip: 'Cards not legal in Commander (banned/restricted)' }}
-          : {{ cls: 'good', label: '&#10003; Commander legal', tip: 'No Commander-banned or restricted cards found' }});
-        if (data.bracket_tag) {{
-          badges.push({{
-            label: BRACKET_TAG_LABELS[data.bracket_tag] || data.bracket_tag,
-            tip: "Commander Spellbook's own community power/style rating for this deck -- not the official WotC bracket system",
-          }});
-        }}
-        if (data.wotc_bracket) {{
-          badges.push({{
-            label: `Bracket ${{data.wotc_bracket[0]}}`,
-            tip: `Estimated from WotC's own published Bracket rules (Game Changers, mass land denial, combos, extra turns): ${{data.wotc_bracket[1]}}`,
-          }});
-        }}
-        badges.push({{
-          label: `&#128279; ${{data.combos_included}} combo${{data.combos_included === 1 ? '' : 's'}}, ${{data.combos_almost}} one away`,
-          tip: `${{data.combos_included}} known combo(s) already in this deck, and ${{data.combos_almost}} more you're exactly one card away from completing (via Commander Spellbook)`,
-        }});
-      }}
-      results.innerHTML = badges.map(b =>
+      document.getElementById('analyze-loading').style.display = 'none';
+      if (data.error) {{ showError(data.error); return; }}
+      lastAnalyzeData = data;
+      document.getElementById('analyze-badges').innerHTML = statBadges(data).map(b =>
         `<span class="bv-badge ${{b.cls || ''}}">${{b.label}}<span class="tooltip-popup">${{b.tip}}</span></span>`
       ).join('');
+      document.getElementById('rule0-list').innerHTML = rule0Items(data).map(t => `<li>${{t}}</li>`).join('');
+      renderComboReference(data);
+      printBattleCardBtn.disabled = false;
     }})
-    .catch(() => {{ results.innerHTML = ''; showError('Could not reach the server.'); }})
-    .finally(() => {{ checkBracketBtn.disabled = false; }});
+    .catch(() => {{ document.getElementById('analyze-loading').style.display = 'none'; showError('Could not reach the server.'); }});
+}});
+
+function buildBattleCardHtml(data) {{
+  const name = brew.deck_name || document.getElementById('deck-name').value || 'Untitled brew';
+  const commanderLine = brew.commander ? `Commander: ${{brew.commander.name}}` : (brew.format === 'commander' ? 'No commander chosen' : '60-card constructed');
+  const badges = [];
+  badges.push(`${{deckColorIdentity().map(c => COLOR_NAMES[c] || c).join(' / ')}}`);
+  if (data.is_commander_format && data.wotc_bracket) badges.push(`Bracket ${{data.wotc_bracket[0]}} (${{data.wotc_bracket[1]}})`);
+  if (data.bracket_tag) badges.push(BRACKET_TAG_LABELS[data.bracket_tag] || data.bracket_tag);
+  badges.push(`$${{data.deck_value.toFixed(2)}}`);
+  const included = data.combos_included_list || [];
+  const almost = data.combos_almost_list || [];
+  const comboLine = c => `${{c.uses.join(' + ')}} \\u2192 ${{c.produces.join(', ')}}`;
+  return `
+    <h1>${{name}}</h1>
+    <div class="bc-sub">${{commanderLine}}</div>
+    <div class="bc-badges">${{badges.map(b => `<span>${{b}}</span>`).join('')}}</div>
+    <h2>Rule 0 Summary</h2>
+    <ul>${{rule0Items(data).map(t => `<li>${{t}}</li>`).join('')}}</ul>
+    <h2>Game Changers</h2>
+    <ul>${{data.is_commander_format && data.game_changers_names.length ? data.game_changers_names.map(n => `<li>${{n}}</li>`).join('') : '<li>None</li>'}}</ul>
+    <h2>Combo Reference</h2>
+    ${{included.length ? included.map(c => `<div class="bc-combo">&#10003; ${{comboLine(c)}}</div>`).join('') : ''}}
+    ${{almost.length ? almost.map(c => `<div class="bc-combo">&#9675; ${{comboLine(c)}} (needs: ${{(c.missing || []).join(', ')}})</div>`).join('') : ''}}
+    ${{!included.length && !almost.length ? '<div class="bc-combo">No known combos detected.</div>' : ''}}
+  `;
+}}
+
+printBattleCardBtn.addEventListener('click', () => {{
+  if (!lastAnalyzeData) return;
+  const card = document.getElementById('battle-card');
+  card.innerHTML = buildBattleCardHtml(lastAnalyzeData);
+  card.classList.add('printing');
+  window.print();
+  card.classList.remove('printing');
 }});
 
 function pollReportProgress(jobId) {{
@@ -1760,6 +2038,8 @@ def builder_save():
         cards=cards,
         mix_targets=body.get("mix_targets") or {},
         intended_bracket=body.get("intended_bracket") or "",
+        preferred_theme_tag_id=body.get("preferred_theme_tag_id") or "",
+        preferred_theme_label=body.get("preferred_theme_label") or "",
     )
     return jsonify(deck_id=deck_id)
 
@@ -1782,14 +2062,46 @@ def builder_suggest():
         role: int(raw_mix[role]) for role in ("Lands", "Ramp", "Draw", "Interaction")
         if role in raw_mix and isinstance(raw_mix[role], (int, float))
     } or None
+    target_size = 100 if deck_format == "commander" else 60
     suggestions = suggest_builder_cards(
         wip_entries, owned_view, deck_format, body.get("target_format"),
-        target_size=100 if deck_format == "commander" else 60,
+        target_size=target_size,
         commander_color_identity=commander.get("color_identity") if deck_format == "commander" else None,
+        # Request everything still needed in one go (suggest_builder_cards
+        # caps this to however many slots are actually left) rather than
+        # the function's own small per-call default -- a fresh deck should
+        # get one big reviewable batch, not require clicking Suggest ~7
+        # times to reach a full 99/100 or 60/60.
+        max_suggestions=target_size,
         mix_targets=mix_targets,
         intended_bracket=body.get("intended_bracket") or None,
+        preferred_theme_tag_id=body.get("preferred_theme_tag_id") or None,
     )
     return jsonify(suggestions=suggestions)
+
+
+@app.route("/builder/themes", methods=["POST"])
+def builder_themes():
+    """Oracle Tags themes (see list_theme_options) with enough owned,
+    legal, color-correct candidates to be worth offering in the builder's
+    "Preferred theme" picker -- recomputed whenever the commander/colors
+    change client-side, same request shape as /builder/suggest."""
+    body = request.get_json(silent=True) or {}
+    deck_format = body.get("format") if body.get("format") in ("commander", "constructed") else "commander"
+    if not os.path.isfile(COLLECTION_PATH):
+        return jsonify(error="No ManaBox collection on file yet -- upload one from the home page first."), 400
+    try:
+        owned = load_collection(COLLECTION_PATH)
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+    owned_view = owned_collection_gameplay_view(owned, gameplay_data_in_index())
+    wip_entries = brew_to_card_entries({"commander": body.get("commander"), "cards": body.get("cards") or []})
+    commander = body.get("commander") or {}
+    themes = list_theme_options(
+        wip_entries, owned_view, deck_format, body.get("target_format"),
+        commander_color_identity=commander.get("color_identity") if deck_format == "commander" else None,
+    )
+    return jsonify(themes=themes)
 
 
 @app.route("/builder/stats", methods=["POST"])
@@ -1824,6 +2136,15 @@ def builder_stats():
         wotc_bracket=totals.get("wotc_bracket"),
         combos_included=len(combos.get("included") or []),
         combos_almost=combos.get("almost_total") or 0,
+        # Full combo detail (uses/produces/url for "included"; uses/missing
+        # for "almost") and the two other rule-0-relevant flags WotC's own
+        # bracket rules key off of -- all for the Analyze modal's combo
+        # reference section and rule-0 summary, not just the badge counts
+        # the old Bracket & Value panel showed.
+        combos_included_list=combos.get("included") or [],
+        combos_almost_list=combos.get("almost_included") or [],
+        mass_land_denial=totals.get("mass_land_denial") or False,
+        extra_turn_count=totals.get("extra_turn_count") or 0,
         is_commander_format=is_commander_format,
     )
 
