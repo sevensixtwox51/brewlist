@@ -791,11 +791,24 @@ body.compact .deck-row .card-thumb { display:none; }
   background:var(--bg); color:var(--text); font-size:0.85rem; margin:0;
 }
 .bracket-value-panel { margin-bottom:10px; }
-#bracket-value-results { margin-top:8px; font-size:0.82rem; color:var(--text-dim); }
+#bracket-value-results { margin-top:8px; }
 #bracket-value-results:empty { margin-top:0; }
-#bracket-value-results .bv-stat { margin-bottom:4px; }
-#bracket-value-results .bv-stat b { color:var(--text); }
-#bracket-value-results .bv-warn { color:var(--missing); }
+.bv-badge {
+  display:inline-flex; align-items:center; gap:4px; padding:4px 10px; margin:0 6px 6px 0;
+  border-radius:999px; background:var(--bg); border:1px solid var(--card-border);
+  font-size:0.78rem; color:var(--text); position:relative; cursor:help;
+}
+.bv-badge b { font-weight:600; }
+.bv-badge.warn { border-color:color-mix(in srgb, var(--missing) 45%, var(--card-border)); color:var(--missing); }
+.bv-badge.good { border-color:color-mix(in srgb, var(--owned) 45%, var(--card-border)); color:var(--owned); }
+.bv-badge.highlight { border-color:color-mix(in srgb, var(--gold) 45%, var(--card-border)); color:var(--gold); }
+.bv-badge .tooltip-popup {
+  display:none; position:absolute; bottom:100%; left:0; margin-bottom:6px;
+  background:var(--bg-elevated); border:1px solid var(--card-border); border-radius:8px;
+  padding:8px 10px; font-size:0.78rem; font-weight:400; color:var(--text); white-space:normal;
+  width:max-content; max-width:260px; box-shadow:var(--shadow); z-index:20;
+}
+.bv-badge:hover .tooltip-popup { display:block; }
 @media (max-width: 900px) { .builder-layout { grid-template-columns: 1fr; } .deck-panel { position:static; } }
 """
 
@@ -1036,9 +1049,14 @@ function thumbHtml(scryfallId, cssClass) {{
 const hoverPreview = document.getElementById('hover-preview');
 function setupHoverPreview(container) {{
   container.addEventListener('mousemove', (e) => {{
-    const img = e.target.closest('.card-thumb[data-full]');
-    if (!img) {{ hoverPreview.classList.remove('show'); return; }}
-    hoverPreview.src = img.dataset.full;
+    // Delegate off the closest element carrying data-full, not just the
+    // small <img class="card-thumb">: in Compact view the thumb itself is
+    // display:none (so it can never receive/bubble mouse events), and in
+    // the suggestions list the thumb is tiny, so the row/tile container
+    // also carries its own data-full to keep the whole row hoverable.
+    const el = e.target.closest('[data-full]');
+    if (!el) {{ hoverPreview.classList.remove('show'); return; }}
+    hoverPreview.src = el.dataset.full;
     hoverPreview.classList.add('show');
     const pad = 18, w = 240, h = Math.round(w * 1.4);
     let x = e.clientX + pad;
@@ -1151,6 +1169,7 @@ function renderGrid() {{
 
     const tile = document.createElement('div');
     tile.className = 'builder-tile';
+    tile.dataset.full = scryfallImg(card.scryfall_id, 'normal') || '';
     const legality = legalityFor(card);
     const warnHtml = (legality && legality !== 'Legal') ? `<div class="warn">&#9888; ${{legality}} in ${{brew.format === 'commander' ? 'Commander' : brew.target_format}}</div>` : '';
     const inDeck = findCard(card.name);
@@ -1204,7 +1223,7 @@ function renderCommanderSlot() {{
     wrap.innerHTML = '<div class="commander-slot"><span class="hint" style="margin:0;">No commander chosen -- click &#9733; Commander on an eligible card.</span></div>';
     return;
   }}
-  wrap.innerHTML = `<div class="commander-slot"><span class="commander-info">${{thumbHtml(brew.commander.scryfall_id, 'card-thumb small')}}<span><b>Commander:</b> ${{brew.commander.name}} ${{colorIconsHtml(brew.commander.color_identity)}}</span></span></div>`;
+  wrap.innerHTML = `<div class="commander-slot" data-full="${{scryfallImg(brew.commander.scryfall_id, 'normal') || ''}}"><span class="commander-info">${{thumbHtml(brew.commander.scryfall_id, 'card-thumb small')}}<span><b>Commander:</b> ${{brew.commander.name}} ${{colorIconsHtml(brew.commander.color_identity)}}</span></span></div>`;
   wrap.querySelector('.commander-slot').appendChild(Object.assign(document.createElement('button'), {{
     type: 'button', className: 'btn ghost small', textContent: 'Clear',
     onclick: clearCommander,
@@ -1226,6 +1245,7 @@ function renderDeckList() {{
     groups[g].sort((a, b) => a.name.localeCompare(b.name)).forEach(c => {{
       const row = document.createElement('div');
       row.className = 'deck-row';
+      row.dataset.full = scryfallImg(c.scryfall_id, 'normal') || '';
       row.innerHTML = `<span class="row-name">${{thumbHtml(c.scryfall_id, 'card-thumb small')}}<span>${{c.name}}</span>${{colorIconsHtml(c.color_identity)}}</span>`;
       const controls = document.createElement('div');
       controls.className = 'qty-controls';
@@ -1245,7 +1265,10 @@ function renderDeckList() {{
 }}
 
 function renderStats() {{
-  const total = brew.cards.reduce((s, c) => s + c.quantity, 0);
+  // Matches WotC's own 99-library + 1-commander = 100-card rule -- the
+  // commander counts toward the displayed total (so a full deck reads
+  // "100/100"), even though it's tracked separately from brew.cards.
+  const total = brew.cards.reduce((s, c) => s + c.quantity, 0) + (brew.format === 'commander' && brew.commander ? 1 : 0);
   const lands = brew.cards.filter(c => (c.category || '').includes('Land')).reduce((s, c) => s + c.quantity, 0);
   const avgCmc = brew.cards.length
     ? (brew.cards.reduce((s, c) => s + (c.cmc || 0) * c.quantity, 0) / Math.max(1, total)).toFixed(2)
@@ -1411,6 +1434,7 @@ suggestBtn.addEventListener('click', () => {{
       data.suggestions.forEach(s => {{
         const row = document.createElement('div');
         row.className = 'suggestion-row';
+        row.dataset.full = scryfallImg(s.scryfall_id, 'normal') || '';
         row.innerHTML = `<span class="row-name">${{thumbHtml(s.scryfall_id, 'card-thumb small')}}<span>${{s.name}} ${{colorIconsHtml(s.color_identity)}}<div class="reason">${{s.reason}}</div></span></span>`;
         const addBtn = Object.assign(document.createElement('button'), {{
           className: 'btn ghost small', textContent: '+ Add',
@@ -1530,21 +1554,41 @@ checkBracketBtn.addEventListener('click', () => {{
     .then(r => r.json())
     .then(data => {{
       if (data.error) {{ results.innerHTML = ''; showError(data.error); return; }}
-      let html = `<div class="bv-stat">Deck value (today's market): <b>$${{data.deck_value.toFixed(2)}}</b></div>`;
+      const badges = [
+        {{ cls: 'highlight', label: `&#128176; $${{data.deck_value.toFixed(2)}}`, tip: "Total deck value at today's market price" }},
+      ];
       if (data.is_commander_format) {{
-        html += `<div class="bv-stat">Game Changers: <b>${{data.game_changers}}</b>${{data.game_changers_names.length ? ' (' + data.game_changers_names.join(', ') + ')' : ''}}</div>`;
-        html += data.banned_count
-          ? `<div class="bv-stat bv-warn">&#9940; Not legal in Commander: <b>${{data.banned_count}}</b></div>`
-          : '<div class="bv-stat">&#10003; No Commander-banned cards found</div>';
+        const gcTip = data.game_changers_names.length
+          ? 'Game Changers in this deck: ' + data.game_changers_names.join(', ')
+          : 'On WotC\\'s official Commander Game Changers list -- none found in this deck';
+        badges.push({{
+          cls: data.game_changers ? 'highlight' : '',
+          label: `&#9889; ${{data.game_changers}} Game Changer${{data.game_changers === 1 ? '' : 's'}}`,
+          tip: gcTip,
+        }});
+        badges.push(data.banned_count
+          ? {{ cls: 'warn', label: `&#9940; ${{data.banned_count}} not legal`, tip: 'Cards not legal in Commander (banned/restricted)' }}
+          : {{ cls: 'good', label: '&#10003; Commander legal', tip: 'No Commander-banned or restricted cards found' }});
         if (data.bracket_tag) {{
-          html += `<div class="bv-stat">Commander Spellbook rating: <b>${{BRACKET_TAG_LABELS[data.bracket_tag] || data.bracket_tag}}</b></div>`;
+          badges.push({{
+            label: BRACKET_TAG_LABELS[data.bracket_tag] || data.bracket_tag,
+            tip: "Commander Spellbook's own community power/style rating for this deck -- not the official WotC bracket system",
+          }});
         }}
         if (data.wotc_bracket) {{
-          html += `<div class="bv-stat">Estimated Bracket: <b>${{data.wotc_bracket[0]}}</b> (${{data.wotc_bracket[1]}})</div>`;
+          badges.push({{
+            label: `Bracket ${{data.wotc_bracket[0]}}`,
+            tip: `Estimated from WotC's own published Bracket rules (Game Changers, mass land denial, combos, extra turns): ${{data.wotc_bracket[1]}}`,
+          }});
         }}
-        html += `<div class="bv-stat">Combos: <b>${{data.combos_included}}</b> in deck, <b>${{data.combos_almost}}</b> one card away</div>`;
+        badges.push({{
+          label: `&#128279; ${{data.combos_included}} combo${{data.combos_included === 1 ? '' : 's'}}, ${{data.combos_almost}} one away`,
+          tip: `${{data.combos_included}} known combo(s) already in this deck, and ${{data.combos_almost}} more you're exactly one card away from completing (via Commander Spellbook)`,
+        }});
       }}
-      results.innerHTML = html;
+      results.innerHTML = badges.map(b =>
+        `<span class="bv-badge ${{b.cls || ''}}">${{b.label}}<span class="tooltip-popup">${{b.tip}}</span></span>`
+      ).join('');
     }})
     .catch(() => {{ results.innerHTML = ''; showError('Could not reach the server.'); }})
     .finally(() => {{ checkBracketBtn.disabled = false; }});

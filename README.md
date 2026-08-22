@@ -113,8 +113,9 @@ page).
   the deck (the same Scryfall Oracle Tags used for the budget-alternative
   suggestions above — not an AI guess), then whichever part of the deck's
   shape is furthest from target. Defaults to the well-known Command
-  Zone-style EDH ratios (38 lands / 10 ramp / 10 draw / 11 interaction / 31
-  synergy pieces out of 100), adjustable under **Deck mix targets**
+  Zone-style EDH ratios (38 lands / 10 ramp / 10 draw / 11 interaction / 30
+  synergy pieces out of a 99-card library, plus your 1 commander),
+  adjustable under **Deck mix targets**
 - An optional **Intended bracket** (1-2 / 3 / 4+) keeps Suggest from
   recommending more Game Changers than WotC's own published bracket rules
   allow for that bracket; leave it on "No preference" to build freely — the

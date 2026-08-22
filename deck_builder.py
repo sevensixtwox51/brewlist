@@ -167,10 +167,24 @@ def suggest_builder_cards(
     bracket (see WOTC_BRACKET_GAME_CHANGER_MAX), Game Changer candidates
     are excluded outright rather than suggested and then flagged later.
     None (no preference) suggests freely, same as before this existed."""
+    # target_size is the *whole* deck (100 for Commander, matching WotC's
+    # own rules -- 99 library + 1 commander); the commander itself never
+    # counts toward the library, so the actual library target is one
+    # less. Comparing the library count straight against target_size
+    # instead would let Suggest keep filling until the library alone hit
+    # 100 (101 cards total) and skew every role's numeric target by the
+    # same one card.
+    library_target = target_size - 1 if deck_format == "commander" else target_size
     used_names = {normalize_name(e.name) for e in wip_entries}
-    remaining = max(0, target_size - sum(e.quantity for e in wip_entries if e.section != "commander"))
+    remaining = max(0, library_target - sum(e.quantity for e in wip_entries if e.section != "commander"))
     if remaining <= 0:
         return []
+    # Cap the batch itself to what's actually left, not just gate on
+    # remaining>0 -- a deck 3 cards from done shouldn't get handed back a
+    # full 15-card batch (every caller so far just appends everything
+    # returned, e.g. "Add All" or a repeated build-to-completion loop, so
+    # without this a deck can overshoot its target by a full batch).
+    max_suggestions = min(max_suggestions, remaining)
 
     legality_key = "commander" if deck_format == "commander" else (target_format or "")
     colors_allowed = set(commander_color_identity) if deck_format == "commander" and commander_color_identity is not None else None
@@ -268,10 +282,11 @@ def suggest_builder_cards(
     # simpler land-only target it always had, since there's no single
     # community-standard ramp/draw/removal ratio across constructed
     # formats/archetypes the way there is for EDH. "Synergy" (the deck's
-    # actual creatures/win-cons/theme pieces) is always whatever's left
-    # of target_size after the tracked roles -- the single biggest bucket
-    # in the standard EDH shape (~31/100), so it's sized like every other
-    # role below, never treated as a mere leftover.
+    # actual creatures/win-cons/theme pieces) is always whatever's left of
+    # library_target (the 99-card library, not counting the commander)
+    # after the tracked roles -- the single biggest bucket in the standard
+    # EDH shape (~30/99), so it's sized like every other role below, never
+    # treated as a mere leftover.
     if deck_format == "commander":
         role_targets = dict(DEFAULT_COMMANDER_MIX)
         if mix_targets:
@@ -279,8 +294,8 @@ def suggest_builder_cards(
                 if role in mix_targets and mix_targets[role] is not None:
                     role_targets[role] = max(0, int(mix_targets[role]))
     else:
-        role_targets = {"Lands": round(target_size * CONSTRUCTED_LAND_FRACTION)}
-    role_targets["Synergy"] = max(0, target_size - sum(role_targets.values()))
+        role_targets = {"Lands": round(library_target * CONSTRUCTED_LAND_FRACTION)}
+    role_targets["Synergy"] = max(0, library_target - sum(role_targets.values()))
 
     def role_of(name: str, category: str) -> str:
         if deck_format != "commander":
@@ -317,6 +332,21 @@ def suggest_builder_cards(
         role: needed for role, needed in role_needed.items()
         if needed > 0 and role_candidates.get(role)
     }
+    if not eligible:
+        # Every tracked role either hit its target already or has no
+        # owned/legal/unused candidates left of that specific role (e.g.
+        # this deck's colors just don't have many Oracle-tagged "draw" or
+        # "interaction" cards in the collection) -- targets are a shape to
+        # aim for, not a hard cap once the narrower roles are tapped out.
+        # Without this fallback, Suggest stalls well short of a full deck
+        # even with hundreds of untouched, perfectly legal Synergy cards
+        # still sitting in the collection, because nothing is technically
+        # "under target" anymore. Fall back to whichever roles still have
+        # any candidates at all, weighted by how many are available.
+        fallback_pools = {role: len(pool) for role, pool in role_candidates.items() if pool}
+        total_pool = sum(fallback_pools.values())
+        if total_pool:
+            eligible = {role: max(1, round(max_suggestions * size / total_pool)) for role, size in fallback_pools.items()}
     role_slots: dict[str, int] = {}
     if eligible:
         total_needed = sum(eligible.values())
