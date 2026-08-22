@@ -694,6 +694,11 @@ body::after {
   padding:8px 10px; border-radius:8px; border:1px solid var(--card-border);
   background:var(--bg); color:var(--text); font-size:0.85rem;
 }
+.exact-color-toggle {
+  display:flex; align-items:center; gap:5px; font-size:0.8rem; color:var(--text-dim);
+  white-space:nowrap; cursor:pointer; user-select:none;
+}
+.exact-color-toggle input { margin:0; cursor:pointer; }
 .collection-grid {
   display:grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap:10px; max-height:75vh; overflow-y:auto; padding-right:4px;
@@ -720,7 +725,10 @@ body::after {
 .mana-cost-pips { display: inline-flex; align-items: center; gap: 1px; flex-shrink: 0; }
 .mana-cost-pips .mana-icon { width: 13px; height: 13px; }
 #hover-preview {
-  position: fixed; pointer-events: none; z-index: 100; display: none;
+  /* Above .modal-overlay's z-index:200 -- sample-hand-cards lives inside
+     the Analyze modal, so the preview has to outrank whatever overlay is
+     currently open, not just the base page content. */
+  position: fixed; pointer-events: none; z-index: 250; display: none;
   width: 240px; border-radius: 4.75% / 3.5%;
   box-shadow: 0 12px 32px rgba(0,0,0,0.5), 0 0 0 1px var(--card-border);
 }
@@ -1019,6 +1027,9 @@ def render_builder_page(deck_id: str | None = None) -> str:
         <input type="text" id="search" placeholder="Search your collection...">
         <select id="filter-category"><option value="">All types</option><option value="Commander">Commander</option>{category_options}</select>
         <select id="filter-color"><option value="">Any color</option><option value="C">Colorless</option><optgroup label="One-Color">{color_options}</optgroup>{color_family_optgroups}</select>
+        <label class="exact-color-toggle" title="Only show cards whose color identity is exactly the selected color(s) -- e.g. true Grixis cards, not also mono-colored or two-color ones that merely fit within Grixis">
+          <input type="checkbox" id="filter-color-exact"> Exact colors
+        </label>
         <div class="segmented" id="view-density-toggle" title="Switches between full tiles and a compact text list with mana-cost pips">
           <button type="button" class="seg-btn active" data-value="cards">Cards</button>
           <button type="button" class="seg-btn" data-value="compact">Compact</button>
@@ -1371,17 +1382,25 @@ themeDropdown.addEventListener('mousedown', (e) => {{
 }});
 themeInput.addEventListener('blur', () => {{ setTimeout(() => themeDropdown.classList.remove('show'), 150); }});
 
-// '' -> no filter. 'C' -> exactly colorless. A single WUBRG letter ->
-// "uses this color" (matches any card whose identity contains it, same
-// as before named color-family filters existed). Two or more letters ->
-// a guild/shard/wedge/etc name's color family: a *subset* match ("legal
-// to include in a deck of these colors"), same rule the Suggest engine
-// already uses for a commander's color identity -- so e.g. "Sultai
-// (BGU)" also surfaces mono-black/blue/green and colorless cards, not
-// just true 3-color ones.
-function matchesColorFilter(colorIdentity, filterValue) {{
+// '' -> no filter. 'C' -> exactly colorless. With `exact` off (the
+// default): a single WUBRG letter matches any card whose identity
+// contains it ("uses this color"); two or more letters (a guild/shard/
+// wedge/etc name) match by *subset* ("legal to include in a deck of
+// these colors"), same rule the Suggest engine uses for a commander's
+// color identity -- so e.g. "Sultai (BGU)" also surfaces mono-color and
+// colorless cards, not just true 3-color ones. With `exact` on (the
+// "Exact colors" checkbox), a card's identity must equal the filter's
+// colors precisely -- e.g. "Grixis (UBR)" + exact finds only true
+// 3-color UBR cards, which is what actually narrows down a Grixis-
+// *only* commander instead of drowning it in every mono/2-color UBR
+// card that also happens to fit inside Grixis.
+function matchesColorFilter(colorIdentity, filterValue, exact) {{
   if (!filterValue) return true;
   if (filterValue === 'C') return colorIdentity.length === 0;
+  if (exact) {{
+    const filterColors = filterValue.split('');
+    return colorIdentity.length === filterColors.length && filterColors.every(c => colorIdentity.includes(c));
+  }}
   if (filterValue.length === 1) return colorIdentity.includes(filterValue);
   return colorIdentity.every(c => filterValue.includes(c));
 }}
@@ -1390,6 +1409,7 @@ function renderGrid() {{
   const search = document.getElementById('search').value.trim().toLowerCase();
   const category = document.getElementById('filter-category').value;
   const color = document.getElementById('filter-color').value;
+  const exactColor = document.getElementById('filter-color-exact').checked;
   const grid = document.getElementById('collection-grid');
   grid.innerHTML = '';
   const frag = document.createDocumentFragment();
@@ -1397,7 +1417,7 @@ function renderGrid() {{
     if (search && !card.name.toLowerCase().includes(search)) return;
     if (category === 'Commander' && !isCommanderEligible(card)) return;
     if (category && category !== 'Commander' && card.category !== category) return;
-    if (!matchesColorFilter(card.color_identity, color)) return;
+    if (!matchesColorFilter(card.color_identity, color, exactColor)) return;
 
     const tile = document.createElement('div');
     tile.className = 'builder-tile';
@@ -1623,6 +1643,7 @@ fetch('/builder/collection-data')
 document.getElementById('search').addEventListener('input', renderGrid);
 document.getElementById('filter-category').addEventListener('change', renderGrid);
 document.getElementById('filter-color').addEventListener('change', renderGrid);
+document.getElementById('filter-color-exact').addEventListener('change', renderGrid);
 
 const saveBtn = document.getElementById('save-btn');
 const saveLabel = document.getElementById('save-label');
