@@ -814,6 +814,37 @@ body.compact .deck-row .card-thumb { display:none; }
 
 COLOR_LABELS = {"W": "White", "U": "Blue", "B": "Black", "R": "Red", "G": "Green"}
 
+# Wizards' own guild/shard/wedge flavor names for 2- and 3-color
+# combinations, plus the community-standard "Nephilim" names for the
+# 4-color combos (from the Time Spiral Nephilim cycle, reused ever since
+# as the accepted shorthand -- e.g. by Scryfall's own color-combination
+# search terms). Letter order in each tuple matches each name's
+# conventional spoken order (not always WUBRG order), same as
+# https://boardgames.stackexchange.com/questions/11550. Filtering by one
+# of these is a subset match against a card's color identity (same
+# "legal to include" rule the Suggest engine already uses for a
+# commander's color identity) -- so e.g. "Sultai" also surfaces mono-
+# black/blue/green and colorless cards, not just true 3-color ones.
+COLOR_FAMILIES = {
+    "Two-Color (Guilds)": [
+        ("WU", "Azorius"), ("UB", "Dimir"), ("BR", "Rakdos"), ("RG", "Gruul"), ("GW", "Selesnya"),
+        ("WB", "Orzhov"), ("UR", "Izzet"), ("BG", "Golgari"), ("RW", "Boros"), ("GU", "Simic"),
+    ],
+    "Three-Color (Shards)": [
+        ("GWU", "Bant"), ("WUB", "Esper"), ("UBR", "Grixis"), ("BRG", "Jund"), ("RGW", "Naya"),
+    ],
+    "Three-Color (Wedges)": [
+        ("WBG", "Abzan"), ("URW", "Jeskai"), ("BGU", "Sultai"), ("RWB", "Mardu"), ("GUR", "Temur"),
+    ],
+    "Four-Color": [
+        ("WUBR", "Yore-Tiller"), ("UBRG", "Glint-Eye"), ("WBRG", "Dune-Brood"),
+        ("WURG", "Ink-Treader"), ("WUBG", "Witch-Maw"),
+    ],
+    "Five-Color": [
+        ("WUBRG", "Five-Color"),
+    ],
+}
+
 
 def render_builder_page(deck_id: str | None = None) -> str:
     brew = load_project(deck_id) if deck_id else {}
@@ -834,6 +865,12 @@ def render_builder_page(deck_id: str | None = None) -> str:
 
     category_options = "".join(f'<option value="{_esc(b)}">{_esc(b)}</option>' for b in BUCKET_ORDER)
     color_options = "".join(f'<option value="{code}">{_esc(label)}</option>' for code, label in COLOR_LABELS.items())
+    color_family_optgroups = "".join(
+        f'<optgroup label="{_esc(group)}">' + "".join(
+            f'<option value="{colors}">{_esc(name)} ({colors})</option>' for colors, name in combos
+        ) + "</optgroup>"
+        for group, combos in COLOR_FAMILIES.items()
+    )
 
     return f"""<!doctype html>
 <html lang="en">
@@ -923,7 +960,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
       <div class="builder-filters">
         <input type="text" id="search" placeholder="Search your collection...">
         <select id="filter-category"><option value="">All types</option><option value="Commander">Commander</option>{category_options}</select>
-        <select id="filter-color"><option value="">Any color</option><option value="C">Colorless</option>{color_options}</select>
+        <select id="filter-color"><option value="">Any color</option><option value="C">Colorless</option><optgroup label="One-Color">{color_options}</optgroup>{color_family_optgroups}</select>
         <div class="segmented" id="view-density-toggle" title="Switches between full tiles and a compact text list with mana-cost pips">
           <button type="button" class="seg-btn active" data-value="cards">Cards</button>
           <button type="button" class="seg-btn" data-value="compact">Compact</button>
@@ -1170,6 +1207,21 @@ function annotateFilterCounts() {{
   }});
 }}
 
+// '' -> no filter. 'C' -> exactly colorless. A single WUBRG letter ->
+// "uses this color" (matches any card whose identity contains it, same
+// as before named color-family filters existed). Two or more letters ->
+// a guild/shard/wedge/etc name's color family: a *subset* match ("legal
+// to include in a deck of these colors"), same rule the Suggest engine
+// already uses for a commander's color identity -- so e.g. "Sultai
+// (BGU)" also surfaces mono-black/blue/green and colorless cards, not
+// just true 3-color ones.
+function matchesColorFilter(colorIdentity, filterValue) {{
+  if (!filterValue) return true;
+  if (filterValue === 'C') return colorIdentity.length === 0;
+  if (filterValue.length === 1) return colorIdentity.includes(filterValue);
+  return colorIdentity.every(c => filterValue.includes(c));
+}}
+
 function renderGrid() {{
   const search = document.getElementById('search').value.trim().toLowerCase();
   const category = document.getElementById('filter-category').value;
@@ -1181,8 +1233,7 @@ function renderGrid() {{
     if (search && !card.name.toLowerCase().includes(search)) return;
     if (category === 'Commander' && !isCommanderEligible(card)) return;
     if (category && category !== 'Commander' && card.category !== category) return;
-    if (color === 'C' && card.color_identity.length > 0) return;
-    if (color && color !== 'C' && !card.color_identity.includes(color)) return;
+    if (!matchesColorFilter(card.color_identity, color)) return;
 
     const tile = document.createElement('div');
     tile.className = 'builder-tile';
