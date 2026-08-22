@@ -232,6 +232,69 @@ def list_theme_options(
     return options
 
 
+def suggest_replacements(
+    target_name: str,
+    target_category: str,
+    wip_entries: list[CardEntry],
+    owned_view: list[dict],
+    deck_format: str,
+    target_format: str | None,
+    commander_color_identity: list[str] | None,
+    limit: int = 6,
+) -> list[dict]:
+    """Owned, legal, color-correct cards that could swap in for
+    target_name -- restricted to the same role it fills (see _card_role:
+    Lands/Ramp/Draw/Interaction/Synergy for Commander, just Lands/other
+    for constructed) so a land only gets replaced with lands, a removal
+    spell with removal, etc. Ranked by whether the candidate shares
+    target_name's own Oracle Tag first (the same "what is this card's
+    actual job" signal suggest_builder_cards's theme callouts use), then
+    Game Changers as a power tiebreak. Deliberately skips the live
+    Commander Spellbook combo check suggest_builder_cards makes -- this
+    runs from a quick per-card popup, not a full re-suggest, so it stays
+    local/instant."""
+    candidates = _filter_candidates(wip_entries, owned_view, deck_format, target_format, commander_color_identity, None)
+    if not candidates:
+        return []
+    budget_alt = budget_alt_data_in_index()
+    tag_by_name = budget_alt.get("tag_by_name") or {}
+    tag_labels = budget_alt.get("tag_labels") or {}
+    game_changers = game_changers_in_index() if deck_format == "commander" else set()
+
+    def role_of(name: str, category: str) -> str:
+        if deck_format != "commander":
+            return "Lands" if category in ("Lands", "Basic Lands") else "Synergy"
+        return _card_role(name, category, tag_by_name, tag_labels)
+
+    target_role = role_of(target_name, target_category)
+    target_tag = tag_by_name.get(normalize_name(target_name))
+    same_role = [c for c in candidates if role_of(c["name"], c["category"]) == target_role]
+
+    def rank_key(c: dict):
+        nm = normalize_name(c["name"])
+        shares_tag = target_tag is not None and tag_by_name.get(nm) == target_tag
+        return (not shares_tag, nm not in game_changers, c["name"])
+
+    same_role.sort(key=rank_key)
+    tag_label = tag_labels.get(target_tag) if target_tag else None
+    results = []
+    for c in same_role[:limit]:
+        nm = normalize_name(c["name"])
+        shares_tag = target_tag is not None and tag_by_name.get(nm) == target_tag
+        reason = (
+            f'shares the "{tag_label}" role with {target_name}' if shares_tag and tag_label
+            else f'fills the same {target_role} role as {target_name}'
+        )
+        results.append({
+            "name": c["name"], "scryfall_id": c["scryfall_id"], "category": c["category"],
+            "type_line": c["type_line"], "color_identity": c["color_identity"],
+            "cmc": c["cmc"], "mana_cost": c["mana_cost"],
+            "set_code": c["set_code"], "collector_number": c["collector_number"],
+            "reason": reason,
+        })
+    return results
+
+
 def suggest_builder_cards(
     wip_entries: list[CardEntry],
     owned_view: list[dict],

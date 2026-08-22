@@ -53,6 +53,7 @@ from deck_builder import (
     list_theme_options,
     owned_collection_gameplay_view,
     suggest_builder_cards,
+    suggest_replacements,
 )
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -109,6 +110,19 @@ def list_projects() -> list[dict]:
             continue
     projects.sort(key=lambda p: p.get("updated", ""), reverse=True)
     return projects
+
+
+def delete_project(deck_id: str) -> bool:
+    """Removes a saved deck's JSON file (the Recent decks list entry and,
+    for a brew, the deck itself). Returns whether a file was actually
+    there to remove -- deleting an already-gone/unknown id is not an
+    error, just a no-op, since the UI's own list is the only thing that
+    could ever hand back a stale id."""
+    path = _project_path(deck_id)
+    if not os.path.isfile(path):
+        return False
+    os.remove(path)
+    return True
 
 
 def collection_meta() -> dict | None:
@@ -327,17 +341,22 @@ def render_home_page(error: str | None = None, prefill_url: str = "") -> str:
 
     def _project_item(p: dict) -> str:
         is_brew = p.get("type") == "brew"
-        label = _esc(p.get("deck_name", p.get("deck_id", "unknown")))
+        deck_id = p.get("deck_id", "")
+        raw_name = p.get("deck_name") or deck_id or "unknown"
+        label = _esc(raw_name)
         if is_brew:
-            href = f'/builder?id={_esc(p.get("deck_id", ""))}'
+            href = f'/builder?id={_esc(deck_id)}'
             data_attrs = 'data-type="brew"'
             label += ' <span class="hint-inline">(brew)</span>'
         else:
             href = "#"
-            data_attrs = f'data-type="compare" data-url="{_esc(p.get("deck_url", p.get("deck_id", "")))}"'
+            data_attrs = f'data-type="compare" data-url="{_esc(p.get("deck_url", deck_id))}"'
         return (
             f'<li><a href="{href}" class="recent-deck-link" {data_attrs}>{label}</a>'
-            f'<span class="when">{_esc((p.get("updated") or "")[:16].replace("T", " "))}</span></li>'
+            f'<span class="when">{_esc((p.get("updated") or "")[:16].replace("T", " "))}</span>'
+            f'<button type="button" class="btn danger small delete-deck-btn" '
+            f'data-deck-id="{_esc(deck_id)}" data-deck-name="{_esc(raw_name)}" title="Delete this deck">&times;</button>'
+            f'</li>'
         )
 
     items = "".join(_project_item(p) for p in projects[:15])
@@ -476,6 +495,28 @@ document.querySelectorAll('.recent-deck-link').forEach(link => {{
     e.preventDefault();
     moxfieldUrlInput.value = link.dataset.url;
     moxfieldUrlInput.focus();
+  }});
+}});
+
+document.querySelectorAll('.delete-deck-btn').forEach(btn => {{
+  btn.addEventListener('click', () => {{
+    if (!confirm(`Delete "${{btn.dataset.deckName}}"? This cannot be undone.`)) return;
+    btn.disabled = true;
+    fetch('/project/delete', {{
+      method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
+      body: JSON.stringify({{ deck_id: btn.dataset.deckId }}),
+    }})
+      .then(r => r.json())
+      .then(data => {{
+        if (data.error) {{ showError(data.error); btn.disabled = false; return; }}
+        const li = btn.closest('li');
+        const list = li.parentElement;
+        li.remove();
+        if (!list.children.length) {{
+          list.outerHTML = '<div class="hint" style="margin:0;">No decks yet.</div>';
+        }}
+      }})
+      .catch(() => {{ showError('Could not reach the server.'); btn.disabled = false; }});
   }});
 }});
 
@@ -725,10 +766,11 @@ body::after {
 .mana-cost-pips { display: inline-flex; align-items: center; gap: 1px; flex-shrink: 0; }
 .mana-cost-pips .mana-icon { width: 13px; height: 13px; }
 #hover-preview {
-  /* Above .modal-overlay's z-index:200 -- sample-hand-cards lives inside
-     the Analyze modal, so the preview has to outrank whatever overlay is
-     currently open, not just the base page content. */
-  position: fixed; pointer-events: none; z-index: 250; display: none;
+  /* Above .modal-overlay's (200) and .replace-popup's (260) z-index --
+     this needs to outrank whatever overlay/popup is currently open, not
+     just the base page content, since it can be triggered from inside
+     either one (sample-hand-cards in the modal, replace-popup's items). */
+  position: fixed; pointer-events: none; z-index: 300; display: none;
   width: 240px; border-radius: 4.75% / 3.5%;
   box-shadow: 0 12px 32px rgba(0,0,0,0.5), 0 0 0 1px var(--card-border);
 }
@@ -749,6 +791,17 @@ body::after {
 .deck-row .row-name span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .deck-row .qty-controls { display:flex; align-items:center; gap:6px; flex-shrink:0; }
 .deck-row .qty-controls .qty-btn { width:22px; height:22px; padding:0; line-height:1; }
+.replace-popup {
+  display:none; position:fixed; z-index:260; width:260px; max-height:320px; overflow-y:auto;
+  background:var(--bg-elevated); border:1px solid var(--card-border); border-radius:10px;
+  box-shadow:var(--shadow); padding:8px;
+}
+.replace-popup.show { display:block; }
+.replace-popup h5 { margin:0 0 6px; padding:0 4px; font-size:0.72rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.03em; }
+.replace-popup .replace-item { display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:6px; cursor:pointer; font-size:0.82rem; }
+.replace-popup .replace-item:hover { background:var(--bg); }
+.replace-popup .replace-item .reason { color:var(--text-dim); font-size:0.72rem; margin-top:1px; }
+.replace-popup .hint { margin:4px; }
 #deck-list { max-height:38vh; overflow-y:auto; padding-right:4px; }
 #suggestions-panel { margin-top:10px; max-height:38vh; overflow-y:auto; padding-right:4px; }
 #suggestions-panel .suggestion-row { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid var(--card-border); font-size:0.82rem; }
@@ -822,12 +875,22 @@ body.compact .deck-row .card-thumb { display:none; }
 .bv-badge.good { border-color:color-mix(in srgb, var(--owned) 45%, var(--card-border)); color:var(--owned); }
 .bv-badge.highlight { border-color:color-mix(in srgb, var(--gold) 45%, var(--card-border)); color:var(--gold); }
 .bv-badge .tooltip-popup {
-  display:none; position:absolute; bottom:100%; left:0; margin-bottom:6px;
+  /* Opens downward, not upward -- these badges sit right at the top of
+     the Analyze modal's scrollable body, and .modal-body's overflow-y:auto
+     makes the X axis clip too (an element with only one non-visible
+     overflow axis gets the other computed as auto as well), so an upward
+     popup got clipped by the modal header above it. Horizontal position
+     is NOT solved with a fixed CSS anchor (left:0 clips at the modal's
+     right edge for a late badge, centering clips at the left edge for the
+     first badge) -- JS clamps the actual left offset per badge on hover
+     instead, see positionBadgeTooltip below; this left:0 is just the
+     unshifted baseline it measures from.
+  */
+  display:none; position:absolute; top:100%; left:0; margin-top:6px;
   background:var(--bg-elevated); border:1px solid var(--card-border); border-radius:8px;
   padding:8px 10px; font-size:0.78rem; font-weight:400; color:var(--text); white-space:normal;
-  width:max-content; max-width:260px; box-shadow:var(--shadow); z-index:20;
+  width:max-content; max-width:220px; box-shadow:var(--shadow); z-index:20;
 }
-.bv-badge:hover .tooltip-popup { display:block; }
 .modal-overlay {
   display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6);
   z-index:200; align-items:center; justify-content:center; padding:20px;
@@ -1083,6 +1146,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
   </div>
 </div>
 <div id="battle-card"></div>
+<div id="replace-popup" class="replace-popup"></div>
 <script>
 let deckId = {json.dumps(deck_id)};
 let brew = {json.dumps(brew_state)};
@@ -1181,14 +1245,24 @@ function thumbHtml(scryfallId, cssClass) {{
 const hoverPreview = document.getElementById('hover-preview');
 function setupHoverPreview(container) {{
   container.addEventListener('mousemove', (e) => {{
-    // Delegate off the closest element carrying data-full, not just the
-    // small <img class="card-thumb">: in Compact view the thumb itself is
-    // display:none (so it can never receive/bubble mouse events), and in
-    // the suggestions list the thumb is tiny, so the row/tile container
-    // also carries its own data-full to keep the whole row hoverable.
-    const el = e.target.closest('[data-full]');
-    if (!el) {{ hoverPreview.classList.remove('show'); return; }}
-    hoverPreview.src = el.dataset.full;
+    // Only the card image itself triggers the preview -- hovering the
+    // name/meta text next to it shouldn't. The one exception is Compact
+    // view, where .card-thumb is display:none (so the mouse can never
+    // actually be "over" it -- hidden elements don't receive pointer
+    // events at all) and there's nothing else to hover, so the row/tile
+    // container's own data-full (a duplicate of the hidden image's) is
+    // used there instead.
+    const thumb = e.target.closest('.card-thumb[data-full]');
+    let full = thumb ? thumb.dataset.full : null;
+    if (!full) {{
+      const row = e.target.closest('[data-full]');
+      const rowThumb = row && row.querySelector('.card-thumb');
+      if (row && rowThumb && getComputedStyle(rowThumb).display === 'none') {{
+        full = row.dataset.full;
+      }}
+    }}
+    if (!full) {{ hoverPreview.classList.remove('show'); return; }}
+    hoverPreview.src = full;
     hoverPreview.classList.add('show');
     const pad = 18, w = 240, h = Math.round(w * 1.4);
     let x = e.clientX + pad;
@@ -1205,6 +1279,7 @@ setupHoverPreview(document.getElementById('commander-slot-wrap'));
 setupHoverPreview(document.getElementById('deck-list'));
 setupHoverPreview(document.getElementById('suggestions-panel'));
 setupHoverPreview(document.getElementById('sample-hand-cards'));
+setupHoverPreview(document.getElementById('replace-popup'));
 
 document.getElementById('draw-hand-btn').addEventListener('click', drawSampleHand);
 
@@ -1507,14 +1582,68 @@ function renderDeckList() {{
         const plus = Object.assign(document.createElement('button'), {{ className: 'btn ghost small qty-btn', textContent: '+', onclick: () => adjustQty(c.name, 1) }});
         controls.append(minus, qty, plus);
       }}
+      const replaceBtn = Object.assign(document.createElement('button'), {{
+        className: 'btn ghost tile-icon-btn replace-btn', textContent: '\\u21c4', title: 'Suggest a replacement',
+        onclick: (e) => openReplacePopup(e.currentTarget, c),
+      }});
       const removeBtn = Object.assign(document.createElement('button'), {{ className: 'btn danger small', textContent: 'Remove', onclick: () => removeCard(c.name) }});
-      controls.appendChild(removeBtn);
+      controls.append(replaceBtn, removeBtn);
       row.appendChild(controls);
       div.appendChild(row);
     }});
     list.appendChild(div);
   }});
 }}
+
+// A single shared popup (like #hover-preview/#battle-card), not one per
+// deck-row -- position:fixed so it escapes #deck-list's own
+// overflow-y:auto (which would otherwise clip it, same issue the
+// Analyze modal's badge tooltips had), repositioned/repopulated on each
+// swap-button click instead.
+const replacePopup = document.getElementById('replace-popup');
+function closeReplacePopup() {{ replacePopup.classList.remove('show'); }}
+function openReplacePopup(btn, card) {{
+  const rect = btn.getBoundingClientRect();
+  replacePopup.innerHTML = '<h5>Suggested replacements</h5><div class="hint">Loading&hellip;</div>';
+  replacePopup.style.top = (rect.bottom + 6) + 'px';
+  replacePopup.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - 268)) + 'px';
+  replacePopup.classList.add('show');
+  fetch('/builder/replace', {{
+    method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
+    body: JSON.stringify({{
+      card_name: card.name, category: card.category, cards: brew.cards,
+      commander: brew.commander, format: brew.format, target_format: brew.target_format,
+    }}),
+  }})
+    .then(r => r.json())
+    .then(data => {{
+      if (!replacePopup.classList.contains('show')) return; // closed while the request was in flight
+      if (data.error) {{ replacePopup.innerHTML = `<h5>Suggested replacements</h5><div class="hint">${{data.error}}</div>`; return; }}
+      if (!data.replacements.length) {{
+        replacePopup.innerHTML = '<h5>Suggested replacements</h5><div class="hint">Nothing else owned fills this role.</div>';
+        return;
+      }}
+      replacePopup.innerHTML = '<h5>Suggested replacements</h5>' +
+        data.replacements.map((r, i) => `
+          <div class="replace-item" data-i="${{i}}" data-full="${{scryfallImg(r.scryfall_id, 'normal') || ''}}">
+            ${{thumbHtml(r.scryfall_id, 'card-thumb small')}}
+            <div><div>${{r.name}}</div><div class="reason">${{r.reason}}</div></div>
+          </div>`).join('');
+      replacePopup.querySelectorAll('.replace-item').forEach(item => {{
+        const rep = data.replacements[Number(item.dataset.i)];
+        item.addEventListener('click', () => {{
+          removeCard(card.name);
+          addCard(rep);
+          closeReplacePopup();
+        }});
+      }});
+    }})
+    .catch(() => {{ replacePopup.innerHTML = '<h5>Suggested replacements</h5><div class="hint">Could not reach the server.</div>'; }});
+}}
+document.addEventListener('click', (e) => {{
+  if (replacePopup.classList.contains('show') && !replacePopup.contains(e.target) && !e.target.closest('.replace-btn')) closeReplacePopup();
+}});
+document.addEventListener('keydown', (e) => {{ if (e.key === 'Escape') closeReplacePopup(); }});
 
 function renderStats() {{
   // Matches WotC's own 99-library + 1-commander = 100-card rule -- the
@@ -1686,10 +1815,21 @@ suggestBtn.addEventListener('click', () => {{
         panel.innerHTML += '<div class="hint" style="margin:0;">No suggestions -- your deck may already be full, or nothing left fits the color/legality filters.</div>';
         return;
       }}
+      // Tracks which suggestions haven't been individually added yet, so
+      // "+ Add All" reflects reality instead of a stale snapshot -- without
+      // this, adding every suggestion one-by-one via its own "+ Add" left
+      // "+ Add All" sitting there with the original count, and clicking it
+      // would try to re-add cards already in the deck.
+      let remaining = data.suggestions.slice();
       const addAllBtn = Object.assign(document.createElement('button'), {{
-        className: 'btn ghost small', textContent: `+ Add All (${{data.suggestions.length}})`, style: 'margin-bottom:8px;',
-        onclick: () => {{ data.suggestions.forEach(addCard); panel.innerHTML = ''; }},
+        className: 'btn ghost small', style: 'margin-bottom:8px;',
+        onclick: () => {{ remaining.forEach(addCard); panel.innerHTML = ''; }},
       }});
+      function refreshAddAllBtn() {{
+        addAllBtn.textContent = `+ Add All (${{remaining.length}})`;
+        addAllBtn.style.display = remaining.length ? '' : 'none';
+      }}
+      refreshAddAllBtn();
       panel.appendChild(addAllBtn);
       data.suggestions.forEach(s => {{
         const row = document.createElement('div');
@@ -1698,7 +1838,12 @@ suggestBtn.addEventListener('click', () => {{
         row.innerHTML = `<span class="row-name">${{thumbHtml(s.scryfall_id, 'card-thumb small')}}<span>${{s.name}} ${{colorIconsHtml(s.color_identity)}}<div class="reason">${{s.reason}}</div></span></span>`;
         const addBtn = Object.assign(document.createElement('button'), {{
           className: 'btn ghost small', textContent: '+ Add',
-          onclick: () => {{ addCard(s); row.remove(); }},
+          onclick: () => {{
+            addCard(s);
+            row.remove();
+            remaining = remaining.filter(x => x !== s);
+            refreshAddAllBtn();
+          }},
         }});
         row.appendChild(addBtn);
         panel.appendChild(row);
@@ -1927,6 +2072,40 @@ analyzeBtn.addEventListener('click', () => {{
     .catch(() => {{ document.getElementById('analyze-loading').style.display = 'none'; showError('Could not reach the server.'); }});
 }});
 
+// Delegated (badges are re-rendered wholesale on every Analyze click, so
+// per-element listeners would leak/duplicate) hover-tooltip positioning
+// for .bv-badge, same clamped-to-container idea as #hover-preview's own
+// viewport clamping above. CSS alone can't do this: the badges live in a
+// modal whose overflow-y:auto clips the X axis too, and no single fixed
+// anchor (left:0, centered, right:0) avoids clipping for every badge --
+// a badge near the row's start needs to open right-ish, one near the end
+// needs to open left-ish. This measures each badge against .modal-box's
+// actual bounds on hover and shifts the tooltip only as much as needed.
+function positionBadgeTooltip(badge) {{
+  const tip = badge.querySelector('.tooltip-popup');
+  if (!tip) return;
+  tip.style.left = '0px';
+  tip.style.display = 'block';
+  const pad = 10;
+  const boxRect = document.querySelector('.modal-box').getBoundingClientRect();
+  const tipRect = tip.getBoundingClientRect();
+  let shift = 0;
+  if (tipRect.right > boxRect.right - pad) shift -= (tipRect.right - (boxRect.right - pad));
+  if (tipRect.left + shift < boxRect.left + pad) shift += (boxRect.left + pad - (tipRect.left + shift));
+  tip.style.left = shift + 'px';
+}}
+const analyzeBadgesEl = document.getElementById('analyze-badges');
+analyzeBadgesEl.addEventListener('mouseover', (e) => {{
+  const badge = e.target.closest('.bv-badge');
+  if (badge) positionBadgeTooltip(badge);
+}});
+analyzeBadgesEl.addEventListener('mouseout', (e) => {{
+  const badge = e.target.closest('.bv-badge');
+  if (!badge || badge.contains(e.relatedTarget)) return;
+  const tip = badge.querySelector('.tooltip-popup');
+  if (tip) tip.style.display = 'none';
+}});
+
 function buildBattleCardHtml(data) {{
   const name = brew.deck_name || document.getElementById('deck-name').value || 'Untitled brew';
   const commanderLine = brew.commander ? `Commander: ${{brew.commander.name}}` : (brew.format === 'commander' ? 'No commander chosen' : '60-card constructed');
@@ -2023,6 +2202,16 @@ reportBtn.addEventListener('click', () => {{
 def home():
     prefill = request.args.get("deck", "")
     return render_home_page(prefill_url=prefill)
+
+
+@app.route("/project/delete", methods=["POST"])
+def project_delete():
+    body = request.get_json(silent=True) or {}
+    deck_id = body.get("deck_id")
+    if not deck_id:
+        return jsonify(error="Missing deck_id."), 400
+    delete_project(deck_id)
+    return jsonify(ok=True)
 
 
 @app.route("/builder", methods=["GET"])
@@ -2123,6 +2312,33 @@ def builder_themes():
         commander_color_identity=commander.get("color_identity") if deck_format == "commander" else None,
     )
     return jsonify(themes=themes)
+
+
+@app.route("/builder/replace", methods=["POST"])
+def builder_replace():
+    """Suggested swap-ins for one specific card already in the deck (see
+    suggest_replacements) -- same role, ranked by shared Oracle Tag then
+    Game Changers, no live Commander Spellbook call since this backs a
+    quick per-card popup, not a full re-suggest."""
+    body = request.get_json(silent=True) or {}
+    deck_format = body.get("format") if body.get("format") in ("commander", "constructed") else "commander"
+    card_name = body.get("card_name")
+    if not card_name:
+        return jsonify(error="Missing card_name."), 400
+    if not os.path.isfile(COLLECTION_PATH):
+        return jsonify(error="No ManaBox collection on file yet -- upload one from the home page first."), 400
+    try:
+        owned = load_collection(COLLECTION_PATH)
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+    owned_view = owned_collection_gameplay_view(owned, gameplay_data_in_index())
+    wip_entries = brew_to_card_entries({"commander": body.get("commander"), "cards": body.get("cards") or []})
+    commander = body.get("commander") or {}
+    replacements = suggest_replacements(
+        card_name, body.get("category") or "", wip_entries, owned_view, deck_format, body.get("target_format"),
+        commander_color_identity=commander.get("color_identity") if deck_format == "commander" else None,
+    )
+    return jsonify(replacements=replacements)
 
 
 @app.route("/builder/stats", methods=["POST"])

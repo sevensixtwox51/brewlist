@@ -92,6 +92,9 @@ Markdown/HTML/CSV reports on disk) — the Deck Builder is web-app only.
   own but have committed to a different build still shows as needed here —
   persisted so you don't have to re-mark it every time
 - A blurred commander-art backdrop, because why not
+- **Recent decks** on the home page can be deleted individually (a small
+  &times; next to each entry, with a confirm prompt) instead of having to
+  dig through `data/projects/` by hand
 
 ## Deck Builder
 
@@ -103,30 +106,48 @@ page).
 ![Deck Builder](screenshots/deck-builder.png)
 
 - Pick **Commander** (100-card singleton) or **60-card constructed**, then
-  search/filter your ManaBox collection by name, card type, color, or
-  "Commander" (legendary creatures eligible to lead a Commander deck)
+  search/filter your ManaBox collection by name, card type, or color —
+  color filtering goes beyond plain WUBRG letters to every named
+  guild/shard/wedge/4-color/5-color combination (Azorius, Sultai, Jeskai,
+  Yore-Tiller, ...), with an **Exact colors** checkbox to narrow a filter
+  like "Grixis (UBR)" down to true 3-color cards only, instead of also
+  matching every mono/2-color card that merely fits inside it. Both the
+  type and color dropdowns show a live count per option (e.g.
+  "Planeswalkers (0)"), so an empty category is obvious before you click
+  into it
 - **★** on an eligible card sets it as your commander; **+** adds any card
   to the deck — both live right on the card tile
-- **Suggest cards** fills empty slots from what you own, ranked by: cards
+- **Suggest cards** fills the deck from what you own in one click (not
+  just a small batch you have to keep re-requesting), ranked by: cards
   that complete a known combo you're one card away from (via Commander
   Spellbook), then cards sharing a theme/synergy tag with what's already in
-  the deck (the same Scryfall Oracle Tags used for the budget-alternative
-  suggestions above — not an AI guess), then whichever part of the deck's
-  shape is furthest from target. Defaults to the well-known Command
-  Zone-style EDH ratios (38 lands / 10 ramp / 10 draw / 11 interaction / 30
-  synergy pieces out of a 99-card library, plus your 1 commander),
-  adjustable under **Deck mix targets**
+  the deck or with your commander itself (the same Scryfall Oracle Tags
+  used for the budget-alternative suggestions above — not an AI guess),
+  then whichever part of the deck's shape is furthest from target.
+  Defaults to the well-known Command Zone-style EDH ratios (38 lands / 10
+  ramp / 10 draw / 11 interaction / 30 synergy pieces out of a 99-card
+  library, plus your 1 commander), adjustable under **Deck mix targets**.
+  An optional **Preferred theme** picker lets you steer Suggest toward a
+  specific Oracle Tags theme (e.g. "tokens matter") from the very first
+  click, instead of only ever discovering one organically
+- Each card already in the deck has a **⇄** button that suggests owned
+  replacements filling the same role (same Lands/Ramp/Draw/Interaction/
+  Synergy slot, ranked by shared Oracle Tag then Game Changers) — pick one
+  to swap it in for the original in a single click
 - An optional **Intended bracket** (1-2 / 3 / 4+) keeps Suggest from
   recommending more Game Changers than WotC's own published bracket rules
   allow for that bracket; leave it on "No preference" to build freely — the
   estimated bracket is shown either way
-- **Check Bracket & Value** shows the same Game Changers count, Commander
-  legality, Commander Spellbook rating, estimated WotC bracket, known
-  combos, and total deck value the compare flow computes — live, for
-  whatever's in the deck right now
-- The same mana curve, color/mana-source breakdown, and sample-hand draw
-  tools from the Deck Analysis panel update live as you build, not just on
-  the finished report
+- **Analyze Deck** opens a modal with the same Game Changers count,
+  Commander legality, Commander Spellbook rating, estimated WotC bracket,
+  known combos, and total deck value the compare flow computes, plus a
+  **Rule 0 summary** (colors, bracket reasoning, Game Changers, mass land
+  denial, extra-turn count — the objective facts a real pre-game chat
+  covers, not AI-generated prose), the live mana curve/color-breakdown
+  chart, a sample-hand draw tool, and a **Combo Reference** list (in-deck
+  combos plus one-card-away ones and what's missing). A **Print Battle
+  Card** button turns all of that into a clean, printable one-page summary
+  for talking through the deck with the table
 - **Save** remembers the brew as a project, same as a compared deck — it
   shows up in Recent decks on the home page and picks up right where you
   left off
