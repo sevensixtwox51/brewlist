@@ -1193,16 +1193,14 @@ def render_builder_page(deck_id: str | None = None) -> str:
         </div>
       </div>
       <div class="action-group builder-utility-actions">
+        <button type="button" class="btn" id="save-btn">Save</button>
+        <span id="save-label" class="hint" style="margin:0;display:none;"></span>
         <button type="button" class="btn ghost small" id="report-btn">View full report</button>
         <button type="button" class="btn ghost small" id="copy-decklist-btn" title="Copies a plain-text decklist (with your exact printings) you can paste into Moxfield or Archidekt to import">&#128203; Copy Decklist</button>
         <button type="button" class="btn ghost small" id="export-csv-btn" title="Downloads a CSV grouped like a physical store's binders, so you can find these cards in your own collection">&#128190; Export CSV</button>
       </div>
     </div>
     <div class="builder-top-row builder-actions">
-      <div class="action-group">
-        <button type="button" class="btn" id="save-btn">Save</button>
-        <span id="save-label" class="hint" style="margin:0;display:none;"></span>
-      </div>
       <div class="action-group">
         <button type="button" class="btn ghost" id="suggest-btn">Suggest cards</button>
         <div class="theme-picker">
