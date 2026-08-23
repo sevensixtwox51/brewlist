@@ -701,8 +701,9 @@ PRICE_INDEX_MAX_AGE_DAYS = 7
 # "gameplay" field (type line, mana cost/CMC, color identity, oracle text,
 # full legalities dict) for the deck builder (deck_builder.py). v15: added
 # the "sets" field (set name + release date per set code) for the deck
-# builder's Set Selection filter.
-PRICE_INDEX_FORMAT_VERSION = 15
+# builder's Set Selection filter. v16: added "card_count" (baseSetSize) to
+# each "sets" entry, for "N / M owned" in the Set filter popups.
+PRICE_INDEX_FORMAT_VERSION = 16
 
 
 # --------------------------------------------------------------------------
@@ -1127,6 +1128,16 @@ def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[
             sets_by_code[set_code.upper()] = {
                 "name": set_obj.get("name") or set_code,
                 "release_date": set_obj.get("releaseDate") or "",
+                # The set's own baseSetSize -- the "how many cards are in
+                # this set" figure a player would actually recognize (e.g.
+                # Modern Horizons 3 is 303). Deliberately not len(cards) or
+                # totalSetSize: both run higher than baseSetSize for sets
+                # with a bonus sheet (MH3: baseSetSize 303 vs totalSetSize
+                # 524 vs 564 card objects -- the gap is "The List"-style
+                # reprints and extra art-variant objects, not real new
+                # cards in the set), which would make "N / M owned" read
+                # as a much larger, less meaningful denominator.
+                "card_count": set_obj.get("baseSetSize") or len(set_obj.get("cards", [])),
             }
             for card in set_obj.get("cards", []):
                 cards_seen += 1

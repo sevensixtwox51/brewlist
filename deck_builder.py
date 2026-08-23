@@ -38,6 +38,66 @@ _INTENDED_BRACKET_GC_CAP = {"1-2": WOTC_BRACKET_GAME_CHANGER_MAX[2], "3": WOTC_B
 # suggestions don't pile up entirely in one category.
 CONSTRUCTED_LAND_FRACTION = 0.40
 
+# Named EDH archetypes/themes (Voltron, Stax, Reanimator, ...) mapped to
+# the underlying Scryfall Oracle Tags label(s) that represent them, per
+# card the user picked (https://commandertheory.com/post/94098579282/
+# archetypes-and-themes) and cross-checked against EDHREC's own theme
+# list (edhrec.com/themes) -- both use a much broader vocabulary than
+# this covers (EDHREC alone lists 250+), but these are the names that are
+# both genuinely well-known EDH deckbuilding identities *and* have a
+# real, verified Oracle Tags match in this app's own tag universe (see
+# budget_alt_data_in_index) -- every label below was checked against the
+# live tag set before being added, not guessed (a few obvious names from
+# that article -- Aggro, Control, Combo, Chaos, Goodstuff -- have no
+# entry here on purpose: those describe what a *whole 100-card deck* is
+# trying to do, not something any single card can be tagged with, so
+# there's no way to steer Suggest toward them the way a per-card theme
+# tag lets it steer toward, say, Reanimator). "Ramp" is deliberately
+# excluded even though the tag exists -- it's already its own dedicated
+# Deck mix targets role, not a flavor theme, so listing it here too would
+# just be a confusing duplicate control for the same thing.
+#
+# This is a curated *shortcut* layer on top of the full raw Oracle Tags
+# list list_theme_options() already offered (every tag with 2+ owned
+# candidates) -- not a replacement for it. A card whose own representative
+# tag isn't covered by any curated theme below still shows up under its
+# raw tag label, same as before.
+CURATED_THEMES: dict[str, list[str]] = {
+    # "affinity for auras" doesn't exist in Scryfall's tag set (checked --
+    # unlike equipment/artifacts/tokens, there's no dedicated "auras
+    # matter" tag; "affinity for enchantments" is the nearest real one but
+    # is too broad, catching general enchantment synergy that has nothing
+    # to do with stacking auras onto a creature) -- Voltron is genuinely
+    # equipment-only coverage here, not the gap it looks like.
+    "Voltron": ["affinity for equipment"],
+    "Stax": ["tax", "tax attack"],
+    "Sacrifice / Aristocrats": [
+        "free sacrifice outlet", "mutual sacrifice", "opponent sacrifice matters", "opponent sacrifices",
+    ],
+    "Reanimator": ["reanimate", "reanimate matters", "mass reanimation", "hunger reanimation"],
+    "Tokens": [
+        "affinity for tokens", "repeatable creature tokens", "repeatable artifact tokens",
+        "repeatable enchantment tokens", "repeatable noncreature tokens",
+    ],
+    "Group Hug": ["group hug", "selective group hug"],
+    "Group Slug": ["group slug"],
+    "Artifacts": ["affinity for artifacts", "artifact matters"],
+    "Enchantress": ["creature type enchantress"],
+    "Mass Land Denial": ["mass land denial"],
+    "Blink / Flicker": [
+        "flicker", "flicker-creature", "flicker-artifact", "flicker-enchantment",
+        "flicker-land", "flicker-nonenchantment",
+    ],
+    "Wheels": ["wheel", "wheel-symmetrical", "wheel-symmetrical-optional", "wheel-one-sided", "miniwheel"],
+    "Extra Turns": ["extra turn"],
+    "Landfall": ["landfall", "landfall other"],
+    "Lifegain": ["lifegain", "lifegain matters", "lifegain increaser"],
+    "Storm": ["storm-like", "gives storm", "storm count matters"],
+    "Mill": ["mill-any", "mill-each", "mill-opponent", "mill-self"],
+    "Discard": ["discard", "discard matters"],
+    "Proliferate": ["repeatable-proliferate", "synergy-proliferate", "pseudo-proliferate"],
+}
+
 # The well-known community-standard EDH deck shape (Command Zone-style
 # ratios: ~38 lands, ~10 ramp, ~10 card draw, ~10-12 interaction/removal,
 # the remaining ~30 "Synergy" slots being the deck's actual creatures/
@@ -147,6 +207,10 @@ def owned_set_options(owned: dict[str, OwnedCard], sets_data: dict[str, dict]) -
             "set_name": info.get("name") or code,
             "release_date": info.get("release_date") or "",
             "count": count,
+            # baseSetSize from MTGJSON -- None (not 0) on a stale index
+            # that predates this field, so the client can tell "unknown"
+            # apart from "a real 0-card set" and just omit the "/ M" part.
+            "total_in_set": info.get("card_count"),
         })
     options.sort(key=lambda o: (o["release_date"] or "9999-99-99", o["set_name"]))
     return options
@@ -252,26 +316,35 @@ def list_theme_options(
     commander_color_identity: list[str] | None,
     excluded_set_codes: set[str] | None = None,
 ) -> list[dict]:
-    """Every Oracle Tags theme (see budget_alt_data_in_index -- the same
-    community-curated tags used for budget-alternative suggestions and
-    suggest_builder_cards's own theme-sharing callouts) with at least 2
-    owned, legal, color-correct, not-yet-in-deck cards -- the pool a
-    "Preferred theme" picker offers, so every option is guaranteed to
-    actually add something if chosen. {"tag_id", "label", "count"},
-    sorted by how many owned cards carry it, most first."""
+    """CURATED_THEMES (named EDH archetypes like Voltron or Reanimator,
+    each backed by one or more underlying Oracle Tags -- see
+    budget_alt_data_in_index, the same community-curated tags used for
+    budget-alternative suggestions and suggest_builder_cards's own
+    theme-sharing callouts) with at least 2 owned/legal/color-correct/
+    not-yet-in-deck candidates across its underlying tag(s), so every
+    option is guaranteed to actually add something if chosen. Each entry:
+    {"tag_ids": [...] (a theme's full underlying tag list, so the client
+    and suggest_builder_cards's preferred_theme_tag_ids can just treat it
+    as an opaque set to match against), "label", "count"}. Sorted by how
+    many owned cards carry it, most first."""
     candidates = _filter_candidates(wip_entries, owned_view, deck_format, target_format, commander_color_identity, None, excluded_set_codes)
     budget_alt = budget_alt_data_in_index()
     tag_by_name = budget_alt.get("tag_by_name") or {}
     tag_labels = budget_alt.get("tag_labels") or {}
+    label_to_tag_id = {label: tag_id for tag_id, label in tag_labels.items()}
+
     counts: dict[str, int] = {}
     for c in candidates:
         tag_id = tag_by_name.get(normalize_name(c["name"]))
         if tag_id:
             counts[tag_id] = counts.get(tag_id, 0) + 1
-    options = [
-        {"tag_id": tag_id, "label": tag_labels.get(tag_id, tag_id), "count": n}
-        for tag_id, n in counts.items() if n >= 2
-    ]
+
+    options = []
+    for theme_name, labels in CURATED_THEMES.items():
+        tag_ids = [label_to_tag_id[label] for label in labels if label in label_to_tag_id]
+        total = sum(counts.get(tid, 0) for tid in tag_ids)
+        if total >= 2:
+            options.append({"tag_ids": tag_ids, "label": theme_name, "count": total})
     options.sort(key=lambda o: (-o["count"], o["label"]))
     return options
 
@@ -350,7 +423,8 @@ def suggest_builder_cards(
     max_suggestions: int = 15,
     mix_targets: dict[str, int] | None = None,
     intended_bracket: str | None = None,
-    preferred_theme_tag_id: str | None = None,
+    preferred_theme_tag_ids: list[str] | None = None,
+    preferred_theme_label: str | None = None,
     excluded_set_codes: set[str] | None = None,
 ) -> list[dict]:
     """Fill-the-gaps auto-suggest: proposes owned, legal, color-correct
@@ -362,8 +436,11 @@ def suggest_builder_cards(
     suggestions use (in fact the exact same Scryfall Oracle Tags data,
     see budget_alt_data_in_index).
 
-    `preferred_theme_tag_id`, if given (a tag_id from list_theme_options),
-    is treated as this deck's theme from the very first Suggest click --
+    `preferred_theme_tag_ids`/`preferred_theme_label` (the "tag_ids"/
+    "label" of one option from list_theme_options -- a curated theme's
+    tag_ids can be several underlying Oracle Tags, a raw tag's is just
+    itself in a 1-item list), if given, is treated as this deck's theme
+    from the very first Suggest click --
     same priority-ordering boost the commander's own tag and any organic
     2+-card overlap already get -- rather than only ever detecting a
     theme after it emerges on its own.
@@ -454,13 +531,22 @@ def suggest_builder_cards(
         # Suggest click, since one card can only ever contribute 1.
         if commander_tag_id and commander_tag_id not in deck_theme_tags:
             deck_theme_tags[commander_tag_id] = 0  # sentinel: commander-only, no other cards yet
-        if preferred_theme_tag_id and preferred_theme_tag_id not in deck_theme_tags:
-            deck_theme_tags[preferred_theme_tag_id] = -1  # sentinel: explicitly chosen, not (yet) organic
+        # A curated theme (see CURATED_THEMES/list_theme_options) can back
+        # onto several underlying tag_ids at once -- every one of them
+        # counts as "chosen", and all get the *same* preferred_theme_label
+        # in the reason text below (a card tagged "flicker-artifact"
+        # should read as matching "Blink / Flicker", not its own narrower
+        # raw tag label) rather than each rendering under its own raw tag.
+        preferred_label_override: dict[str, str] = {}
+        for tag_id in preferred_theme_tag_ids or []:
+            if tag_id not in deck_theme_tags:
+                deck_theme_tags[tag_id] = -1  # sentinel: explicitly chosen, not (yet) organic
+            preferred_label_override[tag_id] = preferred_theme_label or tag_labels.get(tag_id, tag_id)
         if deck_theme_tags:
             for c in candidates:
                 tag_id = tag_by_name.get(normalize_name(c["name"]))
                 if tag_id in deck_theme_tags:
-                    label = tag_labels.get(tag_id, tag_id)
+                    label = preferred_label_override.get(tag_id) or tag_labels.get(tag_id, tag_id)
                     count = deck_theme_tags[tag_id]
                     if count == -1:
                         reason = f'matches your chosen "{label}" theme'

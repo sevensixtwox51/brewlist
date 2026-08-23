@@ -111,10 +111,12 @@ page).
   guild/shard/wedge/4-color/5-color combination (Azorius, Sultai, Jeskai,
   Yore-Tiller, ...), with an **Exact colors** checkbox to narrow a filter
   like "Grixis (UBR)" down to true 3-color cards only, instead of also
-  matching every mono/2-color card that merely fits inside it. Both the
-  type and color dropdowns show a live count per option (e.g.
-  "Planeswalkers (0)"), so an empty category is obvious before you click
-  into it
+  matching every mono/2-color card that merely fits inside it. A **Set**
+  filter narrows the grid to specific sets (multiselect, sorted by
+  release year, each showing how many uniques you own out of that set's
+  real card count via MTGJSON). The type, color, and set dropdowns all
+  show a live count per option (e.g. "Planeswalkers (0)"), so an empty
+  category is obvious before you click into it
 - **★** on an eligible card sets it as your commander; **+** adds any card
   to the deck — both live right on the card tile
 - **Suggest cards** fills the deck from what you own in one click (not
@@ -128,8 +130,17 @@ page).
   ramp / 10 draw / 11 interaction / 30 synergy pieces out of a 99-card
   library, plus your 1 commander), adjustable under **Deck mix targets**.
   An optional **Preferred theme** picker lets you steer Suggest toward a
-  specific Oracle Tags theme (e.g. "tokens matter") from the very first
-  click, instead of only ever discovering one organically
+  named EDH archetype (Voltron, Reanimator, Stax, Tokens, Group Hug, ...)
+  from the very first click, instead of only ever discovering one
+  organically. Each is backed by real Scryfall Oracle Tags data (the same
+  data used for the budget-alternative suggestions above), curated down
+  to archetypes that are both genuinely well-known deckbuilding identities
+  and have owned cards to back them — only options with 2+ owned
+  candidates ever show up. A separate **Set Selection** multiselect (same
+  Select All/Clear All/Cancel/OK popup as the grid's own Set filter, but
+  independent state) restricts which sets Suggest, the theme picker, and
+  the replacement button below are allowed to pull owned candidates from
+  at all — everything's on by default
 - Each card already in the deck has a **⇄** button that suggests owned
   replacements filling the same role (same Lands/Ramp/Draw/Interaction/
   Synergy slot, ranked by shared Oracle Tag then Game Changers) — pick one

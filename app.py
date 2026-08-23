@@ -313,7 +313,8 @@ input[type="text"], input[type="url"], input[type="file"] {
 .project-list li:last-child { border-bottom: none; }
 .project-list a { color: var(--text); text-decoration: none; font-weight: 600; }
 .project-list a:hover { color: var(--accent); }
-.project-list .when { color: var(--text-dim); font-size: 0.8rem; white-space: nowrap; }
+.project-list .deck-meta { display: flex; align-items: center; gap: 10px; }
+.project-list .when { color: var(--text-dim); font-size: 0.8rem; white-space: nowrap; text-align: right; }
 .error { color: var(--missing); background: color-mix(in srgb, var(--missing) 12%, var(--bg-elevated));
   border: 1px solid var(--missing); border-radius: 8px; padding: 12px 16px; margin-bottom: 20px; }
 .update-banner { color: var(--owned); background: color-mix(in srgb, var(--owned) 12%, var(--bg-elevated));
@@ -591,9 +592,11 @@ def render_decks_page(error: str | None = None, prefill_url: str = "") -> str:
             data_attrs = f'data-type="compare" data-url="{_esc(p.get("deck_url", deck_id))}"'
         return (
             f'<li><a href="{href}" class="recent-deck-link" {data_attrs}>{label}</a>'
+            '<span class="deck-meta">'
             f'<span class="when">{_esc((p.get("updated") or "")[:16].replace("T", " "))}</span>'
             f'<button type="button" class="btn danger small delete-deck-btn" '
             f'data-deck-id="{_esc(deck_id)}" data-deck-name="{_esc(raw_name)}" title="Delete this deck">&times;</button>'
+            '</span>'
             f'</li>'
         )
 
@@ -1118,7 +1121,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
         "cards": brew.get("cards") or [],
         "mix_targets": {role: saved_mix.get(role, default_mix[role]) for role in default_mix},
         "intended_bracket": brew.get("intended_bracket") or "",
-        "preferred_theme_tag_id": brew.get("preferred_theme_tag_id") or "",
+        "preferred_theme_tag_ids": brew.get("preferred_theme_tag_ids") or [],
         "preferred_theme_label": brew.get("preferred_theme_label") or "",
         "excluded_set_codes": brew.get("excluded_set_codes") or [],
     }
@@ -1295,7 +1298,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
 let deckId = {json.dumps(deck_id)};
 let brew = {json.dumps(brew_state)};
 let collection = [];
-let themeLabelToId = {{}};
+let themeLabelToIds = {{}};
 let themeRequestId = 0;
 
 const errorBox = document.getElementById('error-box');
@@ -1530,15 +1533,16 @@ function annotateFilterCounts() {{
   }});
 }}
 
-// Populates the "Preferred theme" picker with every Oracle Tags theme
-// that has enough owned, legal, color-correct candidates to be worth
-// picking (see list_theme_options) -- recomputed whenever the commander
-// or format changes, since that's what the color/legality filter behind
-// it depends on. A hand-rolled dropdown (not a native <datalist>) --
-// datalist's suggestion popup is positioned by the browser itself and,
-// in this embedded layout, was rendering nowhere near the input; a plain
-// absolutely-positioned div anchored to .theme-picker (position:relative)
-// is fully within our own control instead.
+// Populates the "Preferred theme" picker with every curated named EDH
+// archetype (Voltron, Reanimator, ... -- see CURATED_THEMES in
+// deck_builder.py) that has enough owned, legal, color-correct candidates
+// to be worth picking (see list_theme_options) -- recomputed whenever the
+// commander or format changes, since that's what the color/legality
+// filter behind it depends on. A hand-rolled dropdown (not a native
+// <datalist>) -- datalist's suggestion popup is positioned by the browser
+// itself and, in this embedded layout, was rendering nowhere near the
+// input; a plain absolutely-positioned div anchored to .theme-picker
+// (position:relative) is fully within our own control instead.
 let themeOptionsList = [];
 function loadThemeOptions() {{
   const requestId = ++themeRequestId;
@@ -1555,14 +1559,15 @@ function loadThemeOptions() {{
       if (requestId !== themeRequestId) return;
       if (data.error) return;
       themeOptionsList = data.themes || [];
-      themeLabelToId = {{}};
-      themeOptionsList.forEach(t => {{ themeLabelToId[t.label] = t.tag_id; }});
+      themeLabelToIds = {{}};
+      themeOptionsList.forEach(t => {{ themeLabelToIds[t.label] = t.tag_ids; }});
       // A previously-chosen theme that no longer has any owned candidates
       // in the current colors (e.g. after switching commanders) can't be
-      // resolved back to a tag_id -- drop it rather than silently sending
-      // a stale/meaningless id with the next Suggest request.
-      if (brew.preferred_theme_label && !(brew.preferred_theme_label in themeLabelToId)) {{
-        brew.preferred_theme_tag_id = '';
+      // resolved back to its tag_ids -- drop it rather than silently
+      // sending a stale/meaningless selection with the next Suggest
+      // request.
+      if (brew.preferred_theme_label && !(brew.preferred_theme_label in themeLabelToIds)) {{
+        brew.preferred_theme_tag_ids = [];
         brew.preferred_theme_label = '';
         document.getElementById('theme-input').value = '';
       }}
@@ -1574,7 +1579,7 @@ const themeInput = document.getElementById('theme-input');
 const themeDropdown = document.getElementById('theme-dropdown');
 function renderThemeDropdown() {{
   const filter = themeInput.value.trim().toLowerCase();
-  const matches = (filter ? themeOptionsList.filter(t => t.label.toLowerCase().includes(filter)) : themeOptionsList).slice(0, 40);
+  const matches = filter ? themeOptionsList.filter(t => t.label.toLowerCase().includes(filter)) : themeOptionsList;
   if (!matches.length) {{
     themeDropdown.innerHTML = '<div class="theme-dropdown-empty">No matching themes among your owned cards</div>';
   }} else {{
@@ -1587,11 +1592,11 @@ function renderThemeDropdown() {{
 themeInput.addEventListener('focus', renderThemeDropdown);
 themeInput.addEventListener('input', (e) => {{
   const label = e.target.value.trim();
-  if (label in themeLabelToId) {{
-    brew.preferred_theme_tag_id = themeLabelToId[label];
+  if (label in themeLabelToIds) {{
+    brew.preferred_theme_tag_ids = themeLabelToIds[label];
     brew.preferred_theme_label = label;
   }} else {{
-    brew.preferred_theme_tag_id = '';
+    brew.preferred_theme_tag_ids = [];
     brew.preferred_theme_label = '';
   }}
   renderThemeDropdown();
@@ -1603,7 +1608,7 @@ themeDropdown.addEventListener('mousedown', (e) => {{
   if (!item) return;
   const label = item.dataset.label;
   themeInput.value = label;
-  brew.preferred_theme_tag_id = themeLabelToId[label] || '';
+  brew.preferred_theme_tag_ids = themeLabelToIds[label] || [];
   brew.preferred_theme_label = label;
   themeDropdown.classList.remove('show');
 }});
@@ -1646,7 +1651,8 @@ function setupSetFilterPopup(btn, popup, opts) {{
     const excluded = new Set(opts.getExcluded());
     const rows = allSetOptions.map(s => {{
       const year = s.release_date ? s.release_date.slice(0, 4) : '?';
-      return `<label><input type="checkbox" value="${{s.set_code}}"${{excluded.has(s.set_code) ? '' : ' checked'}}> ${{s.set_name}} (${{year}}) &middot; ${{s.count}}</label>`;
+      const ownedFrac = s.total_in_set ? `${{s.count}} / ${{s.total_in_set}}` : `${{s.count}}`;
+      return `<label><input type="checkbox" value="${{s.set_code}}"${{excluded.has(s.set_code) ? '' : ' checked'}}> ${{s.set_name}} (${{year}}) &middot; ${{ownedFrac}}</label>`;
     }}).join('');
     popup.innerHTML = `
       <div class="set-selection-quick">
@@ -2061,7 +2067,8 @@ suggestBtn.addEventListener('click', () => {{
     body: JSON.stringify({{
       cards: brew.cards, commander: brew.commander, format: brew.format, target_format: brew.target_format,
       mix_targets: brew.mix_targets, intended_bracket: brew.intended_bracket,
-      preferred_theme_tag_id: brew.preferred_theme_tag_id, excluded_set_codes: brew.excluded_set_codes,
+      preferred_theme_tag_ids: brew.preferred_theme_tag_ids, preferred_theme_label: brew.preferred_theme_label,
+      excluded_set_codes: brew.excluded_set_codes,
     }}),
   }})
     .then(r => r.json())
@@ -2552,7 +2559,7 @@ def builder_save():
         cards=cards,
         mix_targets=body.get("mix_targets") or {},
         intended_bracket=body.get("intended_bracket") or "",
-        preferred_theme_tag_id=body.get("preferred_theme_tag_id") or "",
+        preferred_theme_tag_ids=body.get("preferred_theme_tag_ids") or [],
         preferred_theme_label=body.get("preferred_theme_label") or "",
         excluded_set_codes=body.get("excluded_set_codes") or [],
     )
@@ -2600,7 +2607,8 @@ def builder_suggest():
         max_suggestions=target_size,
         mix_targets=mix_targets,
         intended_bracket=body.get("intended_bracket") or None,
-        preferred_theme_tag_id=body.get("preferred_theme_tag_id") or None,
+        preferred_theme_tag_ids=body.get("preferred_theme_tag_ids") or None,
+        preferred_theme_label=body.get("preferred_theme_label") or None,
         excluded_set_codes=_excluded_set_codes(body),
     )
     return jsonify(suggestions=suggestions)
