@@ -52,6 +52,7 @@ from brewlist_core import (
 from deck_builder import (
     brew_to_card_entries,
     list_theme_options,
+    optimize_builder_combos,
     owned_collection_gameplay_view,
     owned_set_options,
     suggest_builder_cards,
@@ -1249,6 +1250,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
     <div class="card deck-panel">
       <div class="deck-stats" id="deck-stats"></div>
       <button type="button" class="btn ghost small" id="analyze-btn" style="margin-bottom:10px;">&#128269; Analyze Deck</button>
+      <button type="button" class="btn ghost small" id="optimize-btn" style="margin-bottom:10px;" title="Looks for real, owned combos you're exactly one card away from completing, and proposes swaps to add them -- useful after Suggest cards has already filled the deck, since a full batch can't always see a combo piece it's about to add in that same batch">&#9889; Optimize Deck</button>
       <div id="commander-slot-wrap"></div>
       <button type="button" class="btn danger small" id="clear-cards-btn" style="display:none;margin-bottom:6px;">Clear All Cards</button>
       <div id="deck-list"></div>
@@ -2124,6 +2126,73 @@ suggestBtn.addEventListener('click', () => {{
     .finally(() => {{ suggestBtn.disabled = false; }});
 }});
 
+const optimizeBtn = document.getElementById('optimize-btn');
+optimizeBtn.addEventListener('click', () => {{
+  optimizeBtn.disabled = true;
+  fetch('/builder/optimize', {{
+    method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
+    body: JSON.stringify({{
+      cards: brew.cards, commander: brew.commander, format: brew.format, target_format: brew.target_format,
+      intended_bracket: brew.intended_bracket, excluded_set_codes: brew.excluded_set_codes,
+    }}),
+  }})
+    .then(r => r.json())
+    .then(data => {{
+      if (data.error) {{ showError(data.error); return; }}
+      const panel = document.getElementById('suggestions-panel');
+      panel.innerHTML = '<h4 style="font-size:0.8rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.03em;">Combo Optimizations</h4>';
+      if (!data.proposals.length) {{
+        panel.innerHTML += '<div class="hint" style="margin:0;">No one-card-away combos found with a safe card to swap out -- your deck may already have every completable combo, or nothing left fits without bumping something already earning its slot.</div>';
+        return;
+      }}
+      // Same "remaining reflects reality" pattern as Suggest's Add All --
+      // applying one swap can change what a *later* swap in this same
+      // batch would cut (two proposals could target the same filler
+      // card), so re-fetching after Apply All is the honest way to
+      // confirm the deck's actual state rather than trusting this batch.
+      let remaining = data.proposals.slice();
+      function applySwap(p) {{
+        removeCard(p.remove.name);
+        addCard(p.add);
+      }}
+      const applyAllBtn = Object.assign(document.createElement('button'), {{
+        className: 'btn ghost small', style: 'margin-bottom:8px;margin-right:8px;',
+        onclick: () => {{ remaining.forEach(applySwap); panel.innerHTML = ''; }},
+      }});
+      const dismissAllBtn = Object.assign(document.createElement('button'), {{
+        className: 'btn ghost small', textContent: 'Dismiss All', style: 'margin-bottom:8px;',
+        title: 'Discard these swap proposals without applying any of them',
+        onclick: () => {{ panel.innerHTML = ''; }},
+      }});
+      function refreshApplyAllBtn() {{
+        applyAllBtn.textContent = `Apply All (${{remaining.length}})`;
+        applyAllBtn.style.display = remaining.length ? '' : 'none';
+        dismissAllBtn.style.display = remaining.length ? '' : 'none';
+      }}
+      refreshApplyAllBtn();
+      panel.append(applyAllBtn, dismissAllBtn);
+      data.proposals.forEach(p => {{
+        const row = document.createElement('div');
+        row.className = 'suggestion-row';
+        row.dataset.full = scryfallImg(p.add.scryfall_id, 'normal') || '';
+        row.innerHTML = `<span class="row-name">${{thumbHtml(p.add.scryfall_id, 'card-thumb small')}}<span>+ ${{p.add.name}} ${{colorIconsHtml(p.add.color_identity)}}<div class="reason">${{p.reason}} &mdash; cuts ${{p.remove.name}}</div></span></span>`;
+        const applyBtn = Object.assign(document.createElement('button'), {{
+          className: 'btn ghost small', textContent: 'Apply',
+          onclick: () => {{
+            applySwap(p);
+            row.remove();
+            remaining = remaining.filter(x => x !== p);
+            refreshApplyAllBtn();
+          }},
+        }});
+        row.appendChild(applyBtn);
+        panel.appendChild(row);
+      }});
+    }})
+    .catch(() => showError('Could not reach the server.'))
+    .finally(() => {{ optimizeBtn.disabled = false; }});
+}});
+
 // Confirmed live against Moxfield's and Archidekt's own decklist-import
 // UI: both accept plain "qty Name" lines, and both accept an optional
 // "(SET) CollectorNumber" suffix to pin the exact printing rather than
@@ -2612,6 +2681,34 @@ def builder_suggest():
         excluded_set_codes=_excluded_set_codes(body),
     )
     return jsonify(suggestions=suggestions)
+
+
+@app.route("/builder/optimize", methods=["POST"])
+def builder_optimize():
+    """Second-pass combo optimizer for a deck that's already built (see
+    optimize_builder_combos) -- proposed add/remove swaps for real, owned,
+    one-card-away combos that a plain Suggest batch can miss entirely,
+    since Suggest's own combo-completion signal only ever sees combos as
+    they stood at the *start* of that call. Same request shape as
+    /builder/suggest; not auto-applied client-side."""
+    body = request.get_json(silent=True) or {}
+    deck_format = body.get("format") if body.get("format") in ("commander", "constructed") else "commander"
+    if not os.path.isfile(COLLECTION_PATH):
+        return jsonify(error="No ManaBox collection on file yet -- upload one from the home page first."), 400
+    try:
+        owned = load_collection(COLLECTION_PATH)
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+    owned_view = owned_collection_gameplay_view(owned, gameplay_data_in_index())
+    wip_entries = brew_to_card_entries({"commander": body.get("commander"), "cards": body.get("cards") or []})
+    commander = body.get("commander") or {}
+    proposals = optimize_builder_combos(
+        wip_entries, owned_view, deck_format, body.get("target_format"),
+        commander_color_identity=commander.get("color_identity") if deck_format == "commander" else None,
+        intended_bracket=body.get("intended_bracket") or None,
+        excluded_set_codes=_excluded_set_codes(body),
+    )
+    return jsonify(proposals=proposals)
 
 
 @app.route("/builder/themes", methods=["POST"])

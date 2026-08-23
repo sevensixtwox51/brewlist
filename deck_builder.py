@@ -746,3 +746,142 @@ def suggest_builder_cards(
             "reason": reason_by_name.get(nm) or theme_reason_by_name.get(nm) or fallback_reason,
         })
     return suggestions
+
+
+def optimize_builder_combos(
+    wip_entries: list[CardEntry],
+    owned_view: list[dict],
+    deck_format: str,
+    target_format: str | None,
+    commander_color_identity: list[str] | None,
+    intended_bracket: str | None = None,
+    excluded_set_codes: set[str] | None = None,
+) -> list[dict]:
+    """Second-pass optimizer for a deck that's already built (typically to
+    its full target size). suggest_builder_cards()'s own combo-completion
+    carve-out only ever sees combos as they stand at the *start* of one
+    Suggest call -- so a combo piece added in that very same call (e.g.
+    the common "Add All" single-batch flow) is invisible to it, and a
+    deck already sitting at its target size never calls it again at all
+    (suggest_builder_cards returns [] immediately once nothing's left to
+    fill). This looks for real, owned, one-card-away combos in the
+    *finished* deck and proposes concrete swaps instead: add the missing
+    card, cut the lowest-priority card sharing its role.
+
+    Commander Spellbook's own "almost included" results are always
+    exactly one card away (verified directly against the live API, not
+    assumed from its name) -- find_deck_combos() already relies on this,
+    and so does this function: a combo missing 2+ owned cards just won't
+    appear here, since there's no single-card swap that completes it.
+
+    A candidate "cut" card is only ever pulled from the SAME role as the
+    card being added, and is never a Game Changer, never itself a piece
+    of any other included/almost-included combo, and never the deck's
+    own theme match -- so a swap can never bump something that already
+    earned its slot deliberately. If a combo's role has no safe cut
+    candidate, that combo is simply skipped this round rather than
+    forcing a cross-role cut.
+
+    Calling this again after applying some swaps can surface combos that
+    weren't visible before -- e.g. a 3-card combo the deck had 1 of, 2
+    missing, doesn't show up until some other swap happens to add one of
+    its other pieces, at which point it's genuinely one away and this
+    picks it up on the next call. That's not special-cased here; it just
+    falls out of re-querying find_deck_combos() fresh each call.
+
+    Return shape: [{"add": {...card fields...}, "remove": {...card
+    fields...}, "produces": [...], "reason": "..."}, ...]. Never applied
+    automatically -- same "the user picks, we don't touch the deck
+    ourselves" pattern suggest_replacements already uses for its swap
+    popup."""
+    if deck_format != "commander" or not wip_entries:
+        return []
+    combos = find_deck_combos(wip_entries)
+    if not combos:
+        return []
+    almost = [c for c in (combos.get("almost_included") or []) if len(c.get("missing") or []) == 1]
+    if not almost:
+        return []
+
+    candidates = _filter_candidates(wip_entries, owned_view, deck_format, target_format, commander_color_identity, intended_bracket, excluded_set_codes)
+    candidates_by_name = {normalize_name(c["name"]): c for c in candidates}
+
+    budget_alt = budget_alt_data_in_index()
+    tag_by_name = budget_alt.get("tag_by_name") or {}
+    tag_labels = budget_alt.get("tag_labels") or {}
+    game_changers = game_changers_in_index()
+
+    def role_of(name: str, category: str) -> str:
+        return _card_role(name, category, tag_by_name, tag_labels)
+
+    # Cards to protect from ever being cut: any combo piece already
+    # contributing to an included combo or to any almost-included combo
+    # (cutting one would either break a real combo or destroy a *different*
+    # one-away opportunity), and the commander's own theme tag / anything
+    # sharing a 2+-represented tag in the deck (the same organic-theme
+    # signal suggest_builder_cards uses, just read in reverse here).
+    protected_names: set[str] = set()
+    for combo in combos.get("included") or []:
+        protected_names.update(normalize_name(n) for n in combo.get("uses") or [])
+    for combo in combos.get("almost_included") or []:
+        protected_names.update(normalize_name(n) for n in combo.get("uses") or [])
+    wip_tag_counts: dict[str, int] = {}
+    commander_tag_id = None
+    for e in wip_entries:
+        tag_id = tag_by_name.get(normalize_name(e.name))
+        if not tag_id:
+            continue
+        if e.section == "commander":
+            commander_tag_id = tag_id
+        else:
+            wip_tag_counts[tag_id] = wip_tag_counts.get(tag_id, 0) + e.quantity
+    theme_tags = {tag_id for tag_id, n in wip_tag_counts.items() if n >= 2}
+    if commander_tag_id:
+        theme_tags.add(commander_tag_id)
+    for e in wip_entries:
+        if e.section == "commander":
+            continue
+        tag_id = tag_by_name.get(normalize_name(e.name))
+        if tag_id in theme_tags:
+            protected_names.add(normalize_name(e.name))
+
+    used_add_names: set[str] = set()
+    used_remove_names: set[str] = set()
+    proposals = []
+    for combo in almost:
+        missing_name = combo["missing"][0]
+        nm = normalize_name(missing_name)
+        if nm in used_add_names:
+            continue
+        add_card = candidates_by_name.get(nm)
+        if not add_card:
+            continue  # not owned, not legal, or wrong colors -- nothing to propose
+        add_role = role_of(add_card["name"], add_card["category"])
+        cut_pool = sorted(
+            (
+                e for e in wip_entries
+                if e.section != "commander"
+                and normalize_name(e.name) not in used_remove_names
+                and normalize_name(e.name) not in protected_names
+                and normalize_name(e.name) not in game_changers
+                and role_of(e.name, categorize(e.type_line)) == add_role
+            ),
+            key=lambda e: e.name,
+        )
+        if not cut_pool:
+            continue  # no safe filler to cut in this role -- skip, don't force a cross-role cut
+        cut = cut_pool[0]
+        used_add_names.add(nm)
+        used_remove_names.add(normalize_name(cut.name))
+        proposals.append({
+            "add": {
+                "name": add_card["name"], "scryfall_id": add_card["scryfall_id"], "category": add_card["category"],
+                "type_line": add_card["type_line"], "color_identity": add_card["color_identity"],
+                "cmc": add_card["cmc"], "mana_cost": add_card["mana_cost"],
+                "set_code": add_card["set_code"], "collector_number": add_card["collector_number"],
+            },
+            "remove": {"name": cut.name, "scryfall_id": cut.scryfall_id, "category": categorize(cut.type_line)},
+            "produces": combo.get("produces") or [],
+            "reason": f"completes a combo with {', '.join(combo['uses'][:2])}",
+        })
+    return proposals
