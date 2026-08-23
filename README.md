@@ -31,7 +31,7 @@ Markdown/HTML/CSV reports on disk) — the Deck Builder is web-app only.
 - Prices **missing** cards from the true cheapest printing available across
   TCGPlayer, Card Kingdom, and ManaPool (decklists sometimes reference a
   rare, much pricier alt-art printing by default), foil and non-foil toggle.
-  Pick which stores to price from on the home page (all three checked by
+  Pick which stores to price from on the Decks page (all three checked by
   default, saved for next time) — Cardmarket is also available as a 4th,
   opt-in option, shown separately in EUR since it's never blended into any
   dollar total or "cheapest" comparison
@@ -92,7 +92,7 @@ Markdown/HTML/CSV reports on disk) — the Deck Builder is web-app only.
   own but have committed to a different build still shows as needed here —
   persisted so you don't have to re-mark it every time
 - A blurred commander-art backdrop, because why not
-- **Recent decks** on the home page can be deleted individually (a small
+- **Recent decks** on the Decks page can be deleted individually (a small
   &times; next to each entry, with a confirm prompt) instead of having to
   dig through `data/projects/` by hand
 
@@ -100,7 +100,7 @@ Markdown/HTML/CSV reports on disk) — the Deck Builder is web-app only.
 
 Building a new deck instead of checking an existing one? Skip typing out a
 want list and build straight from what you already own, at `/builder` in
-the web app (or the **+ New deck** link next to Recent decks on the home
+the web app (or the **+ New deck** link next to Recent decks on the Decks
 page).
 
 ![Deck Builder](screenshots/deck-builder.png)
@@ -149,7 +149,7 @@ page).
   Card** button turns all of that into a clean, printable one-page summary
   for talking through the deck with the table
 - **Save** remembers the brew as a project, same as a compared deck — it
-  shows up in Recent decks on the home page and picks up right where you
+  shows up in Recent decks on the Decks page and picks up right where you
   left off
 - **View full report** runs the finished brew through the exact same
   report a compared deck gets (pricing, Game Changers, legality, bracket,
@@ -193,12 +193,12 @@ aren't recognized (depends on how Python was installed).
 
 Both the web app and CLI also check automatically every time you launch
 them, and only say something if there's actually an update (a banner on
-the home page, or a line printed before the menu/comparison starts) --
-silent otherwise, so a normal launch isn't cluttered with "already up to
-date" every time.
+the Setup or Decks page, or a line printed before the menu/comparison
+starts) -- silent otherwise, so a normal launch isn't cluttered with
+"already up to date" every time.
 
 To check on demand instead: the web app has a **Check for Updates** button
-on the home page. From the CLI:
+on the Setup page (`/`). From the CLI:
 
 ```bash
 python3 brewlist_cli.py --update
@@ -251,20 +251,24 @@ only) and `NO_BROWSER=1` (skip auto-opening a browser) are also available
 if you want to run it somewhere unusual -- both are set automatically by
 the Docker image below.
 
-From there:
+It opens to a **Setup** page first — upload your ManaBox collection export
+(`.csv`) there, then hit **Continue to Decks**. Uploading is its own
+immediate action (its own button, not bundled into anything else), so it
+takes effect right away — from there:
 
-1. Paste a Moxfield or Archidekt deck URL (e.g. `https://moxfield.com/decks/...`
-   or `https://archidekt.com/decks/...`)
-2. Upload your ManaBox collection export (`.csv`) the first time — after
-   that, it's remembered, so you only need to re-upload when your actual
-   collection changes
-3. Hit **Compare**
+1. On the **Decks** page, paste a Moxfield or Archidekt deck URL (e.g.
+   `https://moxfield.com/decks/...` or `https://archidekt.com/decks/...`)
+2. Hit **Compare**
+
+Once a collection is uploaded, it's remembered — you only need to go back
+to Setup (the **⚙ Collection & Settings** link on the Decks page) when you
+actually want to replace it with a new export.
 
 That comparison already uses accurate cheapest-printing prices — the first
 time you ever run one (or after the weekly auto-refresh), it downloads a
 ~325MB card database from MTGJSON, which takes under a minute; after that,
 every comparison is instant. You can also refresh that database on demand
-from the home page's **Refresh Database** button.
+from the Setup page's **Refresh Database** button.
 
 The app remembers each deck you've looked at as a "project": any
 "reserved for another deck" overrides you save, plus your last-used

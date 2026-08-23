@@ -327,7 +327,80 @@ input[type="text"], input[type="url"], input[type="file"] {
 """
 
 
-def render_home_page(error: str | None = None, prefill_url: str = "") -> str:
+def _esc(s) -> str:
+    import html as _html
+    return _html.escape(str(s or ""))
+
+
+# --------------------------------------------------------------------------
+# Two-step home flow: Setup (/, collection upload + card database + app
+# updates) then Decks (/decks, Recent decks + Compare-a-decklist). Split
+# this way (rather than one page with everything) so uploading a fresh
+# collection is its own immediate action with its own submit button --
+# it used to live inside the Compare form, sharing its submit, so
+# selecting a new file and then clicking "+ New deck" (a plain link, not
+# that form's submit) silently abandoned the upload: the file was chosen
+# but never actually sent to the server, and the Deck Builder went on
+# using whatever collection was already on file. Header (title/ko-fi/
+# shutdown/error-box/update-banner) and the AI-disclosure footer are
+# identical chrome on both pages -- see _page_chrome -- so ko-fi/shutdown/
+# update-checking stay reachable no matter which page you're on, even
+# though collection/price-index setup itself only lives on Setup now.
+# --------------------------------------------------------------------------
+
+def _update_banner_html() -> str:
+    with _STARTUP_UPDATE_LOCK:
+        startup_update = dict(STARTUP_UPDATE)
+    if startup_update.get("checked") and startup_update.get("ok") and startup_update.get("updated"):
+        return (
+            '<div class="update-banner">&#9889; Brewlist was just updated to the latest version -- '
+            'restart the app to use it.</div>'
+        )
+    return ""
+
+
+def _page_chrome(subtitle: str, error: str | None) -> tuple[str, str]:
+    """(header_html, footer_html) shared by the Setup and Decks pages."""
+    header = f"""
+  <div class="sticky-top">
+    <div class="page-header">
+      <div>
+        <h1>Brewlist</h1>
+        <p class="subtitle">{subtitle}</p>
+      </div>
+      <div class="header-actions">
+        <a class="kofi-link" href="https://ko-fi.com/imtotallymeh" target="_blank" rel="noopener noreferrer" title="Support Brewlist on Ko-fi">
+          <img src="https://storage.ko-fi.com/cdn/kofi5.png?v=3" alt="Support me on Ko-fi" loading="lazy">
+        </a>
+        <button type="button" class="btn small danger" id="shutdown-btn" title="Stops the local server">&#9209; Shut Down</button>
+      </div>
+    </div>
+    {_update_banner_html()}
+    <div id="error-box" class="error" style="display:{"block" if error else "none"};">{_esc(error) if error else ""}</div>
+  </div>"""
+    footer = """
+  <div class="ai-disclosure">
+    <a href="https://github.com/sevensixtwox51/brewlist/blob/main/AI-DECLARATION.md" target="_blank" rel="noopener noreferrer" title="Brewlist is built almost entirely by AI (Claude Code) -- see AI-DECLARATION.md">
+      <img src="https://img.shields.io/badge/%E4%B7%BC%20AI--DECLARATION-auto-ede9fe?labelColor=ede9fe" alt="AI-DECLARATION: auto">
+    </a>
+    <a href="https://www.realgoodai.org/real-rating" target="_blank" rel="noopener noreferrer" title="REAL Rating: Level 5, Full AI">
+      <img src="https://images.squarespace-cdn.com/content/v1/677c1269fe60517a0976d6fc/fbf2122d-5b3f-474d-8466-bc18298c15e2/5+REAL+rating%404x.png" alt="REAL Rating: Level 5, Full AI">
+    </a>
+  </div>"""
+    return header, footer
+
+
+SHUTDOWN_BTN_SCRIPT = """
+document.getElementById('shutdown-btn').addEventListener('click', () => {
+  if (!confirm('Shut down the server? You will need to relaunch it to use this again.')) return;
+  fetch('/shutdown', { method: 'POST' }).catch(() => {});
+  document.body.innerHTML =
+    '<main><p style="color:var(--text-dim);padding-top:40px;">Server stopped. You can close this tab.</p></main>';
+});
+"""
+
+
+def render_setup_page(error: str | None = None) -> str:
     meta = collection_meta()
     if meta and meta.get("uploaded"):
         collection_html = (
@@ -339,6 +412,165 @@ def render_home_page(error: str | None = None, prefill_url: str = "") -> str:
     else:
         collection_html = '<div class="collection-status">No collection uploaded yet &mdash; required the first time.</div>'
 
+    index_built_at = price_index_built_at()
+    if index_built_at is None:
+        index_status = 'Not built yet — first use downloads it (~325MB from MTGJSON, one-time, refreshed weekly after).'
+    else:
+        index_status = f'Updated {index_built_at.strftime("%Y-%m-%d %H:%M UTC")}.'
+
+    header_html, footer_html = _page_chrome(
+        "Set up your ManaBox collection and card database, then head to Decks to compare or build.", error
+    )
+
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/svg+xml" href="https://svgs.scryfall.io/card-symbols/PW.svg">
+<title>Brewlist -- Setup</title>
+<style>{PAGE_STYLE}</style>
+</head>
+<body>
+<main>
+  {header_html}
+  <form class="card" id="collection-form">
+    <label for="manabox_csv">ManaBox collection export (.csv)</label>
+    {collection_html}
+    <input type="file" id="manabox_csv" name="manabox_csv" accept=".csv" required>
+    <button type="submit" class="btn" id="collection-submit-btn">Upload Collection</button>
+    <div id="collection-upload-label" class="hint" style="display:none;margin-top:8px;"></div>
+  </form>
+  <div class="card" id="price-index-card">
+    <label>Card database</label>
+    <div class="hint" style="margin-top:-8px;margin-bottom:8px;">Pricing, price trends, Game Changers, and Commander legality all come from this local MTGJSON-based database.</div>
+    <div class="collection-status" id="price-index-status">{_esc(index_status)}</div>
+    <button type="button" class="btn ghost small" id="refresh-index-btn">&#128260; Refresh Database</button>
+    <div id="refresh-index-label" class="hint" style="display:none;margin-top:8px;"></div>
+  </div>
+  <div class="card" id="update-card">
+    <label>App updates</label>
+    <div class="hint" style="margin-top:-8px;margin-bottom:8px;">Pulls the latest Brewlist code from GitHub -- only works if this was installed with 'git clone'.</div>
+    <button type="button" class="btn ghost small" id="check-updates-btn">&#8635; Check for Updates</button>
+    <div id="update-label" class="hint" style="margin-top:8px;"></div>
+  </div>
+  <div class="card" style="text-align:center;">
+    <a href="/decks" class="btn" style="display:block;">Continue to Decks &rarr;</a>
+  </div>
+  {footer_html}
+</main>
+<script>
+const errorBox = document.getElementById('error-box');
+
+const collectionForm = document.getElementById('collection-form');
+const collectionSubmitBtn = document.getElementById('collection-submit-btn');
+const collectionUploadLabel = document.getElementById('collection-upload-label');
+collectionForm.addEventListener('submit', (e) => {{
+  e.preventDefault();
+  collectionSubmitBtn.disabled = true;
+  collectionUploadLabel.style.display = 'block';
+  collectionUploadLabel.textContent = 'Uploading\\u2026';
+  fetch('/collection/upload', {{ method: 'POST', body: new FormData(collectionForm) }})
+    .then(r => r.json())
+    .then(data => {{
+      collectionSubmitBtn.disabled = false;
+      if (data.error) {{ collectionUploadLabel.textContent = data.error; return; }}
+      collectionUploadLabel.textContent = `Uploaded ${{data.filename}} (${{data.uploaded}}).`;
+      const statusEl = collectionForm.querySelector('.collection-status');
+      if (statusEl) {{
+        statusEl.innerHTML = `Using collection <b>${{data.filename}}</b> (uploaded ${{data.uploaded}}) &mdash; upload a new export above to replace it.`;
+      }}
+    }})
+    .catch(() => {{ collectionSubmitBtn.disabled = false; collectionUploadLabel.textContent = 'Could not reach the server.'; }});
+}});
+
+const refreshIndexBtn = document.getElementById('refresh-index-btn');
+const refreshIndexLabel = document.getElementById('refresh-index-label');
+const refreshIndexStatus = document.getElementById('price-index-status');
+
+function fmtIndexProgress(done, total) {{
+  if (total > 100000) {{
+    return (done / 1048576).toFixed(1) + ' / ' + (total / 1048576).toFixed(1) + ' MB';
+  }}
+  return done + '/' + total;
+}}
+
+function pollIndexRefresh(jobId) {{
+  fetch('/compare/progress/' + jobId)
+    .then(r => r.json())
+    .then(data => {{
+      if (data.status === 'running') {{
+        if (data.stage === 'processing') {{
+          refreshIndexLabel.textContent = 'Processing downloaded card data\\u2026';
+        }} else if (data.stage === 'tags') {{
+          refreshIndexLabel.textContent = 'Finding budget-alternative tags\\u2026';
+        }} else {{
+          refreshIndexLabel.textContent = data.total > 0
+            ? 'Downloading\\u2026 (' + fmtIndexProgress(data.done, data.total) + ')'
+            : 'Starting\\u2026';
+        }}
+        setTimeout(() => pollIndexRefresh(jobId), 400);
+      }} else if (data.status === 'done') {{
+        refreshIndexLabel.textContent = 'Done!';
+        const now = new Date();
+        const pad = n => String(n).padStart(2, '0');
+        const stamp = now.getUTCFullYear() + '-' + pad(now.getUTCMonth() + 1) + '-' + pad(now.getUTCDate())
+          + ' ' + pad(now.getUTCHours()) + ':' + pad(now.getUTCMinutes()) + ' UTC';
+        refreshIndexStatus.textContent = 'Updated ' + stamp + '.';
+        refreshIndexBtn.disabled = false;
+        setTimeout(() => {{ refreshIndexLabel.style.display = 'none'; }}, 2000);
+      }} else {{
+        refreshIndexLabel.textContent = data.error || 'Something went wrong.';
+        refreshIndexBtn.disabled = false;
+      }}
+    }})
+    .catch(() => {{
+      refreshIndexLabel.textContent = 'Lost contact with the server.';
+      refreshIndexBtn.disabled = false;
+    }});
+}}
+
+refreshIndexBtn.addEventListener('click', () => {{
+  refreshIndexBtn.disabled = true;
+  refreshIndexLabel.style.display = 'block';
+  refreshIndexLabel.textContent = 'Starting\\u2026';
+  fetch('/price-index/refresh', {{ method: 'POST' }})
+    .then(r => r.json())
+    .then(data => {{
+      if (data.error) {{ refreshIndexLabel.textContent = data.error; refreshIndexBtn.disabled = false; return; }}
+      pollIndexRefresh(data.job_id);
+    }})
+    .catch(() => {{
+      refreshIndexLabel.textContent = 'Could not reach the server.';
+      refreshIndexBtn.disabled = false;
+    }});
+}});
+
+const checkUpdatesBtn = document.getElementById('check-updates-btn');
+const updateLabel = document.getElementById('update-label');
+checkUpdatesBtn.addEventListener('click', () => {{
+  checkUpdatesBtn.disabled = true;
+  updateLabel.textContent = 'Checking\\u2026';
+  fetch('/update/check', {{ method: 'POST' }})
+    .then(r => r.json())
+    .then(data => {{
+      updateLabel.textContent = data.message;
+      checkUpdatesBtn.disabled = false;
+    }})
+    .catch(() => {{
+      updateLabel.textContent = 'Could not reach the server.';
+      checkUpdatesBtn.disabled = false;
+    }});
+}});
+
+{SHUTDOWN_BTN_SCRIPT}
+</script>
+</body>
+</html>
+"""
+
+
+def render_decks_page(error: str | None = None, prefill_url: str = "") -> str:
     projects = list_projects()
 
     def _project_item(p: dict) -> str:
@@ -370,24 +602,6 @@ def render_home_page(error: str | None = None, prefill_url: str = "") -> str:
         f'</div>{projects_list_html}</div>'
     )
 
-    error_html = f'<div class="error">{_esc(error)}</div>' if error else ""
-
-    with _STARTUP_UPDATE_LOCK:
-        startup_update = dict(STARTUP_UPDATE)
-    if startup_update.get("checked") and startup_update.get("ok") and startup_update.get("updated"):
-        update_banner_html = (
-            '<div class="update-banner">&#9889; Brewlist was just updated to the latest version -- '
-            'restart the app to use it.</div>'
-        )
-    else:
-        update_banner_html = ""
-
-    index_built_at = price_index_built_at()
-    if index_built_at is None:
-        index_status = 'Not built yet — first use downloads it (~325MB from MTGJSON, one-time, refreshed weekly after).'
-    else:
-        index_status = f'Updated {index_built_at.strftime("%Y-%m-%d %H:%M UTC")}.'
-
     selected_stores = set(load_store_prefs())
 
     def _store_checkbox(label: str) -> str:
@@ -409,42 +623,29 @@ def render_home_page(error: str | None = None, prefill_url: str = "") -> str:
 
     store_checkboxes_html = "".join(_store_checkbox(label) for label in PICKABLE_STORE_LABELS)
 
+    header_html, footer_html = _page_chrome(
+        "Compare a decklist against your collection, with live pricing.", error
+    )
+
     return f"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" type="image/svg+xml" href="https://svgs.scryfall.io/card-symbols/PW.svg">
-<title>Brewlist</title>
+<title>Brewlist -- Decks</title>
 <style>{PAGE_STYLE}</style>
 </head>
 <body>
 <main>
-  <div class="sticky-top">
-    <div class="page-header">
-      <div>
-        <h1>Brewlist</h1>
-        <p class="subtitle">Compare a decklist against your collection, with live pricing.</p>
-      </div>
-      <div class="header-actions">
-        <a class="kofi-link" href="https://ko-fi.com/imtotallymeh" target="_blank" rel="noopener noreferrer" title="Support Brewlist on Ko-fi">
-          <img src="https://storage.ko-fi.com/cdn/kofi5.png?v=3" alt="Support me on Ko-fi" loading="lazy">
-        </a>
-        <button type="button" class="btn small danger" id="shutdown-btn" title="Stops the local server">&#9209; Shut Down</button>
-      </div>
-    </div>
-    {update_banner_html}
-    <div id="error-box" class="error" style="display:{"block" if error else "none"};">{_esc(error) if error else ""}</div>
+  {header_html}
+  <div style="margin-bottom:16px;">
+    <a href="/" class="btn ghost small">&#9881; Collection &amp; Settings</a>
   </div>
   {projects_html}
   <form class="card" id="compare-form">
     <label for="moxfield_url">Moxfield or Archidekt deck URL</label>
     <input type="url" id="moxfield_url" name="moxfield_url" placeholder="https://moxfield.com/decks/... or https://archidekt.com/decks/..." value="{_esc(prefill_url)}" required>
-
-    {collection_html}
-    <label for="manabox_csv">ManaBox collection export (.csv)</label>
-    <input type="file" id="manabox_csv" name="manabox_csv" accept=".csv">
-    <div class="hint">Leave empty to reuse the collection already on file.</div>
 
     <div class="checkbox-row"><input type="checkbox" id="include_sideboard" name="include_sideboard"><label for="include_sideboard" style="margin:0;font-weight:400;">Include sideboard cards</label></div>
     <div class="checkbox-row"><input type="checkbox" id="include_maybeboard" name="include_maybeboard"><label for="include_maybeboard" style="margin:0;font-weight:400;">Include maybeboard cards</label></div>
@@ -460,27 +661,7 @@ def render_home_page(error: str | None = None, prefill_url: str = "") -> str:
       <div id="progress-label">Fetching deck from Moxfield&hellip;</div>
     </div>
   </form>
-  <div class="card" id="price-index-card">
-    <label>Card database</label>
-    <div class="hint" style="margin-top:-8px;margin-bottom:8px;">Pricing, price trends, Game Changers, and Commander legality all come from this local MTGJSON-based database.</div>
-    <div class="collection-status" id="price-index-status">{_esc(index_status)}</div>
-    <button type="button" class="btn ghost small" id="refresh-index-btn">&#128260; Refresh Database</button>
-    <div id="refresh-index-label" class="hint" style="display:none;margin-top:8px;"></div>
-  </div>
-  <div class="card" id="update-card">
-    <label>App updates</label>
-    <div class="hint" style="margin-top:-8px;margin-bottom:8px;">Pulls the latest Brewlist code from GitHub -- only works if this was installed with 'git clone'.</div>
-    <button type="button" class="btn ghost small" id="check-updates-btn">&#8635; Check for Updates</button>
-    <div id="update-label" class="hint" style="margin-top:8px;"></div>
-  </div>
-  <div class="ai-disclosure">
-    <a href="https://github.com/sevensixtwox51/brewlist/blob/main/AI-DECLARATION.md" target="_blank" rel="noopener noreferrer" title="Brewlist is built almost entirely by AI (Claude Code) -- see AI-DECLARATION.md">
-      <img src="https://img.shields.io/badge/%E4%B7%BC%20AI--DECLARATION-auto-ede9fe?labelColor=ede9fe" alt="AI-DECLARATION: auto">
-    </a>
-    <a href="https://www.realgoodai.org/real-rating" target="_blank" rel="noopener noreferrer" title="REAL Rating: Level 5, Full AI">
-      <img src="https://images.squarespace-cdn.com/content/v1/677c1269fe60517a0976d6fc/fbf2122d-5b3f-474d-8466-bc18298c15e2/5+REAL+rating%404x.png" alt="REAL Rating: Level 5, Full AI">
-    </a>
-  </div>
+  {footer_html}
 </main>
 <script>
 const form = document.getElementById('compare-form');
@@ -599,100 +780,11 @@ form.addEventListener('submit', (e) => {{
     }});
 }});
 
-document.getElementById('shutdown-btn').addEventListener('click', () => {{
-  if (!confirm('Shut down the server? You will need to relaunch it to use this again.')) return;
-  fetch('/shutdown', {{ method: 'POST' }}).catch(() => {{}});
-  document.body.innerHTML =
-    '<main><p style="color:var(--text-dim);padding-top:40px;">Server stopped. You can close this tab.</p></main>';
-}});
-
-const refreshIndexBtn = document.getElementById('refresh-index-btn');
-const refreshIndexLabel = document.getElementById('refresh-index-label');
-const refreshIndexStatus = document.getElementById('price-index-status');
-
-function fmtIndexProgress(done, total) {{
-  if (total > 100000) {{
-    return (done / 1048576).toFixed(1) + ' / ' + (total / 1048576).toFixed(1) + ' MB';
-  }}
-  return done + '/' + total;
-}}
-
-function pollIndexRefresh(jobId) {{
-  fetch('/compare/progress/' + jobId)
-    .then(r => r.json())
-    .then(data => {{
-      if (data.status === 'running') {{
-        if (data.stage === 'processing') {{
-          refreshIndexLabel.textContent = 'Processing downloaded card data\\u2026';
-        }} else if (data.stage === 'tags') {{
-          refreshIndexLabel.textContent = 'Finding budget-alternative tags\\u2026';
-        }} else {{
-          refreshIndexLabel.textContent = data.total > 0
-            ? 'Downloading\\u2026 (' + fmtIndexProgress(data.done, data.total) + ')'
-            : 'Starting\\u2026';
-        }}
-        setTimeout(() => pollIndexRefresh(jobId), 400);
-      }} else if (data.status === 'done') {{
-        refreshIndexLabel.textContent = 'Done!';
-        const now = new Date();
-        const pad = n => String(n).padStart(2, '0');
-        const stamp = now.getUTCFullYear() + '-' + pad(now.getUTCMonth() + 1) + '-' + pad(now.getUTCDate())
-          + ' ' + pad(now.getUTCHours()) + ':' + pad(now.getUTCMinutes()) + ' UTC';
-        refreshIndexStatus.textContent = 'Updated ' + stamp + '.';
-        refreshIndexBtn.disabled = false;
-        setTimeout(() => {{ refreshIndexLabel.style.display = 'none'; }}, 2000);
-      }} else {{
-        refreshIndexLabel.textContent = data.error || 'Something went wrong.';
-        refreshIndexBtn.disabled = false;
-      }}
-    }})
-    .catch(() => {{
-      refreshIndexLabel.textContent = 'Lost contact with the server.';
-      refreshIndexBtn.disabled = false;
-    }});
-}}
-
-refreshIndexBtn.addEventListener('click', () => {{
-  refreshIndexBtn.disabled = true;
-  refreshIndexLabel.style.display = 'block';
-  refreshIndexLabel.textContent = 'Starting\\u2026';
-  fetch('/price-index/refresh', {{ method: 'POST' }})
-    .then(r => r.json())
-    .then(data => {{
-      if (data.error) {{ refreshIndexLabel.textContent = data.error; refreshIndexBtn.disabled = false; return; }}
-      pollIndexRefresh(data.job_id);
-    }})
-    .catch(() => {{
-      refreshIndexLabel.textContent = 'Could not reach the server.';
-      refreshIndexBtn.disabled = false;
-    }});
-}});
-
-const checkUpdatesBtn = document.getElementById('check-updates-btn');
-const updateLabel = document.getElementById('update-label');
-checkUpdatesBtn.addEventListener('click', () => {{
-  checkUpdatesBtn.disabled = true;
-  updateLabel.textContent = 'Checking\\u2026';
-  fetch('/update/check', {{ method: 'POST' }})
-    .then(r => r.json())
-    .then(data => {{
-      updateLabel.textContent = data.message;
-      checkUpdatesBtn.disabled = false;
-    }})
-    .catch(() => {{
-      updateLabel.textContent = 'Could not reach the server.';
-      checkUpdatesBtn.disabled = false;
-    }});
-}});
+{SHUTDOWN_BTN_SCRIPT}
 </script>
 </body>
 </html>
 """
-
-
-def _esc(s) -> str:
-    import html as _html
-    return _html.escape(str(s or ""))
 
 
 # --------------------------------------------------------------------------
@@ -869,18 +961,22 @@ body.compact .deck-row .card-thumb { display:none; }
 }
 .set-selection-field { position:relative; }
 .set-selection-popup {
+  /* Select All/Clear All and Cancel/OK are pinned outside the scrolling
+     list (flex column, only .set-selection-list scrolls) so they're
+     always reachable without scrolling through however many sets are in
+     the list first -- OK/Cancel especially shouldn't require hunting for. */
   display:none; position:absolute; top:100%; left:0; margin-top:4px; width:280px; max-height:340px;
-  overflow-y:auto; background:var(--bg-elevated); border:1px solid var(--card-border); border-radius:8px;
-  box-shadow:var(--shadow); z-index:30; padding:8px;
+  background:var(--bg-elevated); border:1px solid var(--card-border); border-radius:8px;
+  box-shadow:var(--shadow); z-index:30; padding:8px; flex-direction:column;
 }
-.set-selection-popup.show { display:block; }
-.set-selection-list { display:flex; flex-direction:column; gap:2px; margin-bottom:8px; }
+.set-selection-popup.show { display:flex; }
+.set-selection-list { flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:2px; margin:6px 0; }
 .set-selection-list label { display:flex; align-items:center; gap:6px; font-size:0.82rem; padding:3px 4px; border-radius:4px; cursor:pointer; }
 .set-selection-list label:hover { background:var(--bg); }
 .set-selection-list input { margin:0; cursor:pointer; }
-.set-selection-quick { display:flex; gap:8px; margin-bottom:6px; }
+.set-selection-quick { display:flex; gap:8px; flex-shrink:0; }
 .set-selection-quick .btn { flex:1; }
-.set-selection-actions { display:flex; gap:8px; padding-top:6px; border-top:1px solid var(--card-border); }
+.set-selection-actions { display:flex; gap:8px; padding-top:6px; border-top:1px solid var(--card-border); flex-shrink:0; }
 .set-selection-actions .btn { flex:1; }
 .bv-badge {
   display:inline-flex; align-items:center; gap:4px; padding:4px 10px; margin:0 6px 6px 0;
@@ -1033,7 +1129,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
       <p class="subtitle">Build a new deck using only cards you already own.</p>
     </div>
     <div class="header-actions">
-      <a href="/" class="btn ghost small">&larr; Home</a>
+      <a href="/decks" class="btn ghost small">&larr; Decks</a>
     </div>
   </div>
   <div id="error-box" class="error" style="display:none;"></div>
@@ -2347,8 +2443,32 @@ reportBtn.addEventListener('click', () => {{
 
 @app.route("/", methods=["GET"])
 def home():
+    return render_setup_page()
+
+
+@app.route("/decks", methods=["GET"])
+def decks():
     prefill = request.args.get("deck", "")
-    return render_home_page(prefill_url=prefill)
+    return render_decks_page(prefill_url=prefill)
+
+
+@app.route("/collection/upload", methods=["POST"])
+def collection_upload():
+    """Standalone collection upload -- its own submit, decoupled from the
+    Compare form (which used to bundle the file input, so choosing a new
+    file and then navigating to /decks or /builder without also filling
+    in a deck URL and clicking Compare silently dropped the upload)."""
+    upload = request.files.get("manabox_csv")
+    if not upload or not upload.filename:
+        return jsonify(error="Choose a .csv file first."), 400
+    upload.save(COLLECTION_PATH)
+    meta = {
+        "filename": upload.filename,
+        "uploaded": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+    }
+    with open(COLLECTION_META_PATH, "w", encoding="utf-8") as f:
+        json.dump(meta, f)
+    return jsonify(ok=True, **meta)
 
 
 @app.route("/project/delete", methods=["POST"])
@@ -2658,16 +2778,11 @@ def compare_start():
     selected_stores = [s for s in request.form.getlist("stores") if s in PICKABLE_STORE_LABELS]
     save_store_prefs(selected_stores)
 
-    upload = request.files.get("manabox_csv")
-    if upload and upload.filename:
-        upload.save(COLLECTION_PATH)
-        with open(COLLECTION_META_PATH, "w", encoding="utf-8") as f:
-            json.dump({
-                "filename": upload.filename,
-                "uploaded": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
-            }, f)
-    elif not os.path.isfile(COLLECTION_PATH):
-        return jsonify(error="No ManaBox collection on file yet -- upload your export first."), 400
+    # Collection upload is its own standalone action now (see
+    # /collection/upload) -- Compare only ever reads whatever's already on
+    # file, matching the two-step Setup-then-Decks flow.
+    if not os.path.isfile(COLLECTION_PATH):
+        return jsonify(error="No ManaBox collection on file yet -- upload your export on the Collection & Settings page first."), 400
 
     try:
         deck = fetch_deck(source, deck_id)
@@ -2733,9 +2848,9 @@ def compare_result(job_id):
         if job and job["status"] == "done":
             del JOBS[job_id]  # single-use: the report is now fully in the client's hands
     if not job:
-        return render_home_page(error="That comparison has expired or wasn't found -- try again.")
+        return render_decks_page(error="That comparison has expired or wasn't found -- try again.")
     if job["status"] != "done":
-        return render_home_page(error=job.get("error") or "That comparison hasn't finished yet -- try again.")
+        return render_decks_page(error=job.get("error") or "That comparison hasn't finished yet -- try again.")
     return Response(job["html"], mimetype="text/html")
 
 
