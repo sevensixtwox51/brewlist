@@ -147,7 +147,11 @@ def owned_collection_gameplay_view(owned: dict[str, OwnedCard], gameplay: dict[s
     gameplay_data_in_index()'s type/color/legality data into flat,
     JSON-ready dicts for the builder's collection browser: {name,
     quantity, type_line, cmc, mana_cost, color_identity, category,
-    scryfall_id, set_code, collector_number, legalities}. Owned cards with
+    scryfall_id, set_code, collector_number, legalities, oracle_text}.
+    oracle_text exists here purely for ai_builder.py's free-text
+    collection search (see search_owned_collection) -- nothing else in
+    the builder UI reads it, but it costs nothing extra since gameplay
+    already carries it. Owned cards with
     no gameplay match (tokens, Un-cards, anything MTGJSON doesn't carry)
     are skipped -- there's nothing to build a real deck with for those
     anyway. set_code/collector_number identify the *exact* printing you
@@ -172,6 +176,7 @@ def owned_collection_gameplay_view(owned: dict[str, OwnedCard], gameplay: dict[s
             "set_code": printing.set_code if printing else "",
             "collector_number": printing.collector_number if printing else "",
             "legalities": gp.get("legalities") or {},
+            "oracle_text": gp.get("oracle_text") or "",
         })
     view.sort(key=lambda c: c["name"])
     return view

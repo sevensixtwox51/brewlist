@@ -16,6 +16,11 @@ venv/
 # not source and not meant to be shared/committed
 data/
 
+# Belt-and-suspenders: your Anthropic API key, already covered by the
+# bare data/ rule above -- called out explicitly since this is the one
+# file where a slip would actually leak a live credential
+data/ai_config.json
+
 # OS / editor cruft
 .DS_Store
 

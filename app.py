@@ -58,6 +58,7 @@ from deck_builder import (
     suggest_builder_cards,
     suggest_replacements,
 )
+from ai_builder import clear_api_key, key_source, run_ai_build, save_api_key, validate_api_key
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(APP_DIR, "data")
@@ -228,6 +229,50 @@ def _run_brew_report_job(job_id, entries, owned, deck_id, deck_name, is_commande
             if job:
                 job["status"] = "done"
                 job["html"] = html_report
+    except Exception as e:  # noqa: BLE001 -- surface any failure to the polling client
+        with _JOBS_LOCK:
+            job = JOBS.get(job_id)
+            if job:
+                job["status"] = "error"
+                job["error"] = str(e)
+
+
+def _run_ai_build_job(job_id, commander, deck_format, target_format, target_size,
+                       commander_color_identity, intended_bracket, user_notes, owned_view, api_key):
+    """Same JOBS/threading shape as _run_compare_job -- runs
+    ai_builder.run_ai_build() (a multi-round-trip Claude tool-use loop, so
+    genuinely slow) in a background thread. Unlike the compare/report jobs
+    this also tracks a running `log` (list of one-line tool-call
+    summaries) and `deck_state` (current WIP cards) so the client can
+    render live progress, not just a done/total counter -- see
+    /builder/ai-build/progress, a new route rather than widening
+    /compare/progress's existing response shape."""
+    def _on_progress(done, total, stage, log, deck_state):
+        with _JOBS_LOCK:
+            job = JOBS.get(job_id)
+            if job:
+                job["done"] = done
+                job["total"] = total
+                job["stage"] = stage
+                job["log"] = log
+                job["deck_state"] = deck_state
+
+    try:
+        result = run_ai_build(
+            commander, deck_format, target_format, target_size, commander_color_identity,
+            intended_bracket, user_notes, owned_view, api_key, _on_progress,
+        )
+        with _JOBS_LOCK:
+            job = JOBS.get(job_id)
+            if job:
+                if result.get("error"):
+                    job["status"] = "error"
+                    job["error"] = result["error"]
+                else:
+                    job["status"] = "done"
+                    job["suggestions"] = result["suggestions"]
+                    job["finished"] = result["finished"]
+                    job["summary"] = result["summary"]
     except Exception as e:  # noqa: BLE001 -- surface any failure to the polling client
         with _JOBS_LOCK:
             job = JOBS.get(job_id)
@@ -1203,6 +1248,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
     <div class="builder-top-row builder-actions">
       <div class="action-group">
         <button type="button" class="btn ghost" id="suggest-btn">Suggest cards</button>
+        <button type="button" class="btn ghost" id="ai-build-btn" title="Claude reads your commander's actual card text and searches your collection for whatever it decides is relevant -- not limited to the fixed tag list Suggest uses. Uses your own Anthropic API key.">&#10024; Build with AI</button>
         <div class="theme-picker">
           <input type="text" id="theme-input" placeholder="Preferred theme (optional)" autocomplete="off">
           <div class="theme-dropdown" id="theme-dropdown"></div>
@@ -1292,6 +1338,46 @@ def render_builder_page(deck_id: str | None = None) -> str:
     </div>
   </div>
 </div>
+
+<div class="modal-overlay" id="ai-modal">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3>&#10024; Build with AI</h3>
+      <button type="button" class="modal-close" id="ai-modal-close" aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="error" id="ai-modal-error" style="display:none;"></div>
+
+      <div id="ai-setup-phase">
+        <p class="hint" style="margin:0 0 10px;">Claude reads your commander's actual card text and searches your owned collection for whatever it decides is relevant -- not limited to Suggest's fixed tag list. This calls the Anthropic API using your own key, which needs its own billing set up and costs a small amount per build (typically well under a dollar).</p>
+        <ol style="margin:0 0 12px;padding-left:20px;font-size:0.85rem;">
+          <li>Go to <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com/settings/keys</a> and sign in (or create an account).</li>
+          <li>Add billing under Settings &rarr; Billing if you haven't already.</li>
+          <li>Click "Create Key", give it any name, then copy the key it shows you.</li>
+          <li>Paste it below. It's saved locally on your machine only -- never sent anywhere but Anthropic, and never included if you share this app's code.</li>
+        </ol>
+        <input type="password" id="ai-key-input" placeholder="sk-ant-..." autocomplete="off" style="width:100%;box-sizing:border-box;margin-bottom:8px;">
+        <button type="button" class="btn" id="ai-key-save-btn">Save Key</button>
+        <span class="hint" id="ai-key-status" style="margin-left:8px;"></span>
+      </div>
+
+      <div id="ai-confirm-phase" style="display:none;">
+        <p class="hint" style="margin:0 0 8px;" id="ai-key-configured-note"></p>
+        <label for="ai-notes-input" style="font-size:0.85rem;font-weight:600;">Anything specific you want this deck to do? (optional)</label>
+        <textarea id="ai-notes-input" rows="3" placeholder="e.g. lean into graveyard recursion, keep it low to the ground, prioritize card draw" style="width:100%;box-sizing:border-box;margin:6px 0 10px;font-family:inherit;"></textarea>
+        <p class="hint" style="margin:0 0 12px;">This can take several minutes (up to 7) and makes many real API calls on your account. The result won't be applied until you review and approve it.</p>
+        <button type="button" class="btn" id="ai-start-btn">Start Build</button>
+        <button type="button" class="btn ghost small" id="ai-change-key-btn">Change / Remove Key</button>
+      </div>
+
+      <div id="ai-progress-phase" style="display:none;">
+        <p class="hint" id="ai-progress-count" style="margin:0 0 8px;"></p>
+        <div id="ai-log" style="max-height:320px;overflow-y:auto;font-size:0.82rem;font-family:monospace;background:var(--bg);border:1px solid var(--card-border);border-radius:8px;padding:10px;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div id="battle-card"></div>
 <div id="replace-popup" class="replace-popup"></div>
 <script>
@@ -2191,6 +2277,179 @@ optimizeBtn.addEventListener('click', () => {{
     .finally(() => {{ optimizeBtn.disabled = false; }});
 }});
 
+// Unlike every other "reason" string in this page (all template-generated
+// from a bounded set of phrases), AI-build log lines/reasons/summary are
+// genuinely free-form model output -- escape before any innerHTML use.
+function escapeHtml(s) {{
+  const div = document.createElement('div');
+  div.textContent = s == null ? '' : String(s);
+  return div.innerHTML;
+}}
+
+const aiModal = document.getElementById('ai-modal');
+const aiModalError = document.getElementById('ai-modal-error');
+const aiSetupPhase = document.getElementById('ai-setup-phase');
+const aiConfirmPhase = document.getElementById('ai-confirm-phase');
+const aiProgressPhase = document.getElementById('ai-progress-phase');
+const aiKeyInput = document.getElementById('ai-key-input');
+const aiKeyStatus = document.getElementById('ai-key-status');
+const aiKeyConfiguredNote = document.getElementById('ai-key-configured-note');
+
+function closeAiModal() {{ aiModal.classList.remove('show'); }}
+document.getElementById('ai-modal-close').addEventListener('click', closeAiModal);
+aiModal.addEventListener('click', (e) => {{ if (e.target === aiModal) closeAiModal(); }});
+document.addEventListener('keydown', (e) => {{ if (e.key === 'Escape' && aiModal.classList.contains('show')) closeAiModal(); }});
+
+function showAiError(msg) {{ aiModalError.textContent = msg; aiModalError.style.display = 'block'; }}
+function hideAiError() {{ aiModalError.style.display = 'none'; }}
+function showAiPhase(phase) {{
+  aiSetupPhase.style.display = phase === 'setup' ? 'block' : 'none';
+  aiConfirmPhase.style.display = phase === 'confirm' ? 'block' : 'none';
+  aiProgressPhase.style.display = phase === 'progress' ? 'block' : 'none';
+}}
+
+document.getElementById('ai-build-btn').addEventListener('click', () => {{
+  if (brew.format === 'commander' && !brew.commander) {{ showError('Choose a commander first.'); return; }}
+  hideAiError();
+  aiKeyInput.value = '';
+  aiKeyStatus.textContent = '';
+  aiModal.classList.add('show');
+  fetch('/ai/status')
+    .then(r => r.json())
+    .then(data => {{
+      if (data.configured) {{
+        aiKeyConfiguredNote.textContent = data.source === 'env'
+          ? 'Using the ANTHROPIC_API_KEY environment variable.' : 'Using your saved API key.';
+        showAiPhase('confirm');
+      }} else {{
+        showAiPhase('setup');
+      }}
+    }})
+    .catch(() => showAiError('Could not reach the server.'));
+}});
+
+document.getElementById('ai-key-save-btn').addEventListener('click', () => {{
+  const key = aiKeyInput.value.trim();
+  if (!key) {{ aiKeyStatus.textContent = 'Paste a key first.'; return; }}
+  aiKeyStatus.textContent = 'Checking…';
+  fetch('/ai/key', {{
+    method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
+    body: JSON.stringify({{ api_key: key }}),
+  }})
+    .then(r => r.json())
+    .then(data => {{
+      if (data.error) {{ aiKeyStatus.textContent = data.error; return; }}
+      aiKeyInput.value = '';
+      aiKeyConfiguredNote.textContent = 'Using your saved API key.';
+      showAiPhase('confirm');
+    }})
+    .catch(() => {{ aiKeyStatus.textContent = 'Could not reach the server.'; }});
+}});
+
+document.getElementById('ai-change-key-btn').addEventListener('click', () => {{
+  if (!confirm('Remove the saved API key? You can enter a new one right after.')) return;
+  fetch('/ai/key/clear', {{ method: 'POST' }})
+    .then(() => {{ aiKeyInput.value = ''; aiKeyStatus.textContent = ''; showAiPhase('setup'); }})
+    .catch(() => showAiError('Could not reach the server.'));
+}});
+
+let aiPollTimer = null;
+document.getElementById('ai-start-btn').addEventListener('click', () => {{
+  hideAiError();
+  showAiPhase('progress');
+  document.getElementById('ai-log').innerHTML = '';
+  document.getElementById('ai-progress-count').textContent = 'Starting…';
+  fetch('/builder/ai-build/start', {{
+    method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
+    body: JSON.stringify({{
+      cards: brew.cards, commander: brew.commander, format: brew.format, target_format: brew.target_format,
+      intended_bracket: brew.intended_bracket, user_notes: document.getElementById('ai-notes-input').value,
+    }}),
+  }})
+    .then(r => r.json())
+    .then(data => {{
+      if (data.error) {{ showAiError(data.error); showAiPhase('confirm'); return; }}
+      pollAiBuild(data.job_id);
+    }})
+    .catch(() => {{ showAiError('Could not reach the server.'); showAiPhase('confirm'); }});
+}});
+
+function pollAiBuild(jobId) {{
+  clearTimeout(aiPollTimer);
+  fetch('/builder/ai-build/progress/' + jobId)
+    .then(r => r.json())
+    .then(data => {{
+      if (data.status === 'not_found') {{ showAiError('That build expired.'); showAiPhase('confirm'); return; }}
+      const logEl = document.getElementById('ai-log');
+      logEl.innerHTML = (data.log || []).map(l => `<div>${{escapeHtml(l)}}</div>`).join('');
+      logEl.scrollTop = logEl.scrollHeight;
+      const deckCount = (data.deck_state || []).filter(c => c.section !== 'commander').reduce((s, c) => s + c.quantity, 0);
+      document.getElementById('ai-progress-count').textContent = `${{deckCount}} card(s) so far — step ${{data.done}}/${{data.total}}`;
+      if (data.status === 'done' || data.status === 'error') {{ fetchAiResult(jobId); return; }}
+      aiPollTimer = setTimeout(() => pollAiBuild(jobId), 1500);
+    }})
+    .catch(() => {{ aiPollTimer = setTimeout(() => pollAiBuild(jobId), 1500); }});
+}}
+
+function fetchAiResult(jobId) {{
+  fetch('/builder/ai-build/result/' + jobId)
+    .then(r => r.json())
+    .then(data => {{
+      if (data.error) {{ showAiError(data.error); showAiPhase('confirm'); return; }}
+      closeAiModal();
+      renderAiSuggestions(data);
+    }})
+    .catch(() => {{ showAiError('Could not reach the server.'); showAiPhase('confirm'); }});
+}}
+
+function renderAiSuggestions(data) {{
+  const panel = document.getElementById('suggestions-panel');
+  panel.innerHTML = '<h4 style="font-size:0.8rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.03em;">&#10024; AI-Built Deck</h4>';
+  if (data.summary) {{
+    panel.innerHTML += `<p class="hint" style="margin:0 0 8px;">${{escapeHtml(data.summary)}}</p>`;
+  }}
+  if (!data.finished) {{
+    panel.innerHTML += '<p class="hint" style="margin:0 0 8px;color:var(--missing);">Claude hit the time/turn limit before calling finish -- this list may be short of a full deck.</p>';
+  }}
+  if (!data.suggestions.length) {{
+    panel.innerHTML += '<div class="hint" style="margin:0;">Claude didn’t add anything -- try again, or add a note about what you want.</div>';
+    return;
+  }}
+  let remaining = data.suggestions.slice();
+  const addAllBtn = Object.assign(document.createElement('button'), {{
+    className: 'btn ghost small', style: 'margin-bottom:8px;margin-right:8px;',
+    onclick: () => {{ remaining.forEach(addCard); panel.innerHTML = ''; }},
+  }});
+  const dismissAllBtn = Object.assign(document.createElement('button'), {{
+    className: 'btn ghost small', textContent: 'Dismiss All', style: 'margin-bottom:8px;',
+    onclick: () => {{ panel.innerHTML = ''; }},
+  }});
+  function refreshAddAllBtn() {{
+    addAllBtn.textContent = `+ Add All (${{remaining.length}})`;
+    addAllBtn.style.display = remaining.length ? '' : 'none';
+    dismissAllBtn.style.display = remaining.length ? '' : 'none';
+  }}
+  refreshAddAllBtn();
+  panel.append(addAllBtn, dismissAllBtn);
+  data.suggestions.forEach(s => {{
+    const row = document.createElement('div');
+    row.className = 'suggestion-row';
+    row.dataset.full = scryfallImg(s.scryfall_id, 'normal') || '';
+    row.innerHTML = `<span class="row-name">${{thumbHtml(s.scryfall_id, 'card-thumb small')}}<span>${{escapeHtml(s.name)}} ${{colorIconsHtml(s.color_identity)}}<div class="reason">${{escapeHtml(s.reason)}}</div></span></span>`;
+    const addBtn = Object.assign(document.createElement('button'), {{
+      className: 'btn ghost small', textContent: '+ Add',
+      onclick: () => {{
+        addCard(s);
+        row.remove();
+        remaining = remaining.filter(x => x !== s);
+        refreshAddAllBtn();
+      }},
+    }});
+    row.appendChild(addBtn);
+    panel.appendChild(row);
+  }});
+}}
+
 // Confirmed live against Moxfield's and Archidekt's own decklist-import
 // UI: both accept plain "qty Name" lines, and both accept an optional
 // "(SET) CollectorNumber" suffix to pin the exact printing rather than
@@ -2707,6 +2966,116 @@ def builder_optimize():
         excluded_set_codes=_excluded_set_codes(body),
     )
     return jsonify(proposals=proposals)
+
+
+@app.route("/ai/status", methods=["GET"])
+def ai_status():
+    """Whether an Anthropic API key is configured, and where it came
+    from -- never the key itself. env always wins over a locally-saved
+    file (see ai_builder.load_api_key)."""
+    source = key_source()
+    return jsonify(configured=source is not None, source=source)
+
+
+@app.route("/ai/key", methods=["POST"])
+def ai_key_save():
+    body = request.get_json(silent=True) or {}
+    api_key = (body.get("api_key") or "").strip()
+    if not api_key:
+        return jsonify(error="Paste your Anthropic API key first."), 400
+    validation_error = validate_api_key(api_key)
+    if validation_error:
+        return jsonify(error=validation_error), 400
+    save_api_key(api_key)
+    return jsonify(ok=True)
+
+
+@app.route("/ai/key/clear", methods=["POST"])
+def ai_key_clear():
+    clear_api_key()
+    return jsonify(ok=True)
+
+
+@app.route("/builder/ai-build/start", methods=["POST"])
+def builder_ai_build_start():
+    """Kicks off the agentic "Build with AI" loop (see ai_builder.py) in a
+    background thread -- same JOBS/threading/poll shape /compare/start
+    already established, since a multi-round-trip Claude tool-use build
+    genuinely takes a while and shouldn't block one long request."""
+    body = request.get_json(silent=True) or {}
+    deck_format = body.get("format") if body.get("format") in ("commander", "constructed") else "commander"
+    commander = body.get("commander") or {}
+    if deck_format == "commander" and not commander.get("name"):
+        return jsonify(error="Choose a commander first."), 400
+    api_key = load_api_key()
+    if not api_key:
+        return jsonify(error="No Anthropic API key configured yet."), 400
+    if not os.path.isfile(COLLECTION_PATH):
+        return jsonify(error="No ManaBox collection on file yet -- upload one from the home page first."), 400
+    try:
+        owned = load_collection(COLLECTION_PATH)
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+    owned_view = owned_collection_gameplay_view(owned, gameplay_data_in_index())
+    # The commander's own oracle text is what ai_builder actually reasons
+    # over (see its system prompt) -- look it up fresh from the gameplay
+    # index rather than trusting whatever the client happened to have
+    # cached, since that's the one payload this whole feature depends on.
+    gp = gameplay_data_in_index().get(normalize_name(commander["name"])) if commander.get("name") else {}
+    commander_full = {**commander, "oracle_text": (gp or {}).get("oracle_text", "")}
+    target_size = 100 if deck_format == "commander" else 60
+
+    job_id = uuid.uuid4().hex
+    with _JOBS_LOCK:
+        JOBS[job_id] = {
+            "status": "running", "done": 0, "total": 0, "stage": None,
+            "log": [], "deck_state": [], "suggestions": None, "finished": False, "summary": "", "error": None,
+        }
+
+    threading.Thread(
+        target=_run_ai_build_job,
+        args=(
+            job_id, commander_full, deck_format, body.get("target_format"), target_size,
+            commander.get("color_identity") if deck_format == "commander" else None,
+            body.get("intended_bracket") or None, (body.get("user_notes") or "").strip(),
+            owned_view, api_key,
+        ),
+        daemon=True,
+    ).start()
+
+    return jsonify(job_id=job_id)
+
+
+@app.route("/builder/ai-build/progress/<job_id>", methods=["GET"])
+def builder_ai_build_progress(job_id):
+    """Separate from /compare/progress on purpose -- that route's response
+    shape is depended on by the compare/report flows, and this job tracks
+    more (a running tool-call log + live deck state) than a plain
+    done/total counter."""
+    with _JOBS_LOCK:
+        job = JOBS.get(job_id)
+        if not job:
+            return jsonify(status="not_found"), 404
+        status, done, total, error = job["status"], job["done"], job["total"], job["error"]
+        stage, log, deck_state = job.get("stage"), job.get("log") or [], job.get("deck_state") or []
+    return jsonify(status=status, done=done, total=total, stage=stage, log=log, deck_state=deck_state, error=error)
+
+
+@app.route("/builder/ai-build/result/<job_id>", methods=["GET"])
+def builder_ai_build_result(job_id):
+    """Single-use, same convention as /compare/result -- deleted from JOBS
+    once fetched, whether it finished or errored."""
+    with _JOBS_LOCK:
+        job = JOBS.get(job_id)
+        if job and job["status"] in ("done", "error"):
+            del JOBS[job_id]
+    if not job:
+        return jsonify(error="That build has expired or wasn't found -- try again."), 404
+    if job["status"] == "error":
+        return jsonify(error=job.get("error") or "The AI build failed."), 400
+    if job["status"] != "done":
+        return jsonify(error="That build hasn't finished yet."), 409
+    return jsonify(suggestions=job["suggestions"], finished=job["finished"], summary=job["summary"])
 
 
 @app.route("/builder/themes", methods=["POST"])

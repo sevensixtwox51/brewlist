@@ -1,6 +1,9 @@
 # Web app (app.py)
 flask
 
+# "Build with AI" (ai_builder.py) -- optional, only needed if you use it
+anthropic
+
 # CLI (brewlist_cli.py) -- optional if you only use the web app
 rich
 pyfiglet

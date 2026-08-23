@@ -145,6 +145,25 @@ page).
   replacements filling the same role (same Lands/Ramp/Draw/Interaction/
   Synergy slot, ranked by shared Oracle Tag then Game Changers) — pick one
   to swap it in for the original in a single click
+- **Optimize Deck** is a second pass for a deck that's already built:
+  it re-checks Commander Spellbook for real, owned, one-card-away combos
+  and proposes concrete swaps (add the missing piece, cut a safe filler
+  in the same role, never a Game Changer or another combo's own card) —
+  catches combos Suggest can miss in a single big batch, or once the
+  deck's already full and Suggest has nothing left to fill
+- **✨ Build with AI** hands Claude real tools over your owned collection
+  (search by name/type/oracle text, add/remove cards, check combos) and
+  lets it build a deck across multiple turns by actually reading your
+  commander's card text — not limited to Suggest's fixed Oracle Tag
+  vocabulary, so it can catch a synergy no tag captures (e.g. a commander
+  whose power is tied to a specific creature type sitting in the
+  graveyard). Optional and off by default: uses your own Anthropic API
+  key (entered once, saved locally, never committed — see
+  [.gitignore](.gitignore)), costs a small amount per build on your own
+  account, and nothing is applied until you review and approve the
+  result, same as Suggest/Optimize. **Unlike everything else in this
+  app, this feature's output genuinely is AI-generated** — see
+  [AI disclosure](#ai-disclosure) below
 - An optional **Intended bracket** (1-2 / 3 / 4+) keeps Suggest from
   recommending more Game Changers than WotC's own published bracket rules
   allow for that bracket; leave it on "No preference" to build freely — the
@@ -363,12 +382,16 @@ python3 brewlist_cli.py --help
 ## Where your data lives
 
 Everything the app remembers — your uploaded collection, any saved
-per-deck overrides, your store-pricing preference, and the local card
-database (see above) — is stored locally under `data/`, which is excluded
-from version control
+per-deck overrides, your store-pricing preference, the local card
+database (see above), and (if you set one up) your Anthropic API key —
+is stored locally under `data/`, which is excluded from version control
 (`.gitignore`). Nothing leaves your machine except the calls to Moxfield's,
 Archidekt's, Scryfall's, MTGJSON's, and (for Commander decks) Commander
-Spellbook's public APIs needed to fetch decklists, prices, and combos.
+Spellbook's public APIs needed to fetch decklists, prices, and combos —
+**with one opt-in exception**: using **Build with AI** sends your
+commander's card text and the relevant slice of your owned collection to
+Anthropic's API, since that's how the feature works. It's off unless you
+explicitly set up a key and click the button.
 
 ## Uninstalling
 
@@ -403,7 +426,8 @@ appreciated!
 | File | Purpose |
 | --- | --- |
 | `brewlist_core.py` | Shared logic: Moxfield/Archidekt/Scryfall/MTGJSON fetching, ManaBox parsing, price comparison, HTML report rendering. No UI dependencies — imported by both entry points below. |
-| `deck_builder.py` | Deck Builder logic: owned-collection browsing data, the fill-the-gaps Suggest heuristic, brew-to-report conversion. No UI dependencies — imported by `app.py` only (the Deck Builder is web-app only). |
+| `deck_builder.py` | Deck Builder logic: owned-collection browsing data, the fill-the-gaps Suggest heuristic, the Optimize combo-completion pass, brew-to-report conversion. No UI dependencies — imported by `app.py` only (the Deck Builder is web-app only). |
+| `ai_builder.py` | Build with AI: the agentic Claude tool-use loop, plus local Anthropic API key storage. Optional — only used if you set up a key. No UI dependencies — imported by `app.py` only. |
 | `app.py` | Flask web app, including the Deck Builder (`/builder`). |
 | `brewlist_cli.py` | Terminal CLI (interactive menu or scriptable flags). |
 | `Brewlist.command` | macOS double-click launcher for the web app. |
@@ -414,6 +438,15 @@ appreciated!
 
 This project is built almost entirely by AI (Claude Code) — see
 [AI-DECLARATION.md](AI-DECLARATION.md) for what that means in practice.
+That's about the *code*, though — every feature the app itself runs
+(pricing, legality, budget alternatives, Suggest, Optimize) is a
+deterministic heuristic over real data (Scryfall Oracle Tags, MTGJSON,
+Commander Spellbook), explicitly *not* an AI guess, with one deliberate
+exception: **Build with AI** (see [Deck Builder](#deck-builder) above)
+is opt-in, off by default, and its output is genuinely AI-generated —
+Claude reads your commander's card text and searches your collection
+itself, rather than matching a fixed tag list. It's labeled as such in
+the app and never applies anything without your review.
 
 <p align="center">
   <a href="AI-DECLARATION.md"><img src="https://img.shields.io/badge/%E4%B7%BC%20AI--DECLARATION-auto-ede9fe?labelColor=ede9fe" alt="AI-DECLARATION: auto" height="28"></a>
