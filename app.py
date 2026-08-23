@@ -58,7 +58,7 @@ from deck_builder import (
     suggest_builder_cards,
     suggest_replacements,
 )
-from ai_builder import clear_api_key, key_source, run_ai_build, save_api_key, validate_api_key
+from ai_builder import clear_api_key, key_source, load_api_key, run_ai_build, save_api_key, validate_api_key
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(APP_DIR, "data")
@@ -2384,7 +2384,7 @@ function pollAiBuild(jobId) {{
       logEl.innerHTML = (data.log || []).map(l => `<div>${{escapeHtml(l)}}</div>`).join('');
       logEl.scrollTop = logEl.scrollHeight;
       const deckCount = (data.deck_state || []).filter(c => c.section !== 'commander').reduce((s, c) => s + c.quantity, 0);
-      document.getElementById('ai-progress-count').textContent = `${{deckCount}} card(s) so far — step ${{data.done}}/${{data.total}}`;
+      document.getElementById('ai-progress-count').textContent = `${{deckCount}} card(s) so far — turn ${{data.done}}/${{data.total}}`;
       if (data.status === 'done' || data.status === 'error') {{ fetchAiResult(jobId); return; }}
       aiPollTimer = setTimeout(() => pollAiBuild(jobId), 1500);
     }})

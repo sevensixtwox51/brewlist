@@ -204,10 +204,18 @@ def run_ai_build(
     added_by_name: dict[str, dict] = {}
     log: list[str] = []
     client = anthropic.Anthropic(api_key=api_key)
+    # emit() can log several tool calls within one API turn (Claude often
+    # batches multiple tool_use blocks in a single response) -- done/total
+    # need to reflect actual API turns against _MAX_TURNS, not len(log)
+    # tool-call entries, or the count can run past the stated total and
+    # look broken (e.g. "step 87/60") even though nothing is actually
+    # wrong. turn_ref is a mutable holder so the for-loop below can update
+    # it and this closure can read the current value.
+    turn_ref = {"value": 0}
 
     def emit(stage: str):
         log.append(stage)
-        on_progress(len(log), _MAX_TURNS, stage, log, _deck_state_view(wip_entries))
+        on_progress(turn_ref["value"], _MAX_TURNS, stage, log, _deck_state_view(wip_entries))
 
     def _deck_state_view(entries: list[CardEntry]) -> list[dict]:
         return [{"name": e.name, "quantity": e.quantity, "section": e.section, "category": categorize(e.type_line)} for e in entries]
@@ -315,6 +323,7 @@ def run_ai_build(
     emit(f"Reading {commander['name']}'s card text...")
 
     for turn in range(_MAX_TURNS):
+        turn_ref["value"] = turn + 1
         if time.monotonic() - start > _MAX_SECONDS:
             emit("Time limit reached -- stopping with whatever's been built so far.")
             break
