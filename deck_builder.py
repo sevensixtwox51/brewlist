@@ -397,6 +397,20 @@ def suggest_builder_cards(
     if not candidates:
         return []
     game_changers = game_changers_in_index() if deck_format == "commander" else set()
+    # _filter_candidates already excludes every Game Changer once the WIP
+    # deck is AT its cap *before* this call -- but that's a one-time gate,
+    # not a running count, so it doesn't stop a single large batch (Suggest
+    # now returns up to the whole remaining deck in one click) from adding
+    # several Game Changers in a row before anything rechecks: rank_key
+    # below actively sorts them toward the front of their role's pool as a
+    # power tiebreak, so a deck that starts under the cap can end several
+    # over it by the time one batch finishes. running_gc_count, updated as
+    # candidates are actually chosen in the round-robin near the bottom of
+    # this function, closes that gap.
+    gc_cap = _INTENDED_BRACKET_GC_CAP.get(intended_bracket or "")
+    running_gc_count = 0
+    if deck_format == "commander" and gc_cap is not None:
+        running_gc_count = sum(e.quantity for e in wip_entries if normalize_name(e.name) in game_changers)
 
     reason_by_name: dict[str, str] = {}
     if deck_format == "commander" and wip_entries:
@@ -569,20 +583,37 @@ def suggest_builder_cards(
 
     # Round-robin across roles rather than role-by-role so even a short
     # list reads as a mix, not a wall of one role followed by another.
+    # indices[role] walks the role's whole sorted pool (not just its
+    # role_slots[role] budget) so a Game-Changer candidate blocked by the
+    # running cap check below can be skipped in favor of the next
+    # candidate in that same pool, instead of just shrinking the role's
+    # contribution -- added_counts[role] (bounded by role_slots[role]) is
+    # what actually limits how many get taken from each role.
     ordered: list[dict] = []
     indices = {role: 0 for role in role_slots}
+    added_counts = {role: 0 for role in role_slots}
     active_roles = [r for r in role_slots if role_slots[r] > 0]
     while len(ordered) < max_suggestions and active_roles:
         for role in list(active_roles):
             if len(ordered) >= max_suggestions:
                 break
-            i = indices[role]
             pool = role_candidates.get(role) or []
-            if i >= role_slots[role] or i >= len(pool):
+            picked = None
+            while added_counts[role] < role_slots[role] and indices[role] < len(pool):
+                candidate = pool[indices[role]]
+                indices[role] += 1
+                is_gc = normalize_name(candidate["name"]) in game_changers
+                if gc_cap is not None and is_gc and running_gc_count >= gc_cap:
+                    continue  # over the intended bracket's cap -- try this role's next candidate instead
+                picked = candidate
+                break
+            if picked is None:
                 active_roles.remove(role)
                 continue
-            ordered.append(pool[i])
-            indices[role] = i + 1
+            ordered.append(picked)
+            added_counts[role] += 1
+            if normalize_name(picked["name"]) in game_changers:
+                running_gc_count += 1
 
     suggestions = []
     for c in ordered:

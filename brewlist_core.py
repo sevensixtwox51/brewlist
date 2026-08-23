@@ -1056,6 +1056,17 @@ def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[
         with gzip.open(printings_tmp, "rt", encoding="utf-8") as f:
             all_printings = (json.load(f) or {}).get("data") or {}
 
+        # json.load() above (gzip decompression + full JSON parse of both
+        # files) is a single blocking call with no way to report progress
+        # through it -- but the per-card loop just below is the bulk of
+        # "processing"'s actual wall-clock time (100k+ cards, real per-card
+        # work), and *is* instrumentable: count the total up front (cheap,
+        # all_printings is already fully in memory) and report every 2000
+        # cards, so "Processing downloaded card data..." isn't a silent
+        # multi-second black box.
+        total_cards = sum(len(set_obj.get("cards", [])) for set_obj in all_printings.values())
+        cards_seen = 0
+
         working: dict[str, dict] = {}
         # Cards on WotC's official Commander "Game Changers" list, by name --
         # tracked unconditionally for every paper card (not just ones with
@@ -1118,6 +1129,9 @@ def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[
                 "release_date": set_obj.get("releaseDate") or "",
             }
             for card in set_obj.get("cards", []):
+                cards_seen += 1
+                if on_progress and cards_seen % 2000 == 0:
+                    on_progress(cards_seen, total_cards, "processing")
                 if "paper" not in (card.get("availability") or []):
                     continue
 
@@ -1232,6 +1246,9 @@ def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[
             if os.path.exists(p):
                 os.remove(p)
 
+    if on_progress:
+        on_progress(total_cards, total_cards, "processing")
+
     def _trends(current_by_store: dict) -> dict[str, float] | None:
         trend = {}
         for label, (p, _u, ref) in current_by_store.items():
@@ -1263,7 +1280,14 @@ def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[
         if on_progress:
             on_progress(0, 0, "tags")
         try:
-            _download_to_file(tags_url, tags_tmp, None, 0, 0)
+            # Real byte progress for this download too (previously passed
+            # None -- silent) -- wrapped so it keeps reporting stage="tags"
+            # explicitly rather than falling back to on_progress's own
+            # stage=None default on every tick, which would otherwise read
+            # to the client as "back to the main download" mid-tags-fetch.
+            tags_size = _content_length(tags_url)
+            tags_on_progress = (lambda done, total: on_progress(done, total, "tags")) if on_progress else None
+            _download_to_file(tags_url, tags_tmp, tags_on_progress, 0, tags_size)
             budget_alt_groups = _compute_budget_alt_groups(
                 oracle_id_by_name, display_name_by_name, is_land_by_name, scryfall_id_by_name, tags_tmp
             )

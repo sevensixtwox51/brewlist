@@ -501,9 +501,13 @@ function pollIndexRefresh(jobId) {{
     .then(data => {{
       if (data.status === 'running') {{
         if (data.stage === 'processing') {{
-          refreshIndexLabel.textContent = 'Processing downloaded card data\\u2026';
+          refreshIndexLabel.textContent = data.total > 0
+            ? 'Processing downloaded card data\\u2026 (' + data.done.toLocaleString() + ' / ' + data.total.toLocaleString() + ' cards)'
+            : 'Processing downloaded card data\\u2026';
         }} else if (data.stage === 'tags') {{
-          refreshIndexLabel.textContent = 'Finding budget-alternative tags\\u2026';
+          refreshIndexLabel.textContent = data.total > 0
+            ? 'Finding budget-alternative tags\\u2026 (' + fmtIndexProgress(data.done, data.total) + ')'
+            : 'Finding budget-alternative tags\\u2026';
         }} else {{
           refreshIndexLabel.textContent = data.total > 0
             ? 'Downloading\\u2026 (' + fmtIndexProgress(data.done, data.total) + ')'
@@ -664,6 +668,13 @@ def render_decks_page(error: str | None = None, prefill_url: str = "") -> str:
   {footer_html}
 </main>
 <script>
+function fmtIndexProgress(done, total) {{
+  if (total > 100000) {{
+    return (done / 1048576).toFixed(1) + ' / ' + (total / 1048576).toFixed(1) + ' MB';
+  }}
+  return done + '/' + total;
+}}
+
 const form = document.getElementById('compare-form');
 const submitBtn = document.getElementById('submit-btn');
 const progressWrap = document.getElementById('progress-wrap');
@@ -724,11 +735,21 @@ function pollProgress(jobId) {{
           progressFill.style.width = '100%';
           progressLabel.textContent = 'Checking combos & bracket rating (Commander Spellbook)\\u2026';
         }} else if (data.stage === 'processing') {{
-          progressFill.style.width = '100%';
-          progressLabel.textContent = 'Processing downloaded card data\\u2026';
+          if (data.total > 0) {{
+            progressFill.style.width = Math.round((data.done / data.total) * 100) + '%';
+            progressLabel.textContent = 'Processing downloaded card data\\u2026 (' + data.done.toLocaleString() + ' / ' + data.total.toLocaleString() + ' cards)';
+          }} else {{
+            progressFill.style.width = '100%';
+            progressLabel.textContent = 'Processing downloaded card data\\u2026';
+          }}
         }} else if (data.stage === 'tags') {{
-          progressFill.style.width = '100%';
-          progressLabel.textContent = 'Finding budget-alternative tags\\u2026';
+          if (data.total > 0) {{
+            progressFill.style.width = Math.round((data.done / data.total) * 100) + '%';
+            progressLabel.textContent = 'Finding budget-alternative tags\\u2026 (' + fmtIndexProgress(data.done, data.total) + ')';
+          }} else {{
+            progressFill.style.width = '100%';
+            progressLabel.textContent = 'Finding budget-alternative tags\\u2026';
+          }}
         }} else if (data.total > 0) {{
           const pct = Math.round((data.done / data.total) * 100);
           progressFill.style.width = pct + '%';
