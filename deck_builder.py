@@ -117,6 +117,33 @@ def owned_collection_gameplay_view(owned: dict[str, OwnedCard], gameplay: dict[s
     return view
 
 
+def owned_set_options(owned: dict[str, OwnedCard], sets_data: dict[str, dict]) -> list[dict]:
+    """Every set code appearing in the owned collection (from each
+    OwnedPrinting.set_code -- the same single representative printing per
+    card owned_collection_gameplay_view uses, so this lines up with what
+    the Set Selection filter actually restricts), labeled via
+    sets_data_in_index and sorted chronologically by release date (oldest
+    first) -- the pool the builder's Set Selection filter offers,
+    defaulting to all-on. A code with no match in sets_data (a stale
+    pre-this-field index, or an unrecognized code) still shows up, using
+    the raw code as its own name and sorting last (empty release date)."""
+    codes: set[str] = set()
+    for card in owned.values():
+        for p in card.printings:
+            if p.set_code:
+                codes.add(p.set_code.upper())
+    options = []
+    for code in codes:
+        info = sets_data.get(code) or {}
+        options.append({
+            "set_code": code,
+            "set_name": info.get("name") or code,
+            "release_date": info.get("release_date") or "",
+        })
+    options.sort(key=lambda o: (o["release_date"] or "9999-99-99", o["set_name"]))
+    return options
+
+
 def brew_to_card_entries(brew: dict) -> list[CardEntry]:
     """Converts a saved brew ({"format", "commander", "cards": [{"name",
     "quantity", "scryfall_id", "type_line", "color_identity"}, ...]}) into
@@ -148,12 +175,18 @@ def _filter_candidates(
     target_format: str | None,
     commander_color_identity: list[str] | None,
     intended_bracket: str | None,
+    excluded_set_codes: set[str] | None = None,
 ) -> list[dict]:
     """Owned cards that are legal, color-correct, and not already in the
     WIP deck -- the same filtering suggest_builder_cards has always done,
-    pulled out so list_theme_options can compute "how many owned cards
-    would this theme actually add" without duplicating the legality/
-    color-identity/Game-Changer-cap rules."""
+    pulled out so list_theme_options/suggest_replacements can compute
+    their own candidate pools without duplicating the legality/color-
+    identity/Game-Changer-cap/Set-Selection rules.
+
+    `excluded_set_codes`, if given, drops any candidate whose (single,
+    representative -- see owned_collection_gameplay_view) owned printing
+    is from one of those sets. Empty/None means no restriction, matching
+    the Set Selection filter's "everything on by default" behavior."""
     used_names = {normalize_name(e.name) for e in wip_entries}
     legality_key = "commander" if deck_format == "commander" else (target_format or "")
     colors_allowed = set(commander_color_identity) if deck_format == "commander" and commander_color_identity is not None else None
@@ -173,6 +206,8 @@ def _filter_candidates(
     candidates = []
     for c in owned_view:
         if normalize_name(c["name"]) in used_names:
+            continue
+        if excluded_set_codes and (c.get("set_code") or "").upper() in excluded_set_codes:
             continue
         if gc_at_cap and normalize_name(c["name"]) in game_changers:
             continue
@@ -207,6 +242,7 @@ def list_theme_options(
     deck_format: str,
     target_format: str | None,
     commander_color_identity: list[str] | None,
+    excluded_set_codes: set[str] | None = None,
 ) -> list[dict]:
     """Every Oracle Tags theme (see budget_alt_data_in_index -- the same
     community-curated tags used for budget-alternative suggestions and
@@ -215,7 +251,7 @@ def list_theme_options(
     "Preferred theme" picker offers, so every option is guaranteed to
     actually add something if chosen. {"tag_id", "label", "count"},
     sorted by how many owned cards carry it, most first."""
-    candidates = _filter_candidates(wip_entries, owned_view, deck_format, target_format, commander_color_identity, None)
+    candidates = _filter_candidates(wip_entries, owned_view, deck_format, target_format, commander_color_identity, None, excluded_set_codes)
     budget_alt = budget_alt_data_in_index()
     tag_by_name = budget_alt.get("tag_by_name") or {}
     tag_labels = budget_alt.get("tag_labels") or {}
@@ -241,6 +277,7 @@ def suggest_replacements(
     target_format: str | None,
     commander_color_identity: list[str] | None,
     limit: int = 6,
+    excluded_set_codes: set[str] | None = None,
 ) -> list[dict]:
     """Owned, legal, color-correct cards that could swap in for
     target_name -- restricted to the same role it fills (see _card_role:
@@ -253,7 +290,7 @@ def suggest_replacements(
     Commander Spellbook combo check suggest_builder_cards makes -- this
     runs from a quick per-card popup, not a full re-suggest, so it stays
     local/instant."""
-    candidates = _filter_candidates(wip_entries, owned_view, deck_format, target_format, commander_color_identity, None)
+    candidates = _filter_candidates(wip_entries, owned_view, deck_format, target_format, commander_color_identity, None, excluded_set_codes)
     if not candidates:
         return []
     budget_alt = budget_alt_data_in_index()
@@ -306,6 +343,7 @@ def suggest_builder_cards(
     mix_targets: dict[str, int] | None = None,
     intended_bracket: str | None = None,
     preferred_theme_tag_id: str | None = None,
+    excluded_set_codes: set[str] | None = None,
 ) -> list[dict]:
     """Fill-the-gaps auto-suggest: proposes owned, legal, color-correct
     cards to fill the remaining slots in a work-in-progress deck. This is
@@ -347,7 +385,7 @@ def suggest_builder_cards(
     # without this a deck can overshoot its target by a full batch).
     max_suggestions = min(max_suggestions, remaining)
 
-    candidates = _filter_candidates(wip_entries, owned_view, deck_format, target_format, commander_color_identity, intended_bracket)
+    candidates = _filter_candidates(wip_entries, owned_view, deck_format, target_format, commander_color_identity, intended_bracket, excluded_set_codes)
     if not candidates:
         return []
     game_changers = game_changers_in_index() if deck_format == "commander" else set()

@@ -46,12 +46,14 @@ from brewlist_core import (
     price_index_built_at,
     render_html,
     save_store_prefs,
+    sets_data_in_index,
     update_from_git,
 )
 from deck_builder import (
     brew_to_card_entries,
     list_theme_options,
     owned_collection_gameplay_view,
+    owned_set_options,
     suggest_builder_cards,
     suggest_replacements,
 )
@@ -865,6 +867,21 @@ body.compact .deck-row .card-thumb { display:none; }
   width:60px; padding:6px 8px; border-radius:6px; border:1px solid var(--card-border);
   background:var(--bg); color:var(--text); font-size:0.85rem; margin:0;
 }
+.set-selection-field { position:relative; }
+.set-selection-popup {
+  display:none; position:absolute; top:100%; left:0; margin-top:4px; width:280px; max-height:340px;
+  overflow-y:auto; background:var(--bg-elevated); border:1px solid var(--card-border); border-radius:8px;
+  box-shadow:var(--shadow); z-index:30; padding:8px;
+}
+.set-selection-popup.show { display:block; }
+.set-selection-list { display:flex; flex-direction:column; gap:2px; margin-bottom:8px; }
+.set-selection-list label { display:flex; align-items:center; gap:6px; font-size:0.82rem; padding:3px 4px; border-radius:4px; cursor:pointer; }
+.set-selection-list label:hover { background:var(--bg); }
+.set-selection-list input { margin:0; cursor:pointer; }
+.set-selection-quick { display:flex; gap:8px; margin-bottom:6px; }
+.set-selection-quick .btn { flex:1; }
+.set-selection-actions { display:flex; gap:8px; padding-top:6px; border-top:1px solid var(--card-border); }
+.set-selection-actions .btn { flex:1; }
 .bv-badge {
   display:inline-flex; align-items:center; gap:4px; padding:4px 10px; margin:0 6px 6px 0;
   border-radius:999px; background:var(--bg); border:1px solid var(--card-border);
@@ -986,6 +1003,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
         "intended_bracket": brew.get("intended_bracket") or "",
         "preferred_theme_tag_id": brew.get("preferred_theme_tag_id") or "",
         "preferred_theme_label": brew.get("preferred_theme_label") or "",
+        "excluded_set_codes": brew.get("excluded_set_codes") or [],
     }
 
     category_options = "".join(f'<option value="{_esc(b)}">{_esc(b)}</option>' for b in BUCKET_ORDER)
@@ -1080,6 +1098,10 @@ def render_builder_page(deck_id: str | None = None) -> str:
             <span class="hint" id="mix-synergy-readout" style="margin:0;"></span>
           </div>
         </details>
+        <div class="set-selection-field">
+          <button type="button" class="btn ghost small" id="set-selection-btn">Set Selection</button>
+          <div class="set-selection-popup" id="set-selection-popup"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -1104,6 +1126,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
       <div class="deck-stats" id="deck-stats"></div>
       <button type="button" class="btn ghost small" id="analyze-btn" style="margin-bottom:10px;">&#128269; Analyze Deck</button>
       <div id="commander-slot-wrap"></div>
+      <button type="button" class="btn danger small" id="clear-cards-btn" style="display:none;margin-bottom:6px;">Clear All Cards</button>
       <div id="deck-list"></div>
       <div id="suggestions-panel"></div>
     </div>
@@ -1342,6 +1365,14 @@ function removeCard(name) {{
   renderAll();
 }}
 
+document.getElementById('clear-cards-btn').addEventListener('click', () => {{
+  if (!brew.cards.length) return;
+  if (!confirm(`Remove all ${{brew.cards.length}} card(s) from this deck? Your commander is kept -- use its own Clear button to remove that separately.`)) return;
+  brew.cards = [];
+  renderAll();
+  loadThemeOptions();
+}});
+
 function adjustQty(name, delta) {{
   const c = findCard(name);
   if (!c) return;
@@ -1392,7 +1423,7 @@ function loadThemeOptions() {{
   const requestId = ++themeRequestId;
   fetch('/builder/themes', {{
     method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
-    body: JSON.stringify({{ format: brew.format, target_format: brew.target_format, commander: brew.commander, cards: brew.cards }}),
+    body: JSON.stringify({{ format: brew.format, target_format: brew.target_format, commander: brew.commander, cards: brew.cards, excluded_set_codes: brew.excluded_set_codes }}),
   }})
     .then(r => r.json())
     .then(data => {{
@@ -1456,6 +1487,78 @@ themeDropdown.addEventListener('mousedown', (e) => {{
   themeDropdown.classList.remove('show');
 }});
 themeInput.addEventListener('blur', () => {{ setTimeout(() => themeDropdown.classList.remove('show'), 150); }});
+
+// Set Selection: restricts which sets Suggest/Preferred-theme/Replace
+// pull owned candidates from (see excluded_set_codes threaded through
+// deck_builder.py's _filter_candidates). Loaded once at page init --
+// independent of the brew, so no re-fetch is needed as the deck changes
+// (unlike loadThemeOptions, which depends on the commander/colors).
+let allSetOptions = [];
+const setSelectionBtn = document.getElementById('set-selection-btn');
+const setSelectionPopup = document.getElementById('set-selection-popup');
+function refreshSetSelectionLabel() {{
+  const excluded = new Set(brew.excluded_set_codes || []);
+  const total = allSetOptions.length;
+  const includedCount = allSetOptions.filter(s => !excluded.has(s.set_code)).length;
+  setSelectionBtn.textContent = (total === 0 || includedCount === total) ? 'Set Selection' : `Set Selection (${{includedCount}}/${{total}})`;
+}}
+function loadSetOptions() {{
+  fetch('/builder/sets')
+    .then(r => r.json())
+    .then(data => {{
+      if (data.error) return;
+      allSetOptions = data.sets || [];
+      refreshSetSelectionLabel();
+    }})
+    .catch(() => {{}});
+}}
+loadSetOptions();
+
+function renderSetSelectionPopup() {{
+  const excluded = new Set(brew.excluded_set_codes || []);
+  const rows = allSetOptions.map(s => {{
+    const year = s.release_date ? s.release_date.slice(0, 4) : '?';
+    return `<label><input type="checkbox" value="${{s.set_code}}"${{excluded.has(s.set_code) ? '' : ' checked'}}> ${{s.set_name}} (${{year}})</label>`;
+  }}).join('');
+  setSelectionPopup.innerHTML = `
+    <div class="set-selection-quick">
+      <button type="button" class="btn ghost small" id="set-select-all-btn">Select All</button>
+      <button type="button" class="btn ghost small" id="set-clear-all-btn">Clear All</button>
+    </div>
+    <div class="set-selection-list">${{rows || '<div class="hint" style="margin:0;">No sets found in your collection.</div>'}}</div>
+    <div class="set-selection-actions">
+      <button type="button" class="btn ghost small" id="set-selection-cancel-btn">Cancel</button>
+      <button type="button" class="btn small" id="set-selection-ok-btn">OK</button>
+    </div>
+  `;
+  document.getElementById('set-select-all-btn').addEventListener('click', () => {{
+    setSelectionPopup.querySelectorAll('input[type=checkbox]').forEach(cb => {{ cb.checked = true; }});
+  }});
+  document.getElementById('set-clear-all-btn').addEventListener('click', () => {{
+    setSelectionPopup.querySelectorAll('input[type=checkbox]').forEach(cb => {{ cb.checked = false; }});
+  }});
+  document.getElementById('set-selection-cancel-btn').addEventListener('click', () => {{
+    setSelectionPopup.classList.remove('show');
+  }});
+  document.getElementById('set-selection-ok-btn').addEventListener('click', () => {{
+    brew.excluded_set_codes = Array.from(setSelectionPopup.querySelectorAll('input[type=checkbox]'))
+      .filter(cb => !cb.checked).map(cb => cb.value);
+    refreshSetSelectionLabel();
+    setSelectionPopup.classList.remove('show');
+    loadThemeOptions();
+  }});
+}}
+setSelectionBtn.addEventListener('click', () => {{
+  if (setSelectionPopup.classList.contains('show')) {{ setSelectionPopup.classList.remove('show'); return; }}
+  renderSetSelectionPopup();
+  setSelectionPopup.classList.add('show');
+}});
+document.addEventListener('click', (e) => {{
+  if (setSelectionPopup.classList.contains('show') && !setSelectionPopup.contains(e.target) && e.target !== setSelectionBtn) {{
+    setSelectionPopup.classList.remove('show');
+  }}
+}});
+document.addEventListener('keydown', (e) => {{ if (e.key === 'Escape') setSelectionPopup.classList.remove('show'); }});
 
 // '' -> no filter. 'C' -> exactly colorless. With `exact` off (the
 // default): a single WUBRG letter matches any card whose identity
@@ -1560,6 +1663,7 @@ function renderCommanderSlot() {{
 function renderDeckList() {{
   const list = document.getElementById('deck-list');
   list.innerHTML = '';
+  document.getElementById('clear-cards-btn').style.display = brew.cards.length ? '' : 'none';
   const groups = {{}};
   brew.cards.forEach(c => {{
     const g = c.category || 'Other';
@@ -1613,6 +1717,7 @@ function openReplacePopup(btn, card) {{
     body: JSON.stringify({{
       card_name: card.name, category: card.category, cards: brew.cards,
       commander: brew.commander, format: brew.format, target_format: brew.target_format,
+      excluded_set_codes: brew.excluded_set_codes,
     }}),
   }})
     .then(r => r.json())
@@ -1803,7 +1908,7 @@ suggestBtn.addEventListener('click', () => {{
     body: JSON.stringify({{
       cards: brew.cards, commander: brew.commander, format: brew.format, target_format: brew.target_format,
       mix_targets: brew.mix_targets, intended_bracket: brew.intended_bracket,
-      preferred_theme_tag_id: brew.preferred_theme_tag_id,
+      preferred_theme_tag_id: brew.preferred_theme_tag_id, excluded_set_codes: brew.excluded_set_codes,
     }}),
   }})
     .then(r => r.json())
@@ -1822,15 +1927,21 @@ suggestBtn.addEventListener('click', () => {{
       // would try to re-add cards already in the deck.
       let remaining = data.suggestions.slice();
       const addAllBtn = Object.assign(document.createElement('button'), {{
-        className: 'btn ghost small', style: 'margin-bottom:8px;',
+        className: 'btn ghost small', style: 'margin-bottom:8px;margin-right:8px;',
         onclick: () => {{ remaining.forEach(addCard); panel.innerHTML = ''; }},
+      }});
+      const dismissAllBtn = Object.assign(document.createElement('button'), {{
+        className: 'btn ghost small', textContent: 'Dismiss All', style: 'margin-bottom:8px;',
+        title: 'Discard this batch of suggestions without adding any of them',
+        onclick: () => {{ panel.innerHTML = ''; }},
       }});
       function refreshAddAllBtn() {{
         addAllBtn.textContent = `+ Add All (${{remaining.length}})`;
         addAllBtn.style.display = remaining.length ? '' : 'none';
+        dismissAllBtn.style.display = remaining.length ? '' : 'none';
       }}
       refreshAddAllBtn();
-      panel.appendChild(addAllBtn);
+      panel.append(addAllBtn, dismissAllBtn);
       data.suggestions.forEach(s => {{
         const row = document.createElement('div');
         row.className = 'suggestion-row';
@@ -2231,6 +2342,22 @@ def builder_collection_data():
     return jsonify(cards=cards)
 
 
+@app.route("/builder/sets", methods=["GET"])
+def builder_sets():
+    """Every set the owned collection has cards from, name + release date
+    labeled, sorted oldest-first -- backs the builder's Set Selection
+    filter. Independent of any particular brew (unlike /builder/themes),
+    so this is a plain GET with no request body."""
+    if not os.path.isfile(COLLECTION_PATH):
+        return jsonify(error="No ManaBox collection on file yet -- upload one from the home page first."), 400
+    try:
+        owned = load_collection(COLLECTION_PATH)
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+    sets = owned_set_options(owned, sets_data_in_index())
+    return jsonify(sets=sets)
+
+
 @app.route("/builder/save", methods=["POST"])
 def builder_save():
     body = request.get_json(silent=True) or {}
@@ -2250,8 +2377,19 @@ def builder_save():
         intended_bracket=body.get("intended_bracket") or "",
         preferred_theme_tag_id=body.get("preferred_theme_tag_id") or "",
         preferred_theme_label=body.get("preferred_theme_label") or "",
+        excluded_set_codes=body.get("excluded_set_codes") or [],
     )
     return jsonify(deck_id=deck_id)
+
+
+def _excluded_set_codes(body: dict) -> set[str] | None:
+    """Parses the Set Selection filter's excluded_set_codes list out of a
+    /builder/suggest, /builder/themes, or /builder/replace request body --
+    shared so the three routes stay in sync. None (not an empty set) when
+    nothing's excluded, matching _filter_candidates' own "falsy = no
+    restriction" convention."""
+    codes = {str(c).upper() for c in (body.get("excluded_set_codes") or []) if c}
+    return codes or None
 
 
 @app.route("/builder/suggest", methods=["POST"])
@@ -2286,6 +2424,7 @@ def builder_suggest():
         mix_targets=mix_targets,
         intended_bracket=body.get("intended_bracket") or None,
         preferred_theme_tag_id=body.get("preferred_theme_tag_id") or None,
+        excluded_set_codes=_excluded_set_codes(body),
     )
     return jsonify(suggestions=suggestions)
 
@@ -2310,6 +2449,7 @@ def builder_themes():
     themes = list_theme_options(
         wip_entries, owned_view, deck_format, body.get("target_format"),
         commander_color_identity=commander.get("color_identity") if deck_format == "commander" else None,
+        excluded_set_codes=_excluded_set_codes(body),
     )
     return jsonify(themes=themes)
 
@@ -2337,6 +2477,7 @@ def builder_replace():
     replacements = suggest_replacements(
         card_name, body.get("category") or "", wip_entries, owned_view, deck_format, body.get("target_format"),
         commander_color_identity=commander.get("color_identity") if deck_format == "commander" else None,
+        excluded_set_codes=_excluded_set_codes(body),
     )
     return jsonify(replacements=replacements)
 

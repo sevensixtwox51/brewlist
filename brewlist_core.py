@@ -699,8 +699,10 @@ PRICE_INDEX_MAX_AGE_DAYS = 7
 # to force an immediate rebuild rather than waiting up to
 # PRICE_INDEX_MAX_AGE_DAYS for stale picks to self-heal. v13: added the
 # "gameplay" field (type line, mana cost/CMC, color identity, oracle text,
-# full legalities dict) for the deck builder (deck_builder.py).
-PRICE_INDEX_FORMAT_VERSION = 14
+# full legalities dict) for the deck builder (deck_builder.py). v15: added
+# the "sets" field (set name + release date per set code) for the deck
+# builder's Set Selection filter.
+PRICE_INDEX_FORMAT_VERSION = 15
 
 
 # --------------------------------------------------------------------------
@@ -1101,7 +1103,20 @@ def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[
         # check legality without a live Scryfall call per card, reusing
         # this same AllPrintings download instead of a second one.
         gameplay_by_name: dict[str, dict] = {}
-        for set_obj in all_printings.values():
+        # Set name + release date per set code (from AllPrintings' own set-
+        # level fields, not per-card) -- lets the deck builder's Set
+        # Selection filter list the user's owned sets sorted chronologically
+        # without a separate Scryfall /sets call. Every set is recorded
+        # (not just ones with owned cards), same "unconditional, name/code-
+        # level fact" reasoning as game_changers/commander_legality above --
+        # cheap to keep all of them, and load_collection() alone can't tell
+        # us which set codes the user owns without this data.
+        sets_by_code: dict[str, dict] = {}
+        for set_code, set_obj in all_printings.items():
+            sets_by_code[set_code.upper()] = {
+                "name": set_obj.get("name") or set_code,
+                "release_date": set_obj.get("releaseDate") or "",
+            }
             for card in set_obj.get("cards", []):
                 if "paper" not in (card.get("availability") or []):
                     continue
@@ -1266,6 +1281,7 @@ def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[
         "game_changers": sorted(game_changers),
         "commander_legality": commander_legality,
         "gameplay": gameplay_by_name,
+        "sets": sets_by_code,
         "scryfall_prices": by_scryfall_id,
         "budget_alt_tag_by_name": budget_alt_groups.get("tag_by_name") or {},
         "budget_alt_tag_labels": budget_alt_groups.get("tag_labels") or {},
@@ -1355,6 +1371,19 @@ def gameplay_data_in_index(path: str = PRICE_INDEX_PATH) -> dict[str, dict]:
     try:
         with open(path, encoding="utf-8") as f:
             return json.load(f).get("gameplay") or {}
+    except (OSError, ValueError):
+        return {}
+
+
+def sets_data_in_index(path: str = PRICE_INDEX_PATH) -> dict[str, dict]:
+    """Returns {set_code (upper): {"name", "release_date"}}, read from the
+    local price index -- see sets_by_code in rebuild_price_index. Empty
+    dict if the index doesn't exist or predates this field. Used by the
+    deck builder's Set Selection filter to label/sort the sets the user
+    actually owns cards from."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f).get("sets") or {}
     except (OSError, ValueError):
         return {}
 
