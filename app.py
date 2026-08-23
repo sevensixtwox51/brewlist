@@ -449,14 +449,14 @@ def render_setup_page(error: str | None = None) -> str:
     <button type="button" class="btn ghost small" id="refresh-index-btn">&#128260; Refresh Database</button>
     <div id="refresh-index-label" class="hint" style="display:none;margin-top:8px;"></div>
   </div>
+  <div class="card" style="text-align:center;">
+    <a href="/decks" class="btn" style="display:block;">Continue to Decks &rarr;</a>
+  </div>
   <div class="card" id="update-card">
     <label>App updates</label>
     <div class="hint" style="margin-top:-8px;margin-bottom:8px;">Pulls the latest Brewlist code from GitHub -- only works if this was installed with 'git clone'.</div>
     <button type="button" class="btn ghost small" id="check-updates-btn">&#8635; Check for Updates</button>
     <div id="update-label" class="hint" style="margin-top:8px;"></div>
-  </div>
-  <div class="card" style="text-align:center;">
-    <a href="/decks" class="btn" style="display:block;">Continue to Decks &rarr;</a>
   </div>
   {footer_html}
 </main>
