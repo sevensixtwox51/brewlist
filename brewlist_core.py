@@ -3778,7 +3778,7 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
         header_actions_html = (
             '<div class="header-actions">'
             f'{kofi_html}'
-            '<a class="home-link" href="/">&larr; New comparison</a>'
+            '<a class="home-link" href="/decks">&larr; New comparison</a>'
             '<button type="button" class="shutdown-btn" id="shutdown-btn" title="Stops the local server">&#9209; Shut Down</button>'
             '</div>'
         )
