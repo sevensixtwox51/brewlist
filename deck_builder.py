@@ -118,27 +118,35 @@ def owned_collection_gameplay_view(owned: dict[str, OwnedCard], gameplay: dict[s
 
 
 def owned_set_options(owned: dict[str, OwnedCard], sets_data: dict[str, dict]) -> list[dict]:
-    """Every set code appearing in the owned collection (from each
-    OwnedPrinting.set_code -- the same single representative printing per
-    card owned_collection_gameplay_view uses, so this lines up with what
-    the Set Selection filter actually restricts), labeled via
-    sets_data_in_index and sorted chronologically by release date (oldest
-    first) -- the pool the builder's Set Selection filter offers,
+    """Every set code that's some card's *representative* printing (the
+    first one, same `printings[0]` pick owned_collection_gameplay_view
+    makes -- not every set the card happens to be owned in). This has to
+    match that convention exactly: _filter_candidates only ever checks a
+    candidate's single representative set_code, so a set that only shows
+    up via a card's second/third owned printing would be functionally
+    meaningless to exclude/include here -- toggling it wouldn't change
+    which cards Suggest/the grid actually see, and it would silently
+    render as an empty "0 owned" row. Labeled via sets_data_in_index and
+    sorted chronologically by release date (oldest first) -- the pool the
+    builder's Set filters (autobuilder + collection grid) offer,
     defaulting to all-on. A code with no match in sets_data (a stale
     pre-this-field index, or an unrecognized code) still shows up, using
     the raw code as its own name and sorting last (empty release date)."""
-    codes: set[str] = set()
+    counts: dict[str, int] = {}
     for card in owned.values():
-        for p in card.printings:
-            if p.set_code:
-                codes.add(p.set_code.upper())
+        if not card.printings:
+            continue
+        code = (card.printings[0].set_code or "").upper()
+        if code:
+            counts[code] = counts.get(code, 0) + 1
     options = []
-    for code in codes:
+    for code, count in counts.items():
         info = sets_data.get(code) or {}
         options.append({
             "set_code": code,
             "set_name": info.get("name") or code,
             "release_date": info.get("release_date") or "",
+            "count": count,
         })
     options.sort(key=lambda o: (o["release_date"] or "9999-99-99", o["set_name"]))
     return options

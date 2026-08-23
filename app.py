@@ -1115,6 +1115,10 @@ def render_builder_page(deck_id: str | None = None) -> str:
         <label class="exact-color-toggle" title="Only show cards whose color identity is exactly the selected color(s) -- e.g. true Grixis cards, not also mono-colored or two-color ones that merely fit within Grixis">
           <input type="checkbox" id="filter-color-exact"> Exact colors
         </label>
+        <div class="set-selection-field">
+          <button type="button" class="btn ghost small" id="grid-set-filter-btn">Set</button>
+          <div class="set-selection-popup" id="grid-set-filter-popup"></div>
+        </div>
         <div class="segmented" id="view-density-toggle" title="Switches between full tiles and a compact text list with mana-cost pips">
           <button type="button" class="seg-btn active" data-value="cards">Cards</button>
           <button type="button" class="seg-btn" data-value="compact">Compact</button>
@@ -1488,77 +1492,108 @@ themeDropdown.addEventListener('mousedown', (e) => {{
 }});
 themeInput.addEventListener('blur', () => {{ setTimeout(() => themeDropdown.classList.remove('show'), 150); }});
 
-// Set Selection: restricts which sets Suggest/Preferred-theme/Replace
-// pull owned candidates from (see excluded_set_codes threaded through
-// deck_builder.py's _filter_candidates). Loaded once at page init --
-// independent of the brew, so no re-fetch is needed as the deck changes
-// (unlike loadThemeOptions, which depends on the commander/colors).
+// Set filtering: two independent multiselect popups sharing the same
+// owned-set list and the same UI pattern (Select All/Clear All/Cancel/OK,
+// staged -- nothing applies until OK). "Set Selection" restricts which
+// sets Suggest/Preferred-theme/Replace pull owned candidates from (see
+// excluded_set_codes threaded through deck_builder.py's
+// _filter_candidates); the grid's "Set" button separately restricts what
+// the manual collection browser shows -- deliberately independent state,
+// since browsing everything while restricting the autobuilder (or vice
+// versa) is a reasonable thing to want. allSetOptions itself is loaded
+// once at page init, independent of the brew.
 let allSetOptions = [];
-const setSelectionBtn = document.getElementById('set-selection-btn');
-const setSelectionPopup = document.getElementById('set-selection-popup');
-function refreshSetSelectionLabel() {{
-  const excluded = new Set(brew.excluded_set_codes || []);
-  const total = allSetOptions.length;
-  const includedCount = allSetOptions.filter(s => !excluded.has(s.set_code)).length;
-  setSelectionBtn.textContent = (total === 0 || includedCount === total) ? 'Set Selection' : `Set Selection (${{includedCount}}/${{total}})`;
-}}
 function loadSetOptions() {{
   fetch('/builder/sets')
     .then(r => r.json())
     .then(data => {{
       if (data.error) return;
       allSetOptions = data.sets || [];
-      refreshSetSelectionLabel();
+      setSelectionPopupCtl.refreshLabel();
+      gridSetFilterPopupCtl.refreshLabel();
     }})
     .catch(() => {{}});
 }}
-loadSetOptions();
 
-function renderSetSelectionPopup() {{
-  const excluded = new Set(brew.excluded_set_codes || []);
-  const rows = allSetOptions.map(s => {{
-    const year = s.release_date ? s.release_date.slice(0, 4) : '?';
-    return `<label><input type="checkbox" value="${{s.set_code}}"${{excluded.has(s.set_code) ? '' : ' checked'}}> ${{s.set_name}} (${{year}})</label>`;
-  }}).join('');
-  setSelectionPopup.innerHTML = `
-    <div class="set-selection-quick">
-      <button type="button" class="btn ghost small" id="set-select-all-btn">Select All</button>
-      <button type="button" class="btn ghost small" id="set-clear-all-btn">Clear All</button>
-    </div>
-    <div class="set-selection-list">${{rows || '<div class="hint" style="margin:0;">No sets found in your collection.</div>'}}</div>
-    <div class="set-selection-actions">
-      <button type="button" class="btn ghost small" id="set-selection-cancel-btn">Cancel</button>
-      <button type="button" class="btn small" id="set-selection-ok-btn">OK</button>
-    </div>
-  `;
-  document.getElementById('set-select-all-btn').addEventListener('click', () => {{
-    setSelectionPopup.querySelectorAll('input[type=checkbox]').forEach(cb => {{ cb.checked = true; }});
-  }});
-  document.getElementById('set-clear-all-btn').addEventListener('click', () => {{
-    setSelectionPopup.querySelectorAll('input[type=checkbox]').forEach(cb => {{ cb.checked = false; }});
-  }});
-  document.getElementById('set-selection-cancel-btn').addEventListener('click', () => {{
-    setSelectionPopup.classList.remove('show');
-  }});
-  document.getElementById('set-selection-ok-btn').addEventListener('click', () => {{
-    brew.excluded_set_codes = Array.from(setSelectionPopup.querySelectorAll('input[type=checkbox]'))
-      .filter(cb => !cb.checked).map(cb => cb.value);
-    refreshSetSelectionLabel();
-    setSelectionPopup.classList.remove('show');
-    loadThemeOptions();
-  }});
-}}
-setSelectionBtn.addEventListener('click', () => {{
-  if (setSelectionPopup.classList.contains('show')) {{ setSelectionPopup.classList.remove('show'); return; }}
-  renderSetSelectionPopup();
-  setSelectionPopup.classList.add('show');
-}});
-document.addEventListener('click', (e) => {{
-  if (setSelectionPopup.classList.contains('show') && !setSelectionPopup.contains(e.target) && e.target !== setSelectionBtn) {{
-    setSelectionPopup.classList.remove('show');
+// Returns {{refreshLabel}}. `opts`: label (button text prefix), getExcluded/
+// setExcluded (read/write the excluded-codes list this instance owns),
+// onApply (called after OK commits a new selection).
+function setupSetFilterPopup(btn, popup, opts) {{
+  function refreshLabel() {{
+    const excluded = new Set(opts.getExcluded());
+    const total = allSetOptions.length;
+    const includedCount = allSetOptions.filter(s => !excluded.has(s.set_code)).length;
+    btn.textContent = (total === 0 || includedCount === total) ? opts.label : `${{opts.label}} (${{includedCount}}/${{total}})`;
   }}
-}});
-document.addEventListener('keydown', (e) => {{ if (e.key === 'Escape') setSelectionPopup.classList.remove('show'); }});
+  function render() {{
+    const excluded = new Set(opts.getExcluded());
+    const rows = allSetOptions.map(s => {{
+      const year = s.release_date ? s.release_date.slice(0, 4) : '?';
+      return `<label><input type="checkbox" value="${{s.set_code}}"${{excluded.has(s.set_code) ? '' : ' checked'}}> ${{s.set_name}} (${{year}}) &middot; ${{s.count}}</label>`;
+    }}).join('');
+    popup.innerHTML = `
+      <div class="set-selection-quick">
+        <button type="button" class="btn ghost small" data-action="all">Select All</button>
+        <button type="button" class="btn ghost small" data-action="none">Clear All</button>
+      </div>
+      <div class="set-selection-list">${{rows || '<div class="hint" style="margin:0;">No sets found in your collection.</div>'}}</div>
+      <div class="set-selection-actions">
+        <button type="button" class="btn ghost small" data-action="cancel">Cancel</button>
+        <button type="button" class="btn small" data-action="ok">OK</button>
+      </div>
+    `;
+    popup.querySelector('[data-action="all"]').addEventListener('click', () => {{
+      popup.querySelectorAll('input[type=checkbox]').forEach(cb => {{ cb.checked = true; }});
+    }});
+    popup.querySelector('[data-action="none"]').addEventListener('click', () => {{
+      popup.querySelectorAll('input[type=checkbox]').forEach(cb => {{ cb.checked = false; }});
+    }});
+    popup.querySelector('[data-action="cancel"]').addEventListener('click', () => {{
+      popup.classList.remove('show');
+    }});
+    popup.querySelector('[data-action="ok"]').addEventListener('click', () => {{
+      const excludedCodes = Array.from(popup.querySelectorAll('input[type=checkbox]'))
+        .filter(cb => !cb.checked).map(cb => cb.value);
+      opts.setExcluded(excludedCodes);
+      refreshLabel();
+      popup.classList.remove('show');
+      opts.onApply();
+    }});
+  }}
+  btn.addEventListener('click', () => {{
+    if (popup.classList.contains('show')) {{ popup.classList.remove('show'); return; }}
+    render();
+    popup.classList.add('show');
+  }});
+  document.addEventListener('click', (e) => {{
+    if (popup.classList.contains('show') && !popup.contains(e.target) && e.target !== btn) {{
+      popup.classList.remove('show');
+    }}
+  }});
+  document.addEventListener('keydown', (e) => {{ if (e.key === 'Escape') popup.classList.remove('show'); }});
+  return {{ refreshLabel }};
+}}
+
+const setSelectionPopupCtl = setupSetFilterPopup(
+  document.getElementById('set-selection-btn'), document.getElementById('set-selection-popup'), {{
+    label: 'Set Selection',
+    getExcluded: () => brew.excluded_set_codes || [],
+    setExcluded: (codes) => {{ brew.excluded_set_codes = codes; }},
+    onApply: () => loadThemeOptions(),
+  }}
+);
+
+let gridExcludedSetCodes = [];
+const gridSetFilterPopupCtl = setupSetFilterPopup(
+  document.getElementById('grid-set-filter-btn'), document.getElementById('grid-set-filter-popup'), {{
+    label: 'Set',
+    getExcluded: () => gridExcludedSetCodes,
+    setExcluded: (codes) => {{ gridExcludedSetCodes = codes; }},
+    onApply: () => renderGrid(),
+  }}
+);
+
+loadSetOptions();
 
 // '' -> no filter. 'C' -> exactly colorless. With `exact` off (the
 // default): a single WUBRG letter matches any card whose identity
@@ -1596,6 +1631,7 @@ function renderGrid() {{
     if (category === 'Commander' && !isCommanderEligible(card)) return;
     if (category && category !== 'Commander' && card.category !== category) return;
     if (!matchesColorFilter(card.color_identity, color, exactColor)) return;
+    if (gridExcludedSetCodes.length && gridExcludedSetCodes.includes(card.set_code)) return;
 
     const tile = document.createElement('div');
     tile.className = 'builder-tile';
