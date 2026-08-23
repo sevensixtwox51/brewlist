@@ -560,6 +560,33 @@ def suggest_builder_cards(
         nm = normalize_name(c["name"])
         return (nm not in reason_by_name, nm not in theme_reason_by_name, nm not in game_changers, c["name"])
 
+    # Combo-completing candidates are pulled in up front, ahead of the
+    # role-shape apportionment below -- rank_key only sorts them to the
+    # front of their OWN role's pool, which does nothing if that role
+    # already hit its numeric target (e.g. Synergy's default 30-card
+    # target, the single biggest bucket, so also the one most likely to
+    # already be "full" by the time a combo piece becomes findable). That
+    # let a real, owned, legal, one-card-away combo (Commander Spellbook
+    # confirmed) get silently skipped every single Suggest call once its
+    # role filled up, even though nothing else in the deck could ever
+    # complete it. Still respects the intended-bracket Game Changer cap,
+    # same check the round-robin below uses.
+    combo_first: list[dict] = []
+    for c in sorted(
+        (c for c in candidates if normalize_name(c["name"]) in reason_by_name),
+        key=lambda c: c["name"],
+    ):
+        if len(combo_first) >= max_suggestions:
+            break
+        is_gc = normalize_name(c["name"]) in game_changers
+        if gc_cap is not None and is_gc and running_gc_count >= gc_cap:
+            continue
+        combo_first.append(c)
+        if is_gc:
+            running_gc_count += 1
+    combo_first_names = {normalize_name(c["name"]) for c in combo_first}
+    role_pool_candidates = [c for c in candidates if normalize_name(c["name"]) not in combo_first_names]
+
     # Deck-shape roles: Commander gets the full Lands/Ramp/Draw/
     # Interaction/Synergy breakdown (see DEFAULT_COMMANDER_MIX and its
     # user-supplied override, mix_targets); constructed keeps the
@@ -593,7 +620,7 @@ def suggest_builder_cards(
     role_needed = {role: max(0, target - current_role_counts.get(role, 0)) for role, target in role_targets.items()}
 
     role_candidates: dict[str, list[dict]] = {}
-    for c in candidates:
+    for c in role_pool_candidates:
         role_candidates.setdefault(role_of(c["name"], c["category"]), []).append(c)
     for pool in role_candidates.values():
         pool.sort(key=rank_key)
@@ -675,7 +702,7 @@ def suggest_builder_cards(
     # candidate in that same pool, instead of just shrinking the role's
     # contribution -- added_counts[role] (bounded by role_slots[role]) is
     # what actually limits how many get taken from each role.
-    ordered: list[dict] = []
+    ordered: list[dict] = list(combo_first)
     indices = {role: 0 for role in role_slots}
     added_counts = {role: 0 for role in role_slots}
     active_roles = [r for r in role_slots if role_slots[r] > 0]
