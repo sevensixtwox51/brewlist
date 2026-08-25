@@ -3353,7 +3353,8 @@ if (shutdownBtn) {{
 def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[str],
                  buckets: dict[str, list[CardResult]], totals: dict,
                  overrides_endpoint: str | None = None, is_commander_format: bool = False,
-                 ai_summary: str = "", further_optimizations: list[str] | None = None) -> str:
+                 ai_summary: str = "", further_optimizations: list[str] | None = None,
+                 maybeboard: list[dict] | None = None) -> str:
     """Renders the full standalone HTML report. Every price/enrichment here
     reflects build_comparison's single always-accurate pass (see its
     docstring) -- there's no separate "fast vs. accurate" mode to reconcile.
@@ -3378,6 +3379,11 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
     of swaps applied via the deterministic (non-AI) Optimize Deck button
     after the AI summary was written -- keeps the AI's own narrative from
     silently going stale relative to what's actually in the deck now.
+    `maybeboard`, if given, is a list of {"name", "reason", "replaces",
+    ...card fields} the import/improve AI flagged as worth considering
+    without committing to a specific swap -- see ai_builder.py's
+    suggest_maybeboard_card tool. Purely informational here, same as the
+    other two.
     """
     further_optimizations = further_optimizations or []
     total_cards = totals["owned"] + totals["missing"]
@@ -3610,11 +3616,26 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
         + "</ul></div>"
         if further_optimizations else ""
     )
+    maybeboard = maybeboard or []
+    maybeboard_html = (
+        '<div class="ai-summary-note"><b>&#128064; Maybeboard</b> -- candidates the AI found but wasn\'t '
+        'confident enough to commit as a direct swap; not part of the deck, consider them yourself.'
+        '<ul class="rule0-list" style="margin-top:6px;">'
+        + "".join(
+            f"<li><b>{html.escape(c['name'])}</b> -- {html.escape(c['reason'])}"
+            + (f" (could replace {html.escape(c['replaces'])})" if c.get("replaces") else "")
+            + "</li>"
+            for c in maybeboard
+        )
+        + "</ul></div>"
+        if maybeboard else ""
+    )
     deck_analysis_html = f"""<details class="combos-panel" open>
 <summary>&#128202; Deck Analysis</summary>
 <div class="deck-analysis-body">
   {ai_summary_html}
   {further_optimizations_html}
+  {maybeboard_html}
   <div>
     <div class="analysis-stat-line">
       Average mana value: <b>{avg_with_lands:.2f}</b> with lands / <b>{avg_without_lands:.2f}</b> without &middot;

@@ -274,7 +274,26 @@ def _build_tools(scope: str) -> list[dict]:
                 "required": ["summary"],
             },
         },
-    ]
+    ] + ([{
+        "name": "suggest_maybeboard_card",
+        "description": (
+            "Flags a strong card you found but aren't committing as a direct swap right now -- a close "
+            "runner-up, a nice-to-have upgrade, or something worth considering without a specific card in "
+            "mind to cut for it. Does NOT touch the deck itself (no add_card/remove_card needed, and it "
+            "doesn't count toward the library target) -- it just goes on a separate maybeboard list shown to "
+            "the player afterward as options to consider on their own. Use this instead of forcing a swap "
+            "you're not fully confident about."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": f"Exact card name, as returned by {search_name}."},
+                "reason": {"type": "string", "description": "One sentence on why this card is worth considering."},
+                "replaces": {"type": "string", "description": "Optional: a card currently in the deck this would be a reasonable replacement for, if you have one in mind."},
+            },
+            "required": ["name", "reason"],
+        },
+    }] if scope == "any" else [])
 
 
 def _card_summary(c: dict, scope: str, owned_names: set[str], prices: dict[str, dict]) -> dict:
@@ -341,6 +360,7 @@ def run_ai_build(
     starting_library_count = sum(e.quantity for e in wip_entries if e.section != "commander")
     added_by_name: dict[str, dict] = {}
     removed_names: list[str] = []
+    maybeboard: list[dict] = []
     log: list[str] = []
     client = anthropic.Anthropic(api_key=api_key)
     owned_names = {normalize_name(c["name"]) for c in owned_view}
@@ -445,6 +465,20 @@ def run_ai_build(
                 "almost_included": [{"uses": c["uses"], "missing": c["missing"], "produces": c["produces"]} for c in combos["almost_included"]],
             })
 
+        if tool_name == "suggest_maybeboard_card":
+            name = (tool_input.get("name") or "").strip()
+            reason = (tool_input.get("reason") or "").strip()
+            replaces = (tool_input.get("replaces") or "").strip()
+            nm = normalize_name(name)
+            match = next((c for c in current_pool() if normalize_name(c["name"]) == nm), None)
+            if not match:
+                return json.dumps({"ok": False, "error": f"{name} isn't in the {pool_label} pool -- {search_tool_name} first to confirm the exact name."})
+            if replaces and not any(e.section != "commander" and normalize_name(e.name) == normalize_name(replaces) for e in wip_entries):
+                replaces = ""  # named a card that isn't actually in the deck -- drop rather than mislead the player
+            maybeboard.append({**match, "reason": reason, "replaces": replaces})
+            emit(f"Maybeboard: {match['name']}" + (f" (could replace {replaces})" if replaces else "") + f" -- {reason}")
+            return json.dumps({"ok": True})
+
         if tool_name == "finish_deck":
             count = library_count()
             if count != library_target:
@@ -457,13 +491,46 @@ def run_ai_build(
         return json.dumps({"error": f"Unknown tool {tool_name}"})
 
     pool_desc = "the player's owned cards" if scope == "owned" else "any real Magic card, owned or not (each search result says whether it's owned and, if not, a rough price)"
-    deck_state_note = (
-        f"The deck library already has {starting_library_count} card(s) chosen -- keep them unless one is "
-        "clearly wrong for the plan, and focus on filling the remaining slots and making targeted "
-        "improvements rather than rebuilding from scratch.\n"
-        if starting_library_count > 0 else
-        "The deck library is currently empty -- build it from scratch.\n"
-    )
+    if starting_library_count == 0:
+        deck_state_note = "The deck library is currently empty -- build it from scratch.\n"
+    elif scope == "owned":
+        # "Improve current deck" -- the player built this by hand, so stay
+        # conservative: respect their choices, just fill gaps.
+        deck_state_note = (
+            f"The deck library already has {starting_library_count} card(s) chosen -- keep them unless one is "
+            "clearly wrong for the plan, and focus on filling the remaining slots and making targeted "
+            "improvements rather than rebuilding from scratch.\n"
+        )
+    else:
+        # "Import & improve" -- this list came from an import (a paste or
+        # someone else's Moxfield/Archidekt deck), not built card-by-card
+        # by the player, and it can easily already be at or near the
+        # target size (confirmed live: a real 99-card imported deck gave
+        # the model nothing to "fill", and a passive "keep unless clearly
+        # wrong" framing then meant it just called finish_deck having
+        # changed almost nothing -- exactly the "did it actually do
+        # anything?" the user asked about). Being at target size is not
+        # the finish line here; genuinely improving the list is.
+        deck_state_note = (
+            f"The deck library already has {starting_library_count} card(s) from the import -- but your job is "
+            "to genuinely evaluate and improve this list using the full card database, not just accept it "
+            "because the count already looks right. Actively search for stronger options for the deck's actual "
+            "plan (owned or not) and swap out real upgrades -- weak filler, off-plan cards, or anything a "
+            "better card exists for. Being at the target size already is not a reason to stop; only stop adding/"
+            "removing once you've actually looked for upgrades across the deck's main roles (ramp, draw, "
+            "interaction, win conditions) and are satisfied nothing meaningful is left to improve. It's fine if "
+            "some cards turn out to already be good and stay untouched -- but reach that conclusion by actually "
+            "checking, not by default.\n\n"
+            f"IMPORTANT: the library is already at (or close to) the {library_target}-card target, so a genuine "
+            "improvement here is a SWAP, not a bare addition -- every add_card should normally be paired with a "
+            "remove_card for whatever weaker card it's replacing (call them back to back), or you'll overshoot "
+            "the target and have to undo work later. Do not add a run of new cards first and plan to remove "
+            "filler afterward -- alternate add/remove as you go so the count stays near target throughout.\n\n"
+            "If you find a strong card but AREN'T confident enough to commit it as a direct swap right now (a "
+            "close runner-up, a nice-to-have, something you'd want the player to weigh in on) -- call "
+            "suggest_maybeboard_card instead of forcing add_card/remove_card. That's the right tool for "
+            "anything short of a clear, confident upgrade; it costs nothing and doesn't affect the count.\n"
+        )
     system_prompt = (
         f"You are building/improving a real, legal Magic: The Gathering deck using {pool_desc}.\n\n"
         f"Commander: {commander['name']}\n"
@@ -492,11 +559,17 @@ def run_ai_build(
         "guessing one name at a time. If two searches in a row return zero matches, that's a signal to change "
         "your whole angle (a different mechanic, a different need) rather than try another specific guess in the "
         "same vein.\n\n"
-        "Your only goal is reaching exactly {target} library cards; time spent searching without adding makes "
+        + (
+            f"Your goal is a genuinely IMPROVED deck at exactly {library_target} library cards -- reaching that "
+            "count on its own is not the finish line if you haven't actually looked for upgrades (see above). "
+            if scope == "any" and starting_library_count > 0 else
+            f"Your only goal is reaching exactly {library_target} library cards; "
+        )
+        + "time spent searching without adding makes "
         "zero progress toward that no matter how thorough it feels, and you will run out of turns before "
-        "finishing if search calls aren't converting into add_card calls at a good rate. Call check_combos every "
-        "10-15 cards or so, not constantly. Call finish_deck only once the library is at the exact target size, "
-        "and give a short summary of the deck's strategy.".format(target=library_target)
+        "finishing if search calls aren't converting into add_card/remove_card calls at a good rate. Call "
+        "check_combos every 10-15 cards or so, not constantly. Call finish_deck only once the library is at "
+        "the exact target size, and give a short summary of the deck's strategy."
     )
 
     messages: list[dict] = [{"role": "user", "content": "Build the deck."}]
@@ -564,7 +637,14 @@ def run_ai_build(
         "type_line": e.type_line, "color_identity": e.color_identity, "cmc": e.cmc, "mana_cost": e.mana_cost,
         "set_code": e.set_code, "collector_number": e.collector_number, "category": categorize(e.type_line),
     } for e in wip_entries]
+    maybeboard_out = [{
+        "name": c["name"], "scryfall_id": c["scryfall_id"], "category": c["category"],
+        "type_line": c["type_line"], "color_identity": c["color_identity"],
+        "cmc": c["cmc"], "mana_cost": c["mana_cost"],
+        "set_code": c.get("set_code", ""), "collector_number": c.get("collector_number", ""),
+        "reason": c["reason"], "replaces": c.get("replaces") or "",
+    } for c in maybeboard]
     return {
         "suggestions": suggestions, "removed": removed_names, "final_entries": final_entries,
-        "log": log, "finished": finished, "summary": summary, "error": error,
+        "maybeboard": maybeboard_out, "log": log, "finished": finished, "summary": summary, "error": error,
     }

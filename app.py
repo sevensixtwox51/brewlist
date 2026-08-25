@@ -202,7 +202,7 @@ def _run_compare_job(job_id, entries, owned, break_out_basics, reserved,
                 job["error"] = str(e)
 
 
-def _run_brew_report_job(job_id, entries, owned, deck_id, deck_name, is_commander_format, ai_summary="", further_optimizations=None):
+def _run_brew_report_job(job_id, entries, owned, deck_id, deck_name, is_commander_format, ai_summary="", further_optimizations=None, maybeboard=None):
     """Same job shape as _run_compare_job, for the deck builder's "View
     full report" button -- reuses the exact same /compare/progress and
     /compare/result polling routes, so a brew's report is a saved decklist
@@ -225,7 +225,7 @@ def _run_brew_report_job(job_id, entries, owned, deck_id, deck_name, is_commande
             deck_name, "", deck_id, bucket_names, buckets, totals,
             overrides_endpoint=f"/api/overrides/{deck_id}",
             is_commander_format=is_commander_format, ai_summary=ai_summary,
-            further_optimizations=further_optimizations,
+            further_optimizations=further_optimizations, maybeboard=maybeboard,
         )
         with _JOBS_LOCK:
             job = JOBS.get(job_id)
@@ -283,6 +283,7 @@ def _run_ai_build_job(job_id, commander, deck_format, target_format, target_size
                     job["suggestions"] = result["suggestions"]
                     job["removed"] = result["removed"]
                     job["final_entries"] = result["final_entries"]
+                    job["maybeboard"] = result.get("maybeboard") or []
                     job["finished"] = result["finished"]
                     job["summary"] = result["summary"]
     except Exception as e:  # noqa: BLE001 -- surface any failure to the polling client
@@ -1184,6 +1185,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
         "excluded_set_codes": brew.get("excluded_set_codes") or [],
         "ai_summary": brew.get("ai_summary") or "",
         "further_optimizations": brew.get("further_optimizations") or [],
+        "maybeboard": brew.get("maybeboard") or [],
     }
 
     category_options = "".join(f'<option value="{_esc(b)}">{_esc(b)}</option>' for b in BUCKET_ORDER)
@@ -1332,6 +1334,11 @@ def render_builder_page(deck_id: str | None = None) -> str:
       <div id="further-optimizations-block" style="display:none;">
         <h4 class="analysis-heading">&#9889; Further Optimizations</h4>
         <ul class="rule0-list" id="further-optimizations-list"></ul>
+      </div>
+      <div id="maybeboard-block" style="display:none;">
+        <h4 class="analysis-heading">&#128064; Maybeboard</h4>
+        <p class="hint" style="margin:0 0 8px;">Candidates the AI found but wasn't confident enough to commit as a direct swap -- not part of the deck.</p>
+        <div id="maybeboard-list"></div>
       </div>
       <div class="hint" id="analyze-loading" style="margin:0 0 12px;">Checking&hellip; (calls Commander Spellbook live, may take a few seconds)</div>
 
@@ -2506,6 +2513,7 @@ function fetchAiResult(jobId) {{
 function applyAiImportResult(data) {{
   if (data.summary) {{ brew.ai_summary = data.summary; }}
   brew.further_optimizations = [];  // fresh AI-built deck -- no stale trail from whatever was here before
+  brew.maybeboard = data.maybeboard || [];
   const commanderEntry = (data.final_entries || []).find(c => c.section === 'commander');
   const libraryEntries = (data.final_entries || []).filter(c => c.section !== 'commander');
   brew.commander = commanderEntry ? {{
@@ -2528,6 +2536,35 @@ function applyAiImportResult(data) {{
     showError(`Couldn't recognize ${{data.import_unresolved.length}} line(s) from your import: ${{data.import_unresolved.slice(0, 5).join('; ')}}`);
   }}
   saveThenViewReport();
+}}
+
+// Maybeboard entries are informational + actionable (unlike the static
+// Further Optimizations trail) -- each gets its own "+ Add" since the
+// whole point is the player deciding, not the AI committing a swap it
+// wasn't confident about. Re-run after adding one so the list reflects
+// what's left, same "remaining reflects reality" pattern used elsewhere.
+function renderMaybeboard() {{
+  const list = brew.maybeboard || [];
+  document.getElementById('maybeboard-block').style.display = list.length ? 'block' : 'none';
+  const container = document.getElementById('maybeboard-list');
+  container.innerHTML = '';
+  list.forEach(c => {{
+    const row = document.createElement('div');
+    row.className = 'suggestion-row';
+    row.dataset.full = scryfallImg(c.scryfall_id, 'normal') || '';
+    const replacesNote = c.replaces ? ` &mdash; could replace ${{escapeHtml(c.replaces)}}` : '';
+    row.innerHTML = `<span class="row-name">${{thumbHtml(c.scryfall_id, 'card-thumb small')}}<span>${{escapeHtml(c.name)}} ${{colorIconsHtml(c.color_identity)}}<div class="reason">${{escapeHtml(c.reason)}}${{replacesNote}}</div></span></span>`;
+    const addBtn = Object.assign(document.createElement('button'), {{
+      className: 'btn ghost small', textContent: '+ Add',
+      onclick: () => {{
+        addCard(c);
+        brew.maybeboard = brew.maybeboard.filter(x => x !== c);
+        renderMaybeboard();
+      }},
+    }});
+    row.appendChild(addBtn);
+    container.appendChild(row);
+  }});
 }}
 
 function renderAiSuggestions(data) {{
@@ -2805,6 +2842,7 @@ analyzeBtn.addEventListener('click', () => {{
   const furtherOpts = brew.further_optimizations || [];
   document.getElementById('further-optimizations-block').style.display = furtherOpts.length ? 'block' : 'none';
   document.getElementById('further-optimizations-list').innerHTML = furtherOpts.map(t => `<li>${{escapeHtml(t)}}</li>`).join('');
+  renderMaybeboard();
   renderDeckAnalysis();
   drawSampleHand();
   document.getElementById('analyze-badges').innerHTML = '';
@@ -3053,6 +3091,7 @@ def builder_save():
         excluded_set_codes=body.get("excluded_set_codes") or [],
         ai_summary=body.get("ai_summary") or "",
         further_optimizations=body.get("further_optimizations") or [],
+        maybeboard=body.get("maybeboard") or [],
     )
     return jsonify(deck_id=deck_id)
 
@@ -3259,8 +3298,8 @@ def builder_ai_build_start():
     with _JOBS_LOCK:
         JOBS[job_id] = {
             "status": "running", "done": 0, "total": 0, "stage": None,
-            "log": [], "deck_state": [], "suggestions": None, "removed": [], "final_entries": [], "finished": False,
-            "summary": "", "error": None, "import_unresolved": import_unresolved, "mode": mode,
+            "log": [], "deck_state": [], "suggestions": None, "removed": [], "final_entries": [], "maybeboard": [],
+            "finished": False, "summary": "", "error": None, "import_unresolved": import_unresolved, "mode": mode,
             "guessed_deck_name": guessed_deck_name,
         }
 
@@ -3312,7 +3351,7 @@ def builder_ai_build_result(job_id):
         suggestions=job["suggestions"], removed=job.get("removed") or [], finished=job["finished"],
         summary=job["summary"], import_unresolved=job.get("import_unresolved") or [],
         final_entries=job.get("final_entries") or [], mode=job.get("mode") or "fresh",
-        guessed_deck_name=job.get("guessed_deck_name"),
+        guessed_deck_name=job.get("guessed_deck_name"), maybeboard=job.get("maybeboard") or [],
     )
 
 
@@ -3439,7 +3478,10 @@ def builder_report_start():
     threading.Thread(
         target=_run_brew_report_job,
         args=(job_id, entries, owned, deck_id, brew.get("deck_name") or "Brew", is_commander_format),
-        kwargs={"ai_summary": brew.get("ai_summary") or "", "further_optimizations": brew.get("further_optimizations") or []},
+        kwargs={
+            "ai_summary": brew.get("ai_summary") or "", "further_optimizations": brew.get("further_optimizations") or [],
+            "maybeboard": brew.get("maybeboard") or [],
+        },
         daemon=True,
     ).start()
 
