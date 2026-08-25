@@ -552,4 +552,19 @@ def run_ai_build(
             "set_code": c.get("set_code", ""), "collector_number": c.get("collector_number", ""),
             "reason": c["reason"],
         })
-    return {"suggestions": suggestions, "removed": removed_names, "log": log, "finished": finished, "summary": summary, "error": error}
+    # The full commander + library list as it stands at the end of the run
+    # -- not just the delta suggestions() tracks. A seeded build (mode
+    # "improve"/"import") can end with plenty of cards the AI never
+    # touched at all (kept as-is), which added_by_name has no record of
+    # but which still need to reach the caller -- e.g. import mode's own
+    # decklist, fetched/parsed entirely server-side, was never sent to
+    # the client in the first place until now.
+    final_entries = [{
+        "name": e.name, "quantity": e.quantity, "section": e.section, "scryfall_id": e.scryfall_id,
+        "type_line": e.type_line, "color_identity": e.color_identity, "cmc": e.cmc, "mana_cost": e.mana_cost,
+        "set_code": e.set_code, "collector_number": e.collector_number, "category": categorize(e.type_line),
+    } for e in wip_entries]
+    return {
+        "suggestions": suggestions, "removed": removed_names, "final_entries": final_entries,
+        "log": log, "finished": finished, "summary": summary, "error": error,
+    }

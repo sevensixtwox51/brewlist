@@ -2720,6 +2720,11 @@ a.badge:hover {{ text-decoration: underline; }}
 
 .deck-analysis-body {{ padding: 4px 16px 16px; display: grid; gap: 20px; }}
 @media (min-width: 900px) {{ .deck-analysis-body {{ grid-template-columns: 1.3fr 1fr; }} }}
+.ai-summary-note {{
+  grid-column: 1 / -1; color: var(--text-dim); font-size: 0.85rem; line-height: 1.5;
+  background: var(--bg-elevated); border: 1px solid var(--card-border); border-radius: 8px; padding: 10px 14px;
+}}
+.ai-summary-note b {{ color: var(--text); }}
 .analysis-stat-line {{ color: var(--text-dim); font-size: 0.85rem; margin: 0 0 10px; }}
 .curve-chart {{ display: flex; align-items: flex-end; gap: 6px; height: 140px; }}
 .curve-col {{ flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%; }}
@@ -3347,7 +3352,8 @@ if (shutdownBtn) {{
 
 def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[str],
                  buckets: dict[str, list[CardResult]], totals: dict,
-                 overrides_endpoint: str | None = None, is_commander_format: bool = False) -> str:
+                 overrides_endpoint: str | None = None, is_commander_format: bool = False,
+                 ai_summary: str = "", further_optimizations: list[str] | None = None) -> str:
     """Renders the full standalone HTML report. Every price/enrichment here
     reflects build_comparison's single always-accurate pass (see its
     docstring) -- there's no separate "fast vs. accurate" mode to reconcile.
@@ -3362,7 +3368,18 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
     CardResult.entry.commander_legality/is_game_changer/etc. are only
     meaningful when it's true (see build_comparison's own param of the same
     name).
+
+    `ai_summary`, if given, is the strategy explanation Claude wrote when
+    this brew was built/improved via "Build with AI" (ai_builder.py) --
+    persisted on the saved project (see app.py's /builder/save) purely so
+    it survives past the builder's own transient suggestions panel and
+    shows up here too, not just in the moment right after a build.
+    `further_optimizations`, if given, is a list of one-line descriptions
+    of swaps applied via the deterministic (non-AI) Optimize Deck button
+    after the AI summary was written -- keeps the AI's own narrative from
+    silently going stale relative to what's actually in the deck now.
     """
+    further_optimizations = further_optimizations or []
     total_cards = totals["owned"] + totals["missing"]
     pct = (totals["owned"] / total_cards * 100) if total_cards else 100.0
     max_card_price = 0.0
@@ -3583,9 +3600,21 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
     ]
     sample_hand_json = json.dumps(sample_hand_pool)
 
+    ai_summary_html = (
+        f'<div class="ai-summary-note"><b>&#10024; AI Summary</b> -- {html.escape(ai_summary)}</div>'
+        if ai_summary else ""
+    )
+    further_optimizations_html = (
+        '<div class="ai-summary-note"><b>&#9889; Further Optimizations</b><ul class="rule0-list" style="margin-top:6px;">'
+        + "".join(f"<li>{html.escape(t)}</li>" for t in further_optimizations)
+        + "</ul></div>"
+        if further_optimizations else ""
+    )
     deck_analysis_html = f"""<details class="combos-panel" open>
 <summary>&#128202; Deck Analysis</summary>
 <div class="deck-analysis-body">
+  {ai_summary_html}
+  {further_optimizations_html}
   <div>
     <div class="analysis-stat-line">
       Average mana value: <b>{avg_with_lands:.2f}</b> with lands / <b>{avg_without_lands:.2f}</b> without &middot;

@@ -202,7 +202,7 @@ def _run_compare_job(job_id, entries, owned, break_out_basics, reserved,
                 job["error"] = str(e)
 
 
-def _run_brew_report_job(job_id, entries, owned, deck_id, deck_name, is_commander_format):
+def _run_brew_report_job(job_id, entries, owned, deck_id, deck_name, is_commander_format, ai_summary="", further_optimizations=None):
     """Same job shape as _run_compare_job, for the deck builder's "View
     full report" button -- reuses the exact same /compare/progress and
     /compare/result polling routes, so a brew's report is a saved decklist
@@ -224,7 +224,8 @@ def _run_brew_report_job(job_id, entries, owned, deck_id, deck_name, is_commande
         html_report = render_html(
             deck_name, "", deck_id, bucket_names, buckets, totals,
             overrides_endpoint=f"/api/overrides/{deck_id}",
-            is_commander_format=is_commander_format,
+            is_commander_format=is_commander_format, ai_summary=ai_summary,
+            further_optimizations=further_optimizations,
         )
         with _JOBS_LOCK:
             job = JOBS.get(job_id)
@@ -281,6 +282,7 @@ def _run_ai_build_job(job_id, commander, deck_format, target_format, target_size
                     job["status"] = "done"
                     job["suggestions"] = result["suggestions"]
                     job["removed"] = result["removed"]
+                    job["final_entries"] = result["final_entries"]
                     job["finished"] = result["finished"]
                     job["summary"] = result["summary"]
     except Exception as e:  # noqa: BLE001 -- surface any failure to the polling client
@@ -903,7 +905,7 @@ body::after {
 }
 .action-group { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .builder-layout { display:grid; grid-template-columns: 1.8fr 1fr; gap:20px; align-items:start; margin-top:20px; }
-.builder-filters { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
+.builder-filters { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:28px; }
 .builder-filters input[type=text] { flex:1; min-width:160px; margin:0; }
 .builder-filters select {
   padding:8px 10px; border-radius:8px; border:1px solid var(--card-border);
@@ -1180,6 +1182,8 @@ def render_builder_page(deck_id: str | None = None) -> str:
         "preferred_theme_tag_ids": brew.get("preferred_theme_tag_ids") or [],
         "preferred_theme_label": brew.get("preferred_theme_label") or "",
         "excluded_set_codes": brew.get("excluded_set_codes") or [],
+        "ai_summary": brew.get("ai_summary") or "",
+        "further_optimizations": brew.get("further_optimizations") or [],
     }
 
     category_options = "".join(f'<option value="{_esc(b)}">{_esc(b)}</option>' for b in BUCKET_ORDER)
@@ -1321,6 +1325,14 @@ def render_builder_page(deck_id: str | None = None) -> str:
     </div>
     <div class="modal-body">
       <div id="analyze-badges"></div>
+      <div id="ai-summary-block" style="display:none;">
+        <h4 class="analysis-heading">&#10024; AI Summary</h4>
+        <p class="hint" id="ai-summary-text" style="margin:0 0 12px;"></p>
+      </div>
+      <div id="further-optimizations-block" style="display:none;">
+        <h4 class="analysis-heading">&#9889; Further Optimizations</h4>
+        <ul class="rule0-list" id="further-optimizations-list"></ul>
+      </div>
       <div class="hint" id="analyze-loading" style="margin:0 0 12px;">Checking&hellip; (calls Commander Spellbook live, may take a few seconds)</div>
 
       <h4 class="analysis-heading">Rule 0 summary</h4>
@@ -2272,6 +2284,12 @@ optimizeBtn.addEventListener('click', () => {{
       function applySwap(p) {{
         removeCard(p.remove.name);
         addCard(p.add);
+        // Recorded onto the brew (not just applied) so Analyze Deck and
+        // the full report can show a "Further Optimizations" trail below
+        // the AI summary -- otherwise a deterministic Optimize swap made
+        // after an AI build leaves the AI's own narrative silently
+        // out of sync with what's actually in the deck now.
+        brew.further_optimizations.push(`+ ${{p.add.name}} (${{p.reason}}) — cut ${{p.remove.name}}`);
       }}
       const applyAllBtn = Object.assign(document.createElement('button'), {{
         className: 'btn ghost small', style: 'margin-bottom:8px;margin-right:8px;',
@@ -2464,12 +2482,60 @@ function fetchAiResult(jobId) {{
     .then(data => {{
       if (data.error) {{ showAiError(data.error); showAiPhase('confirm'); return; }}
       closeAiModal();
-      renderAiSuggestions(data);
+      if (data.mode === 'import') {{
+        applyAiImportResult(data);
+      }} else {{
+        renderAiSuggestions(data);
+      }}
     }})
     .catch(() => {{ showAiError('Could not reach the server.'); showAiPhase('confirm'); }});
 }}
 
+// Import & improve is a different shape of result than fresh/improve:
+// the point was never to keep hand-picking individual suggestions in the
+// builder (there's nothing to "do" with a bare list there) -- it's to
+// end up with a real deck you can immediately see owned-vs-missing for.
+// So this replaces the WIP deck outright with the AI's full final list
+// (commander + everything it kept or added -- see run_ai_build's
+// final_entries, which exists specifically because the originally
+// imported/pasted cards were otherwise never sent back to the client at
+// all), names it, saves it, and jumps straight into the existing
+// compare/report view -- same one-click flow "View full report" already
+// uses, just triggered automatically instead of requiring Save then
+// View full report by hand afterward.
+function applyAiImportResult(data) {{
+  if (data.summary) {{ brew.ai_summary = data.summary; }}
+  brew.further_optimizations = [];  // fresh AI-built deck -- no stale trail from whatever was here before
+  const commanderEntry = (data.final_entries || []).find(c => c.section === 'commander');
+  const libraryEntries = (data.final_entries || []).filter(c => c.section !== 'commander');
+  brew.commander = commanderEntry ? {{
+    name: commanderEntry.name, scryfall_id: commanderEntry.scryfall_id, type_line: commanderEntry.type_line,
+    color_identity: commanderEntry.color_identity, cmc: commanderEntry.cmc, mana_cost: commanderEntry.mana_cost,
+    category: commanderEntry.category, quantity: 1, set_code: commanderEntry.set_code,
+    collector_number: commanderEntry.collector_number,
+  }} : null;
+  brew.cards = libraryEntries.map(c => ({{
+    name: c.name, quantity: c.quantity, scryfall_id: c.scryfall_id, cmc: c.cmc, mana_cost: c.mana_cost,
+    type_line: c.type_line, color_identity: c.color_identity, category: c.category,
+    set_code: c.set_code, collector_number: c.collector_number,
+  }}));
+  if (data.guessed_deck_name) {{
+    brew.deck_name = data.guessed_deck_name;
+    document.getElementById('deck-name').value = data.guessed_deck_name;
+  }}
+  renderAll();
+  if (data.import_unresolved && data.import_unresolved.length) {{
+    showError(`Couldn't recognize ${{data.import_unresolved.length}} line(s) from your import: ${{data.import_unresolved.slice(0, 5).join('; ')}}`);
+  }}
+  saveThenViewReport();
+}}
+
 function renderAiSuggestions(data) {{
+  // Persisted onto the brew (not just shown here) so it survives past
+  // this transient panel -- Analyze Deck and the full report's Deck
+  // Analysis section both surface it once the deck is saved, instead of
+  // the AI's own reasoning being lost the moment this panel is dismissed.
+  if (data.summary) {{ brew.ai_summary = data.summary; brew.further_optimizations = []; }}
   const panel = document.getElementById('suggestions-panel');
   panel.innerHTML = '<h4 style="font-size:0.8rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.03em;">&#10024; AI-Built Deck</h4>';
   if (data.summary) {{
@@ -2734,6 +2800,11 @@ analyzeBtn.addEventListener('click', () => {{
   lastAnalyzeData = null;
   analyzeModal.classList.add('show');
   document.getElementById('analyze-modal-title').textContent = brew.deck_name || document.getElementById('deck-name').value || 'Analyze Deck';
+  document.getElementById('ai-summary-block').style.display = brew.ai_summary ? 'block' : 'none';
+  document.getElementById('ai-summary-text').textContent = brew.ai_summary || '';
+  const furtherOpts = brew.further_optimizations || [];
+  document.getElementById('further-optimizations-block').style.display = furtherOpts.length ? 'block' : 'none';
+  document.getElementById('further-optimizations-list').innerHTML = furtherOpts.map(t => `<li>${{escapeHtml(t)}}</li>`).join('');
   renderDeckAnalysis();
   drawSampleHand();
   document.getElementById('analyze-badges').innerHTML = '';
@@ -2849,7 +2920,7 @@ function pollReportProgress(jobId) {{
 }}
 
 const reportBtn = document.getElementById('report-btn');
-reportBtn.addEventListener('click', () => {{
+function saveThenViewReport() {{
   if (!brew.cards.length) {{ showError('Add some cards first.'); return; }}
   reportBtn.disabled = true;
   fetch('/builder/save', {{
@@ -2875,7 +2946,8 @@ reportBtn.addEventListener('click', () => {{
       showError(e.message || 'Could not reach the server.');
       reportBtn.disabled = false;
     }});
-}});
+}}
+reportBtn.addEventListener('click', saveThenViewReport);
 </script>
 </body>
 </html>
@@ -2979,6 +3051,8 @@ def builder_save():
         preferred_theme_tag_ids=body.get("preferred_theme_tag_ids") or [],
         preferred_theme_label=body.get("preferred_theme_label") or "",
         excluded_set_codes=body.get("excluded_set_codes") or [],
+        ai_summary=body.get("ai_summary") or "",
+        further_optimizations=body.get("further_optimizations") or [],
     )
     return jsonify(deck_id=deck_id)
 
@@ -3130,6 +3204,7 @@ def builder_ai_build_start():
     wip_entries = None
     scope = "owned"
     import_unresolved: list[str] = []
+    guessed_deck_name = None
 
     if mode == "improve":
         wip_entries = brew_to_card_entries({"commander": commander, "cards": body.get("cards") or []})
@@ -3143,6 +3218,7 @@ def builder_ai_build_start():
             except ValueError as e:
                 return jsonify(error=str(e)), 400
             wip_entries = extract_entries(source, deck, include_sideboard=False, include_maybeboard=False)
+            guessed_deck_name = deck.get("name") or deck_id
         elif import_text:
             parsed = parse_pasted_decklist(import_text)
             import_unresolved = parsed["unresolved"]
@@ -3164,6 +3240,8 @@ def builder_ai_build_start():
                 "set_code": imported_commander.set_code, "collector_number": imported_commander.collector_number,
             }
             deck_format = "commander"
+        if not guessed_deck_name and commander.get("name"):
+            guessed_deck_name = f"{commander['name']} (AI-improved)"
         scope = "any"
 
     if deck_format == "commander" and not commander.get("name"):
@@ -3181,8 +3259,9 @@ def builder_ai_build_start():
     with _JOBS_LOCK:
         JOBS[job_id] = {
             "status": "running", "done": 0, "total": 0, "stage": None,
-            "log": [], "deck_state": [], "suggestions": None, "removed": [], "finished": False, "summary": "",
-            "error": None, "import_unresolved": import_unresolved,
+            "log": [], "deck_state": [], "suggestions": None, "removed": [], "final_entries": [], "finished": False,
+            "summary": "", "error": None, "import_unresolved": import_unresolved, "mode": mode,
+            "guessed_deck_name": guessed_deck_name,
         }
 
     threading.Thread(
@@ -3232,6 +3311,8 @@ def builder_ai_build_result(job_id):
     return jsonify(
         suggestions=job["suggestions"], removed=job.get("removed") or [], finished=job["finished"],
         summary=job["summary"], import_unresolved=job.get("import_unresolved") or [],
+        final_entries=job.get("final_entries") or [], mode=job.get("mode") or "fresh",
+        guessed_deck_name=job.get("guessed_deck_name"),
     )
 
 
@@ -3358,6 +3439,7 @@ def builder_report_start():
     threading.Thread(
         target=_run_brew_report_job,
         args=(job_id, entries, owned, deck_id, brew.get("deck_name") or "Brew", is_commander_format),
+        kwargs={"ai_summary": brew.get("ai_summary") or "", "further_optimizations": brew.get("further_optimizations") or []},
         daemon=True,
     ).start()
 
