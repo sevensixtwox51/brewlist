@@ -146,10 +146,31 @@ def _full_card_pool(
         current_gc_count = sum(e.quantity for e in wip_entries if normalize_name(e.name) in game_changers)
         gc_at_cap = current_gc_count >= gc_cap
 
-    candidates = []
+    # MTGJSON indexes a multi-faced card (split/DFC/Adventure) under BOTH
+    # its full "Front // Back" name and each individual face name, all
+    # sharing one scryfall_id -- iterating the whole dict as-is would
+    # surface the same physical card up to 3x under different-looking
+    # names (confirmed live: "Thranduil, Sindarin Liege", "... // Silvan
+    # Rally", and "Silvan Rally" all appeared as separate search results
+    # for one owned card, and the bare-face-name variant got a false
+    # owned=False annotation since owned_view records it under the full
+    # name). Dedupe by scryfall_id first, preferring whichever variant
+    # contains " // " -- the full-name convention this app already uses
+    # everywhere else (owned_view, Moxfield/Archidekt import/export).
+    deduped: dict[str, dict] = {}
     for nm, gp in gameplay.items():
-        if nm in used_names:
+        key = gp.get("scryfall_id") or f"noid:{nm}"
+        existing = deduped.get(key)
+        name = gp.get("name") or nm
+        if existing is None or ("//" in name and "//" not in (existing.get("name") or "")):
+            deduped[key] = gp
+
+    candidates = []
+    for gp in deduped.values():
+        name = gp.get("name") or ""
+        if normalize_name(name) in used_names:
             continue
+        nm = normalize_name(name)
         if gc_at_cap and nm in game_changers:
             continue
         color_identity = gp.get("color_identity") or []
@@ -163,7 +184,7 @@ def _full_card_pool(
             elif legality != "Legal":
                 continue
         candidates.append({
-            "name": gp.get("name") or nm,
+            "name": name,
             "type_line": gp.get("type_line") or "",
             "mana_cost": gp.get("mana_cost") or "",
             "cmc": gp.get("cmc") or 0,
