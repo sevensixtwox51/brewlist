@@ -32,6 +32,7 @@ from brewlist_core import (
     BUCKET_ORDER,
     PICKABLE_STORE_LABELS,
     STORE_DISPLAY_NAMES,
+    CardEntry,
     build_comparison,
     deck_is_commander_format,
     deck_key,
@@ -43,6 +44,7 @@ from brewlist_core import (
     load_store_prefs,
     normalize_name,
     parse_deck_ref,
+    parse_pasted_decklist,
     price_index_built_at,
     render_html,
     save_store_prefs,
@@ -238,7 +240,8 @@ def _run_brew_report_job(job_id, entries, owned, deck_id, deck_name, is_commande
 
 
 def _run_ai_build_job(job_id, commander, deck_format, target_format, target_size,
-                       commander_color_identity, intended_bracket, user_notes, owned_view, api_key):
+                       commander_color_identity, intended_bracket, user_notes, owned_view, api_key,
+                       wip_entries=None, scope="owned"):
     """Same JOBS/threading shape as _run_compare_job -- runs
     ai_builder.run_ai_build() (a multi-round-trip Claude tool-use loop, so
     genuinely slow) in a background thread. Unlike the compare/report jobs
@@ -246,7 +249,12 @@ def _run_ai_build_job(job_id, commander, deck_format, target_format, target_size
     summaries) and `deck_state` (current WIP cards) so the client can
     render live progress, not just a done/total counter -- see
     /builder/ai-build/progress, a new route rather than widening
-    /compare/progress's existing response shape."""
+    /compare/progress's existing response shape.
+
+    `wip_entries`/`scope` are just threaded through to run_ai_build() --
+    see its own docstring for what "improve the current deck" (wip_entries
+    seeded from the WIP deck) and "import & improve" (scope="any", full
+    card database) actually change."""
     def _on_progress(done, total, stage, log, deck_state):
         with _JOBS_LOCK:
             job = JOBS.get(job_id)
@@ -261,6 +269,7 @@ def _run_ai_build_job(job_id, commander, deck_format, target_format, target_size
         result = run_ai_build(
             commander, deck_format, target_format, target_size, commander_color_identity,
             intended_bracket, user_notes, owned_view, api_key, _on_progress,
+            wip_entries=wip_entries, scope=scope,
         )
         with _JOBS_LOCK:
             job = JOBS.get(job_id)
@@ -271,6 +280,7 @@ def _run_ai_build_job(job_id, commander, deck_format, target_format, target_size
                 else:
                     job["status"] = "done"
                     job["suggestions"] = result["suggestions"]
+                    job["removed"] = result["removed"]
                     job["finished"] = result["finished"]
                     job["summary"] = result["summary"]
     except Exception as e:  # noqa: BLE001 -- surface any failure to the polling client
@@ -1348,8 +1358,32 @@ def render_builder_page(deck_id: str | None = None) -> str:
     <div class="modal-body">
       <div class="error" id="ai-modal-error" style="display:none;"></div>
 
-      <div id="ai-setup-phase">
-        <p class="hint" style="margin:0 0 10px;">Claude reads your commander's actual card text and searches your owned collection for whatever it decides is relevant -- not limited to Suggest's fixed tag list. This calls the Anthropic API using your own key, which needs its own billing set up and costs a small amount per build (typically well under a dollar).</p>
+      <div id="ai-mode-phase">
+        <p class="hint" style="margin:0 0 10px;">Claude reads your commander's actual card text and searches for whatever it decides is relevant -- not limited to Suggest's fixed tag list.</p>
+        <button type="button" class="btn" id="ai-mode-fresh-btn" style="display:block;width:100%;text-align:left;margin-bottom:8px;">
+          <strong>Build deck from chosen commander</strong><br><span class="hint" style="margin:0;">Starts fresh from just your commander.</span>
+        </button>
+        <button type="button" class="btn" id="ai-mode-improve-btn" style="display:block;width:100%;text-align:left;margin-bottom:8px;">
+          <strong>Improve/optimize current deck</strong><br><span class="hint" style="margin:0;">Keeps what you've already chosen and builds on it.</span>
+        </button>
+        <button type="button" class="btn" id="ai-mode-import-btn" style="display:block;width:100%;text-align:left;">
+          <strong>Improve deck from import</strong><br><span class="hint" style="margin:0;">Paste a decklist or a Moxfield/Archidekt URL -- may include cards you don't own. Get a report of what to buy afterward.</span>
+        </button>
+      </div>
+
+      <div id="ai-import-phase" style="display:none;">
+        <p class="hint" style="margin:0 0 8px;">Fill in either one -- not both.</p>
+        <label for="ai-import-url-input" style="font-size:0.85rem;font-weight:600;">Moxfield or Archidekt URL</label>
+        <input type="text" id="ai-import-url-input" placeholder="https://moxfield.com/decks/..." style="width:100%;box-sizing:border-box;margin:6px 0 10px;">
+        <label for="ai-import-text-input" style="font-size:0.85rem;font-weight:600;">Or paste a decklist</label>
+        <textarea id="ai-import-text-input" rows="6" placeholder="1 Sol Ring&#10;1 Command Tower&#10;..." style="width:100%;box-sizing:border-box;margin:6px 0 10px;font-family:monospace;font-size:0.82rem;"></textarea>
+        <p class="hint" style="margin:0 0 12px;">A pasted list doesn't carry a commander -- your already-chosen commander is used. A Commander-format URL import uses its own commander automatically.</p>
+        <button type="button" class="btn" id="ai-import-continue-btn">Continue</button>
+        <button type="button" class="btn ghost small" id="ai-import-back-btn">&larr; Back</button>
+      </div>
+
+      <div id="ai-setup-phase" style="display:none;">
+        <p class="hint" style="margin:0 0 10px;">This calls the Anthropic API using your own key, which needs its own billing set up and costs a small amount per build (typically well under a dollar).</p>
         <ol style="margin:0 0 12px;padding-left:20px;font-size:0.85rem;">
           <li>Go to <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com/settings/keys</a> and sign in (or create an account).</li>
           <li>Add billing under Settings &rarr; Billing if you haven't already.</li>
@@ -1365,7 +1399,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
         <p class="hint" style="margin:0 0 8px;" id="ai-key-configured-note"></p>
         <label for="ai-notes-input" style="font-size:0.85rem;font-weight:600;">Anything specific you want this deck to do? (optional)</label>
         <textarea id="ai-notes-input" rows="3" placeholder="e.g. lean into graveyard recursion, keep it low to the ground, prioritize card draw" style="width:100%;box-sizing:border-box;margin:6px 0 10px;font-family:inherit;"></textarea>
-        <p class="hint" style="margin:0 0 12px;">This can take several minutes (up to 7) and makes many real API calls on your account. The result won't be applied until you review and approve it.</p>
+        <p class="hint" style="margin:0 0 12px;" id="ai-confirm-note">This can take several minutes (up to 7) and makes many real API calls on your account. The result won't be applied until you review and approve it.</p>
         <button type="button" class="btn" id="ai-start-btn">Start Build</button>
         <button type="button" class="btn ghost small" id="ai-change-key-btn">Change / Remove Key</button>
       </div>
@@ -2288,12 +2322,15 @@ function escapeHtml(s) {{
 
 const aiModal = document.getElementById('ai-modal');
 const aiModalError = document.getElementById('ai-modal-error');
+const aiModePhase = document.getElementById('ai-mode-phase');
+const aiImportPhase = document.getElementById('ai-import-phase');
 const aiSetupPhase = document.getElementById('ai-setup-phase');
 const aiConfirmPhase = document.getElementById('ai-confirm-phase');
 const aiProgressPhase = document.getElementById('ai-progress-phase');
 const aiKeyInput = document.getElementById('ai-key-input');
 const aiKeyStatus = document.getElementById('ai-key-status');
 const aiKeyConfiguredNote = document.getElementById('ai-key-configured-note');
+let aiMode = 'fresh';  // 'fresh' | 'improve' | 'import'
 
 function closeAiModal() {{ aiModal.classList.remove('show'); }}
 document.getElementById('ai-modal-close').addEventListener('click', closeAiModal);
@@ -2303,29 +2340,57 @@ document.addEventListener('keydown', (e) => {{ if (e.key === 'Escape' && aiModal
 function showAiError(msg) {{ aiModalError.textContent = msg; aiModalError.style.display = 'block'; }}
 function hideAiError() {{ aiModalError.style.display = 'none'; }}
 function showAiPhase(phase) {{
+  aiModePhase.style.display = phase === 'mode' ? 'block' : 'none';
+  aiImportPhase.style.display = phase === 'import' ? 'block' : 'none';
   aiSetupPhase.style.display = phase === 'setup' ? 'block' : 'none';
   aiConfirmPhase.style.display = phase === 'confirm' ? 'block' : 'none';
   aiProgressPhase.style.display = phase === 'progress' ? 'block' : 'none';
 }}
 
 document.getElementById('ai-build-btn').addEventListener('click', () => {{
-  if (brew.format === 'commander' && !brew.commander) {{ showError('Choose a commander first.'); return; }}
   hideAiError();
   aiKeyInput.value = '';
   aiKeyStatus.textContent = '';
+  document.getElementById('ai-import-url-input').value = '';
+  document.getElementById('ai-import-text-input').value = '';
+  document.getElementById('ai-mode-improve-btn').style.display = brew.cards.length ? '' : 'none';
   aiModal.classList.add('show');
+  showAiPhase('mode');
+}});
+
+function aiProceedAfterMode() {{
+  if (aiMode !== 'import' && brew.format === 'commander' && !brew.commander) {{ closeAiModal(); showError('Choose a commander first.'); return; }}
   fetch('/ai/status')
     .then(r => r.json())
     .then(data => {{
       if (data.configured) {{
         aiKeyConfiguredNote.textContent = data.source === 'env'
           ? 'Using the ANTHROPIC_API_KEY environment variable.' : 'Using your saved API key.';
+        const notes = {{
+          fresh: 'This can take several minutes (up to 7) and makes many real API calls on your account. The result won’t be applied until you review and approve it.',
+          improve: `Your existing ${{brew.cards.length}} card(s) are kept unless there’s a clear reason to change one. Can take several minutes and makes many real API calls on your account. Nothing changes until you review and approve it.`,
+          import: 'May suggest cards you don’t own -- nothing is applied until you review it, and once applied you can use Save + View full report to see what’s already owned vs. what to buy. Can take several minutes and makes many real API calls on your account.',
+        }};
+        document.getElementById('ai-confirm-note').textContent = notes[aiMode] || notes.fresh;
         showAiPhase('confirm');
       }} else {{
         showAiPhase('setup');
       }}
     }})
     .catch(() => showAiError('Could not reach the server.'));
+}}
+
+document.getElementById('ai-mode-fresh-btn').addEventListener('click', () => {{ aiMode = 'fresh'; aiProceedAfterMode(); }});
+document.getElementById('ai-mode-improve-btn').addEventListener('click', () => {{ aiMode = 'improve'; aiProceedAfterMode(); }});
+document.getElementById('ai-mode-import-btn').addEventListener('click', () => {{ aiMode = 'import'; showAiPhase('import'); }});
+document.getElementById('ai-import-back-btn').addEventListener('click', () => {{ showAiPhase('mode'); }});
+document.getElementById('ai-import-continue-btn').addEventListener('click', () => {{
+  const url = document.getElementById('ai-import-url-input').value.trim();
+  const text = document.getElementById('ai-import-text-input').value.trim();
+  if (!url && !text) {{ showAiError('Paste a decklist or provide a URL first.'); return; }}
+  hideAiError();
+  aiMode = 'import';
+  aiProceedAfterMode();
 }});
 
 document.getElementById('ai-key-save-btn').addEventListener('click', () => {{
@@ -2340,8 +2405,7 @@ document.getElementById('ai-key-save-btn').addEventListener('click', () => {{
     .then(data => {{
       if (data.error) {{ aiKeyStatus.textContent = data.error; return; }}
       aiKeyInput.value = '';
-      aiKeyConfiguredNote.textContent = 'Using your saved API key.';
-      showAiPhase('confirm');
+      aiProceedAfterMode();
     }})
     .catch(() => {{ aiKeyStatus.textContent = 'Could not reach the server.'; }});
 }});
@@ -2364,6 +2428,9 @@ document.getElementById('ai-start-btn').addEventListener('click', () => {{
     body: JSON.stringify({{
       cards: brew.cards, commander: brew.commander, format: brew.format, target_format: brew.target_format,
       intended_bracket: brew.intended_bracket, user_notes: document.getElementById('ai-notes-input').value,
+      mode: aiMode,
+      import_url: document.getElementById('ai-import-url-input').value.trim(),
+      import_text: document.getElementById('ai-import-text-input').value.trim(),
     }}),
   }})
     .then(r => r.json())
@@ -2411,10 +2478,34 @@ function renderAiSuggestions(data) {{
   if (!data.finished) {{
     panel.innerHTML += '<p class="hint" style="margin:0 0 8px;color:var(--missing);">Claude hit the time/turn limit before calling finish -- this list may be short of a full deck.</p>';
   }}
-  if (!data.suggestions.length) {{
-    panel.innerHTML += '<div class="hint" style="margin:0;">Claude didn’t add anything -- try again, or add a note about what you want.</div>';
+  if (data.import_unresolved && data.import_unresolved.length) {{
+    panel.innerHTML += `<p class="hint" style="margin:0 0 8px;color:var(--missing);">Couldn’t recognize ${{data.import_unresolved.length}} line(s) from your import: ${{escapeHtml(data.import_unresolved.slice(0, 5).join('; '))}}</p>`;
+  }}
+  if (!data.suggestions.length && !(data.removed || []).length) {{
+    panel.innerHTML += '<div class="hint" style="margin:0;">Claude didn’t change anything -- try again, or add a note about what you want.</div>';
     return;
   }}
+
+  if ((data.removed || []).length) {{
+    const removeHeader = document.createElement('div');
+    removeHeader.className = 'hint';
+    removeHeader.style.margin = '0 0 6px';
+    removeHeader.textContent = 'Suggested cuts:';
+    panel.appendChild(removeHeader);
+    data.removed.forEach(name => {{
+      const row = document.createElement('div');
+      row.className = 'suggestion-row';
+      row.innerHTML = `<span class="row-name"><span>${{escapeHtml(name)}}</span></span>`;
+      const cutBtn = Object.assign(document.createElement('button'), {{
+        className: 'btn ghost small', textContent: 'Remove',
+        onclick: () => {{ removeCard(name); row.remove(); }},
+      }});
+      row.appendChild(cutBtn);
+      panel.appendChild(row);
+    }});
+  }}
+
+  if (!data.suggestions.length) return;
   let remaining = data.suggestions.slice();
   const addAllBtn = Object.assign(document.createElement('button'), {{
     className: 'btn ghost small', style: 'margin-bottom:8px;margin-right:8px;',
@@ -3001,12 +3092,30 @@ def builder_ai_build_start():
     """Kicks off the agentic "Build with AI" loop (see ai_builder.py) in a
     background thread -- same JOBS/threading/poll shape /compare/start
     already established, since a multi-round-trip Claude tool-use build
-    genuinely takes a while and shouldn't block one long request."""
+    genuinely takes a while and shouldn't block one long request.
+
+    `mode` ("fresh" | "improve" | "import", default "fresh") picks which
+    of the three modal options fired this call:
+    - "fresh": today's original behavior -- no wip_entries, starts from
+      just the commander.
+    - "improve": seeds wip_entries from the WIP deck's own cards
+      (`body["cards"]`) via brew_to_card_entries(), same helper
+      /builder/suggest and /builder/optimize already use -- so the loop
+      builds on what's already chosen instead of discarding it.
+    - "import": seeds wip_entries from a Moxfield/Archidekt URL
+      (`import_url`, reusing parse_deck_ref/fetch_deck/extract_entries
+      exactly like /compare does) or a pasted plain-text decklist
+      (`import_text`, via parse_pasted_decklist()) and runs with
+      scope="any" -- the candidate pool becomes every real, legal card,
+      not just owned ones, since the point is often to find what's worth
+      *buying*. A Commander-format import's own commander (tagged via
+      extract_entries' section=="commander") is used directly; otherwise
+      falls back to whatever commander the builder already has set."""
     body = request.get_json(silent=True) or {}
     deck_format = body.get("format") if body.get("format") in ("commander", "constructed") else "commander"
+    mode = body.get("mode") if body.get("mode") in ("fresh", "improve", "import") else "fresh"
     commander = body.get("commander") or {}
-    if deck_format == "commander" and not commander.get("name"):
-        return jsonify(error="Choose a commander first."), 400
+
     api_key = load_api_key()
     if not api_key:
         return jsonify(error="No Anthropic API key configured yet."), 400
@@ -3017,6 +3126,49 @@ def builder_ai_build_start():
     except ValueError as e:
         return jsonify(error=str(e)), 400
     owned_view = owned_collection_gameplay_view(owned, gameplay_data_in_index())
+
+    wip_entries = None
+    scope = "owned"
+    import_unresolved: list[str] = []
+
+    if mode == "improve":
+        wip_entries = brew_to_card_entries({"commander": commander, "cards": body.get("cards") or []})
+    elif mode == "import":
+        import_url = (body.get("import_url") or "").strip()
+        import_text = (body.get("import_text") or "").strip()
+        if import_url:
+            try:
+                source, deck_id = parse_deck_ref(import_url)
+                deck = fetch_deck(source, deck_id)
+            except ValueError as e:
+                return jsonify(error=str(e)), 400
+            wip_entries = extract_entries(source, deck, include_sideboard=False, include_maybeboard=False)
+        elif import_text:
+            parsed = parse_pasted_decklist(import_text)
+            import_unresolved = parsed["unresolved"]
+            commander_entry = CardEntry(
+                name=commander.get("name", ""), quantity=1, type_line=commander.get("type_line", ""),
+                is_foil=False, section="commander", scryfall_id=commander.get("scryfall_id"),
+                color_identity=commander.get("color_identity") or [],
+                set_code=commander.get("set_code", ""), collector_number=commander.get("collector_number", ""),
+            )
+            wip_entries = [commander_entry] + parsed["entries"] if commander.get("name") else parsed["entries"]
+        else:
+            return jsonify(error="Paste a decklist or provide a Moxfield/Archidekt URL first."), 400
+
+        imported_commander = next((e for e in wip_entries if e.section == "commander"), None)
+        if imported_commander:
+            commander = {
+                "name": imported_commander.name, "type_line": imported_commander.type_line,
+                "color_identity": imported_commander.color_identity, "scryfall_id": imported_commander.scryfall_id,
+                "set_code": imported_commander.set_code, "collector_number": imported_commander.collector_number,
+            }
+            deck_format = "commander"
+        scope = "any"
+
+    if deck_format == "commander" and not commander.get("name"):
+        return jsonify(error="Choose a commander first." if mode != "import" else "This import has no commander -- choose one in the builder first, or import a Commander deck/list."), 400
+
     # The commander's own oracle text is what ai_builder actually reasons
     # over (see its system prompt) -- look it up fresh from the gameplay
     # index rather than trusting whatever the client happened to have
@@ -3029,7 +3181,8 @@ def builder_ai_build_start():
     with _JOBS_LOCK:
         JOBS[job_id] = {
             "status": "running", "done": 0, "total": 0, "stage": None,
-            "log": [], "deck_state": [], "suggestions": None, "finished": False, "summary": "", "error": None,
+            "log": [], "deck_state": [], "suggestions": None, "removed": [], "finished": False, "summary": "",
+            "error": None, "import_unresolved": import_unresolved,
         }
 
     threading.Thread(
@@ -3040,6 +3193,7 @@ def builder_ai_build_start():
             body.get("intended_bracket") or None, (body.get("user_notes") or "").strip(),
             owned_view, api_key,
         ),
+        kwargs={"wip_entries": wip_entries, "scope": scope},
         daemon=True,
     ).start()
 
@@ -3075,7 +3229,10 @@ def builder_ai_build_result(job_id):
         return jsonify(error=job.get("error") or "The AI build failed."), 400
     if job["status"] != "done":
         return jsonify(error="That build hasn't finished yet."), 409
-    return jsonify(suggestions=job["suggestions"], finished=job["finished"], summary=job["summary"])
+    return jsonify(
+        suggestions=job["suggestions"], removed=job.get("removed") or [], finished=job["finished"],
+        summary=job["summary"], import_unresolved=job.get("import_unresolved") or [],
+    )
 
 
 @app.route("/builder/themes", methods=["POST"])

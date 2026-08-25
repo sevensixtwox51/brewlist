@@ -230,6 +230,52 @@ def extract_entries(source: str, deck: dict, include_sideboard: bool, include_ma
     return _extract_moxfield_entries(deck, include_sideboard, include_maybeboard)
 
 
+_PASTED_LINE_RE = re.compile(r"^(\d+)x?\s+(.+?)$", re.IGNORECASE)
+_PASTED_PRINTING_SUFFIX_RE = re.compile(r"\s*\([A-Za-z0-9]{2,6}\)\s*\S+\s*$")
+
+
+def parse_pasted_decklist(text: str) -> dict:
+    """Parses a plain-text decklist paste ("1 Sol Ring", "4x Opt", "2
+    Command Tower (LTR) 262" -- one card per line) into CardEntry objects,
+    resolving each name against gameplay_data_in_index() (the full,
+    not-owned-only index -- see its own docstring -- so an "improve an
+    imported list" build can search/reason about unowned cards too) so
+    only real cards make it through. Returns {"entries": [...],
+    "unresolved": [raw line strings that didn't resolve to a real card]}
+    -- unresolved lines are reported back to the caller rather than
+    silently dropped, same "tell the user, don't guess" discipline this
+    app already follows for MTGJSON's legality-omission convention.
+
+    No commander detection: Moxfield's own paste-import doesn't embed the
+    commander in the pasted list either (confirmed live against its UI
+    earlier this session, see the Deck Builder's "Copy Decklist" export)
+    -- every line here becomes a mainboard entry, and the caller supplies
+    the commander separately, same as brew_to_card_entries()."""
+    gameplay = gameplay_data_in_index()
+    entries: list[CardEntry] = []
+    unresolved: list[str] = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or line.startswith("//"):
+            continue
+        match = _PASTED_LINE_RE.match(line)
+        if not match:
+            unresolved.append(raw_line)
+            continue
+        quantity = int(match.group(1))
+        name_part = _PASTED_PRINTING_SUFFIX_RE.sub("", match.group(2)).strip()
+        gp = gameplay.get(normalize_name(name_part))
+        if not gp:
+            unresolved.append(raw_line)
+            continue
+        entries.append(CardEntry(
+            name=gp.get("name") or name_part, quantity=quantity, type_line=gp.get("type_line") or "",
+            is_foil=False, section="mainboard", scryfall_id=gp.get("scryfall_id") or None,
+            color_identity=gp.get("color_identity") or [], cmc=gp.get("cmc") or 0.0, mana_cost=gp.get("mana_cost") or "",
+        ))
+    return {"entries": entries, "unresolved": unresolved}
+
+
 def deck_is_commander_format(source: str, deck: dict) -> bool:
     """Whether this deck is Commander/EDH, used to decide whether it makes
     sense to check cards against Commander's banned list (see
@@ -703,7 +749,7 @@ PRICE_INDEX_MAX_AGE_DAYS = 7
 # the "sets" field (set name + release date per set code) for the deck
 # builder's Set Selection filter. v16: added "card_count" (baseSetSize) to
 # each "sets" entry, for "N / M owned" in the Set filter popups.
-PRICE_INDEX_FORMAT_VERSION = 16
+PRICE_INDEX_FORMAT_VERSION = 17
 
 
 # --------------------------------------------------------------------------
@@ -1170,6 +1216,15 @@ def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[
                         "color_identity": card.get("colorIdentity") or [],
                         "oracle_text": card.get("text") or "",
                         "legalities": card.get("legalities") or {},
+                        # One representative printing's Scryfall ID, same
+                        # "first one seen wins, doesn't matter which"
+                        # reasoning as scryfall_id_by_name above -- lets
+                        # ai_builder.py's full-card-database search (see
+                        # _full_card_pool) render a real image for a card
+                        # the player doesn't own, which owned_view's own
+                        # scryfall_id (tied to an actual owned printing)
+                        # can't provide.
+                        "scryfall_id": card_scryfall_id or "",
                     })
 
                 if card.get("isGameChanger"):
@@ -1395,17 +1450,37 @@ def game_changers_in_index(path: str = PRICE_INDEX_PATH) -> set[str]:
 
 def gameplay_data_in_index(path: str = PRICE_INDEX_PATH) -> dict[str, dict]:
     """Returns {normalized_name: {"name", "type_line", "mana_cost", "cmc",
-    "color_identity", "oracle_text", "legalities"}}, read from the local
-    price index (see rebuild_price_index/ensure_price_index -- call that
-    first to make sure the index is actually present/fresh). Empty dict if
-    the index doesn't exist or predates this field. Used by the deck
-    builder (deck_builder.py) to browse/filter the owned collection by
-    color/type/curve and check format legality without a live Scryfall
-    call -- see gameplay_by_name in rebuild_price_index for how this is
-    populated."""
+    "color_identity", "oracle_text", "legalities", "scryfall_id"}}, read
+    from the local price index (see rebuild_price_index/ensure_price_index
+    -- call that first to make sure the index is actually present/fresh).
+    Empty dict if the index doesn't exist or predates this field. Covers
+    every real paper card MTGJSON knows about, not just owned ones -- the
+    deck builder (deck_builder.py) narrows this down to the owned
+    collection itself (see owned_collection_gameplay_view), but
+    ai_builder.py's "Build with AI" import/improve mode reads it
+    unfiltered to search/reason about cards the player doesn't own. See
+    gameplay_by_name in rebuild_price_index for how this is populated."""
     try:
         with open(path, encoding="utf-8") as f:
             return json.load(f).get("gameplay") or {}
+    except (OSError, ValueError):
+        return {}
+
+
+def prices_data_in_index(path: str = PRICE_INDEX_PATH) -> dict[str, dict]:
+    """Returns {normalized_name: {"nonfoil": [[store_label, price, url],
+    ...] or None, "foil": [...] or None, ...}}, cheapest-per-store-first,
+    read from the local price index -- see the `working`/`index` dicts in
+    rebuild_price_index for how this is built (same data ensure_price_index
+    returns, just a read-only local-file accessor with the same "empty
+    dict if stale/missing" convention as gameplay_data_in_index/
+    game_changers_in_index, rather than ensure_price_index's own
+    network-refresh-if-stale behavior). Works for ANY card name, owned or
+    not -- used by ai_builder.py's full-card-database mode to show a
+    rough price on cards it's suggesting as a new purchase."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f).get("prices") or {}
     except (OSError, ValueError):
         return {}
 
