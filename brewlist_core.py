@@ -2406,6 +2406,21 @@ header .source a:hover {{ color: var(--accent); }}
 .stat b {{ font-size: 1.1rem; }}
 .stat.value {{ cursor: pointer; }}
 #value-pie-modal {{ max-width: 620px; }}
+#pie-tooltip {{
+  position: fixed;
+  pointer-events: none;
+  z-index: 110;
+  display: none;
+  background: var(--bg-elevated);
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  padding: 8px 10px;
+  font-size: 0.8rem;
+  white-space: pre-line;
+  max-width: 220px;
+}}
+#pie-tooltip.show {{ display: block; }}
 #value-pie-modal .pie-legend {{ display: flex; gap: 18px; font-size: 0.85rem; margin-top: 14px; justify-content: center; }}
 #value-pie-modal .pie-legend span {{ display: inline-flex; align-items: center; gap: 6px; }}
 #value-pie-modal .pie-swatch {{ width: 12px; height: 12px; border-radius: 2px; display: inline-block; }}
@@ -2977,6 +2992,7 @@ footer {{
 <footer>Generated {generated} &middot; {deck_name}</footer>
 
 <img id="hover-preview" alt="">
+<div id="pie-tooltip"></div>
 
 <div class="modal-overlay" id="value-pie-modal-overlay">
   <div class="modal" id="value-pie-modal">
@@ -3190,12 +3206,6 @@ if (drawHandBtn) {{
   if (SAMPLE_HAND_LIBRARY.length) drawSampleHand();
 }}
 
-function escapeHtmlText(s) {{
-  const div = document.createElement('div');
-  div.textContent = s;
-  return div.innerHTML;
-}}
-
 // Click the "Total deck value" stat for a per-card pie chart in its own
 // modal -- built entirely from data already on the page (data-owned-value
 // for owned cards, data-price-nonfoil/foil * shortfall for missing ones),
@@ -3210,6 +3220,29 @@ const valueStat = document.getElementById('deck-value-stat');
 const valuePieModalOverlay = document.getElementById('value-pie-modal-overlay');
 const valuePieContent = document.getElementById('value-pie-content');
 const valuePieModalClose = document.getElementById('value-pie-modal-close');
+const valuePieTooltip = document.getElementById('pie-tooltip');
+const valuePieTooltips = [];
+function bindPieTooltips() {{
+  valuePieContent.querySelectorAll('[data-tip-idx]').forEach(el => {{
+    el.addEventListener('mouseenter', () => {{
+      valuePieTooltip.textContent = valuePieTooltips[el.dataset.tipIdx] || '';
+      valuePieTooltip.classList.add('show');
+    }});
+    el.addEventListener('mousemove', (e) => {{
+      const pad = 14, w = 220;
+      let x = e.clientX + pad;
+      let y = e.clientY + pad;
+      if (x + w > window.innerWidth) x = e.clientX - w - pad;
+      const h = valuePieTooltip.offsetHeight || 40;
+      if (y + h > window.innerHeight) y = window.innerHeight - h - pad;
+      valuePieTooltip.style.left = x + 'px';
+      valuePieTooltip.style.top = Math.max(0, y) + 'px';
+    }});
+    el.addEventListener('mouseleave', () => {{
+      valuePieTooltip.classList.remove('show');
+    }});
+  }});
+}}
 if (valueStat && valuePieModalOverlay) {{
   function buildValuePieHtml() {{
     const slices = [];
@@ -3261,6 +3294,13 @@ if (valueStat && valuePieModalOverlay) {{
     const missingColor = style.getPropertyValue('--missing').trim();
     const cx = 70, cy = 70, r = 65;
     let angle = -Math.PI / 2, ownedCount = 0, missingCount = 0;
+    // Text lives in this array, looked up by index at hover time (see
+    // bindPieTooltips below) -- not embedded as a <title> child (native
+    // browser tooltips have a fixed, unconfigurable show delay, too slow
+    // for scrubbing across dozens of thin wedges) and not an HTML
+    // attribute either (would need its own quote-safe escaping for no
+    // benefit; a plain JS array sidesteps that entirely).
+    valuePieTooltips.length = 0;
     const paths = slicesFinal.map(s => {{
       const frac = s.value / total;
       const startAngle = angle;
@@ -3269,23 +3309,24 @@ if (valueStat && valuePieModalOverlay) {{
       const idx = s.owned ? ownedCount++ : missingCount++;
       const opacity = Math.max(0.5, 1 - idx * 0.04);
       const color = s.owned ? ownedColor : missingColor;
-      let titleText;
+      let tipText;
       if (s.members) {{
         const shown = s.members.slice(0, 15).map(m => `${{m.name}}: $${{m.value.toFixed(2)}}`);
         if (s.members.length > 15) shown.push(`+${{s.members.length - 15}} more`);
-        titleText = `${{s.name}} ($${{s.value.toFixed(2)}} total)\\n` + shown.join('\\n');
+        tipText = `${{s.name}} ($${{s.value.toFixed(2)}} total)\\n` + shown.join('\\n');
       }} else {{
-        titleText = `${{s.name}}: $${{s.value.toFixed(2)}}`;
+        tipText = `${{s.name}}: $${{s.value.toFixed(2)}}`;
       }}
-      const title = `<title>${{escapeHtmlText(titleText)}}</title>`;
+      const tipIdx = valuePieTooltips.push(tipText) - 1;
+      const tipAttr = `data-tip-idx="${{tipIdx}}"`;
       if (frac >= 0.999) {{
-        return `<circle cx="${{cx}}" cy="${{cy}}" r="${{r}}" fill="${{color}}" fill-opacity="${{opacity.toFixed(2)}}">${{title}}</circle>`;
+        return `<circle cx="${{cx}}" cy="${{cy}}" r="${{r}}" fill="${{color}}" fill-opacity="${{opacity.toFixed(2)}}" ${{tipAttr}}></circle>`;
       }}
       const x1 = cx + r * Math.cos(startAngle), y1 = cy + r * Math.sin(startAngle);
       const x2 = cx + r * Math.cos(endAngle), y2 = cy + r * Math.sin(endAngle);
       const largeArc = (endAngle - startAngle) > Math.PI ? 1 : 0;
       const d = `M ${{cx}},${{cy}} L ${{x1.toFixed(2)}},${{y1.toFixed(2)}} A ${{r}},${{r}} 0 ${{largeArc}},1 ${{x2.toFixed(2)}},${{y2.toFixed(2)}} Z`;
-      return `<path d="${{d}}" fill="${{color}}" fill-opacity="${{opacity.toFixed(2)}}" stroke="var(--bg-elevated)" stroke-width="1">${{title}}</path>`;
+      return `<path d="${{d}}" fill="${{color}}" fill-opacity="${{opacity.toFixed(2)}}" stroke="var(--bg-elevated)" stroke-width="1" ${{tipAttr}}></path>`;
     }}).join('');
     const ownedTotal = slices.filter(s => s.owned).reduce((s, c) => s + c.value, 0);
     const missingTotal = total - ownedTotal;
@@ -3297,9 +3338,10 @@ if (valueStat && valuePieModalOverlay) {{
   }}
   function openValuePieModal() {{
     valuePieContent.innerHTML = buildValuePieHtml();
+    bindPieTooltips();
     valuePieModalOverlay.classList.add('open');
   }}
-  function closeValuePieModal() {{ valuePieModalOverlay.classList.remove('open'); }}
+  function closeValuePieModal() {{ valuePieModalOverlay.classList.remove('open'); valuePieTooltip.classList.remove('show'); }}
   valueStat.addEventListener('click', openValuePieModal);
   if (valuePieModalClose) valuePieModalClose.addEventListener('click', closeValuePieModal);
   valuePieModalOverlay.addEventListener('click', (e) => {{ if (e.target === valuePieModalOverlay) closeValuePieModal(); }});
