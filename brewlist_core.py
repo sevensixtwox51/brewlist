@@ -3232,14 +3232,36 @@ if (valueStat && valuePieModalOverlay) {{
       if (value > 0) slices.push({{ name: el.dataset.displayName, value, owned }});
     }});
     if (!slices.length) return '<div class="hint" style="margin:0;">No priced cards to show.</div>';
-    slices.sort((a, b) => (a.owned === b.owned) ? (b.value - a.value) : (a.owned ? -1 : 1));
     const total = slices.reduce((s, c) => s + c.value, 0);
+    // Cards under ~1% of total value each render as a sliver too thin to
+    // see or hover reliably (a real deck can have 40+ of these) -- group
+    // them into one "N other owned/missing cards" wedge per category
+    // instead, keeping their individual names/prices in that wedge's own
+    // tooltip (still plain, native multi-line SVG <title>, capped so it
+    // doesn't turn into a wall of text for a deck with a very long tail).
+    const threshold = total * 0.01;
+    // Kept individual slices, sorted big-to-small within each category;
+    // the group wedge (built below) always goes AFTER these regardless
+    // of its own aggregate value -- it represents a pile of tiny things,
+    // so it belongs at the small end of the arc even if the pile adds up
+    // to more than some individually-kept card.
+    const ownedKept = slices.filter(s => s.owned && s.value >= threshold).sort((a, b) => b.value - a.value);
+    const missingKept = slices.filter(s => !s.owned && s.value >= threshold).sort((a, b) => b.value - a.value);
+    const grouped = slices.filter(s => s.value < threshold);
+    function groupWedge(owned) {{
+      const members = grouped.filter(s => s.owned === owned).sort((a, b) => b.value - a.value);
+      if (!members.length) return [];
+      const groupValue = members.reduce((s, c) => s + c.value, 0);
+      const label = members.length === 1 ? members[0].name : `${{members.length}} other ${{owned ? 'owned' : 'missing'}} card(s)`;
+      return [{{ name: label, value: groupValue, owned, members: members.length > 1 ? members : null }}];
+    }}
+    const slicesFinal = [...ownedKept, ...groupWedge(true), ...missingKept, ...groupWedge(false)];
     const style = getComputedStyle(document.documentElement);
     const ownedColor = style.getPropertyValue('--owned').trim();
     const missingColor = style.getPropertyValue('--missing').trim();
     const cx = 70, cy = 70, r = 65;
     let angle = -Math.PI / 2, ownedCount = 0, missingCount = 0;
-    const paths = slices.map(s => {{
+    const paths = slicesFinal.map(s => {{
       const frac = s.value / total;
       const startAngle = angle;
       const endAngle = angle + frac * Math.PI * 2;
@@ -3247,7 +3269,15 @@ if (valueStat && valuePieModalOverlay) {{
       const idx = s.owned ? ownedCount++ : missingCount++;
       const opacity = Math.max(0.5, 1 - idx * 0.04);
       const color = s.owned ? ownedColor : missingColor;
-      const title = `<title>${{escapeHtmlText(s.name)}}: $${{s.value.toFixed(2)}}</title>`;
+      let titleText;
+      if (s.members) {{
+        const shown = s.members.slice(0, 15).map(m => `${{m.name}}: $${{m.value.toFixed(2)}}`);
+        if (s.members.length > 15) shown.push(`+${{s.members.length - 15}} more`);
+        titleText = `${{s.name}} ($${{s.value.toFixed(2)}} total)\\n` + shown.join('\\n');
+      }} else {{
+        titleText = `${{s.name}}: $${{s.value.toFixed(2)}}`;
+      }}
+      const title = `<title>${{escapeHtmlText(titleText)}}</title>`;
       if (frac >= 0.999) {{
         return `<circle cx="${{cx}}" cy="${{cy}}" r="${{r}}" fill="${{color}}" fill-opacity="${{opacity.toFixed(2)}}">${{title}}</circle>`;
       }}
