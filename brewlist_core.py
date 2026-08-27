@@ -2405,9 +2405,10 @@ header .source a:hover {{ color: var(--accent); }}
 .stat {{ font-size: 0.95rem; }}
 .stat b {{ font-size: 1.1rem; }}
 .stat.value {{ cursor: pointer; }}
-#value-pie-modal .pie-legend {{ display: flex; gap: 14px; font-size: 0.78rem; margin-top: 10px; justify-content: center; }}
-#value-pie-modal .pie-legend span {{ display: inline-flex; align-items: center; gap: 5px; }}
-#value-pie-modal .pie-swatch {{ width: 10px; height: 10px; border-radius: 2px; display: inline-block; }}
+#value-pie-modal {{ max-width: 620px; }}
+#value-pie-modal .pie-legend {{ display: flex; gap: 18px; font-size: 0.85rem; margin-top: 14px; justify-content: center; }}
+#value-pie-modal .pie-legend span {{ display: inline-flex; align-items: center; gap: 6px; }}
+#value-pie-modal .pie-swatch {{ width: 12px; height: 12px; border-radius: 2px; display: inline-block; }}
 #value-pie-modal .pie-hint {{ margin: 0 0 12px; }}
 .stat.owned b {{ color: var(--owned); }}
 .stat.missing b {{ color: var(--missing); }}
@@ -3258,7 +3259,7 @@ if (valueStat && valuePieModalOverlay) {{
     }}).join('');
     const ownedTotal = slices.filter(s => s.owned).reduce((s, c) => s + c.value, 0);
     const missingTotal = total - ownedTotal;
-    return `<svg viewBox="0 0 140 140" width="220" height="220" style="display:block;margin:0 auto;">${{paths}}</svg>
+    return `<svg viewBox="0 0 140 140" width="380" height="380" style="display:block;margin:0 auto;">${{paths}}</svg>
       <div class="pie-legend">
         <span><span class="pie-swatch" style="background:${{ownedColor}};"></span>Owned $${{ownedTotal.toFixed(2)}}</span>
         <span><span class="pie-swatch" style="background:${{missingColor}};"></span>Missing $${{missingTotal.toFixed(2)}}</span>
