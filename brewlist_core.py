@@ -2404,24 +2404,11 @@ header .source a:hover {{ color: var(--accent); }}
 }}
 .stat {{ font-size: 0.95rem; }}
 .stat b {{ font-size: 1.1rem; }}
-.stat.value {{ cursor: help; }}
-#value-pie-popup {{
-  position: fixed;
-  pointer-events: none;
-  z-index: 100;
-  display: none;
-  background: var(--bg-elevated);
-  border: 1px solid var(--card-border);
-  border-radius: 10px;
-  box-shadow: 0 12px 32px rgba(0,0,0,0.5), 0 0 0 1px var(--card-border);
-  padding: 12px;
-  width: 280px;
-}}
-#value-pie-popup.show {{ display: block; }}
-#value-pie-popup .pie-title {{ font-size: 0.78rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 8px; }}
-#value-pie-popup .pie-legend {{ display: flex; gap: 14px; font-size: 0.78rem; margin-top: 8px; }}
-#value-pie-popup .pie-legend span {{ display: inline-flex; align-items: center; gap: 5px; }}
-#value-pie-popup .pie-swatch {{ width: 10px; height: 10px; border-radius: 2px; display: inline-block; }}
+.stat.value {{ cursor: pointer; }}
+#value-pie-modal .pie-legend {{ display: flex; gap: 14px; font-size: 0.78rem; margin-top: 10px; justify-content: center; }}
+#value-pie-modal .pie-legend span {{ display: inline-flex; align-items: center; gap: 5px; }}
+#value-pie-modal .pie-swatch {{ width: 10px; height: 10px; border-radius: 2px; display: inline-block; }}
+#value-pie-modal .pie-hint {{ margin: 0 0 12px; }}
 .stat.owned b {{ color: var(--owned); }}
 .stat.missing b {{ color: var(--missing); }}
 .stat.cost b {{ color: var(--gold); }}
@@ -2949,7 +2936,7 @@ footer {{
     <div class="stat owned">Owned <b id="stat-owned">{owned}</b></div>
     <div class="stat missing">Missing <b id="stat-missing">{missing}</b></div>
     <div class="stat cost">Est. cost to complete <b id="stat-cost-nonfoil">${cost_nonfoil:.2f}</b> non-foil &nbsp;/&nbsp; <b id="stat-cost-foil">${cost_foil:.2f}</b> foil</div>
-    <div class="stat value" id="deck-value-stat" title="Hover for a per-card breakdown">Total deck value (today's market) <b id="stat-deck-value">${deck_value:.2f}</b> &nbsp;<span class="stat-sub">owned portion <span id="stat-owned-value">${owned_value:.2f}</span></span></div>
+    <div class="stat value" id="deck-value-stat" title="Click for a per-card breakdown">Total deck value (today's market) <b id="stat-deck-value">${deck_value:.2f}</b> &nbsp;<span class="stat-sub">owned portion <span id="stat-owned-value">${owned_value:.2f}</span></span></div>
     {game_changers_html}
     {legality_html}
     {bracket_tag_html}
@@ -2989,7 +2976,17 @@ footer {{
 <footer>Generated {generated} &middot; {deck_name}</footer>
 
 <img id="hover-preview" alt="">
-<div id="value-pie-popup"></div>
+
+<div class="modal-overlay" id="value-pie-modal-overlay">
+  <div class="modal" id="value-pie-modal">
+    <h2>Deck value by card</h2>
+    <p class="hint pie-hint">Hover a slice for that card's name and price.</p>
+    <div id="value-pie-content"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="value-pie-modal-close">Close</button>
+    </div>
+  </div>
+</div>
 
 <div class="modal-overlay" id="modal-overlay">
   <div class="modal">
@@ -3198,20 +3195,21 @@ function escapeHtmlText(s) {{
   return div.innerHTML;
 }}
 
-// Hover the "Total deck value" stat for a per-card pie chart -- built
-// entirely from data already on the page (data-owned-value for owned
-// cards, data-price-nonfoil/foil * shortfall for missing ones, same
-// foil/nonfoil toggle buildInStoreRows() already respects), no server
-// round trip. Owned and missing each get their own color family (same
-// --owned/--missing variables the rest of the page already uses) and
-// sort into two contiguous arcs, with fill-opacity varied per wedge
+// Click the "Total deck value" stat for a per-card pie chart in its own
+// modal -- built entirely from data already on the page (data-owned-value
+// for owned cards, data-price-nonfoil/foil * shortfall for missing ones),
+// no server round trip. Owned and missing each get their own color family
+// (same --owned/--missing variables the rest of the page already uses)
+// and sort into two contiguous arcs, with fill-opacity varied per wedge
 // (not a distinct hue per card -- with 80+ cards that's illegible) so
 // individual cards are still visually distinguishable within their
 // category; the real per-card breakdown is the native SVG <title>
-// tooltip on hover, name + exact dollar amount.
+// tooltip on hovering a slice, name + exact dollar amount.
 const valueStat = document.getElementById('deck-value-stat');
-const valuePiePopup = document.getElementById('value-pie-popup');
-if (valueStat && valuePiePopup) {{
+const valuePieModalOverlay = document.getElementById('value-pie-modal-overlay');
+const valuePieContent = document.getElementById('value-pie-content');
+const valuePieModalClose = document.getElementById('value-pie-modal-close');
+if (valueStat && valuePieModalOverlay) {{
   function buildValuePieHtml() {{
     const slices = [];
     document.querySelectorAll('.card').forEach(el => {{
@@ -3260,30 +3258,21 @@ if (valueStat && valuePiePopup) {{
     }}).join('');
     const ownedTotal = slices.filter(s => s.owned).reduce((s, c) => s + c.value, 0);
     const missingTotal = total - ownedTotal;
-    return `<div class="pie-title">Deck value by card</div>
-      <svg viewBox="0 0 140 140" width="140" height="140" style="display:block;margin:0 auto;">${{paths}}</svg>
+    return `<svg viewBox="0 0 140 140" width="220" height="220" style="display:block;margin:0 auto;">${{paths}}</svg>
       <div class="pie-legend">
         <span><span class="pie-swatch" style="background:${{ownedColor}};"></span>Owned $${{ownedTotal.toFixed(2)}}</span>
         <span><span class="pie-swatch" style="background:${{missingColor}};"></span>Missing $${{missingTotal.toFixed(2)}}</span>
       </div>`;
   }}
-  valueStat.addEventListener('mouseenter', () => {{
-    valuePiePopup.innerHTML = buildValuePieHtml();
-    valuePiePopup.classList.add('show');
-  }});
-  valueStat.addEventListener('mousemove', (e) => {{
-    const pad = 18, w = 280;
-    let x = e.clientX + pad;
-    let y = e.clientY + pad;
-    if (x + w > window.innerWidth) x = e.clientX - w - pad;
-    const h = valuePiePopup.offsetHeight || 260;
-    if (y + h > window.innerHeight) y = window.innerHeight - h - pad;
-    valuePiePopup.style.left = x + 'px';
-    valuePiePopup.style.top = Math.max(0, y) + 'px';
-  }});
-  valueStat.addEventListener('mouseleave', () => {{
-    valuePiePopup.classList.remove('show');
-  }});
+  function openValuePieModal() {{
+    valuePieContent.innerHTML = buildValuePieHtml();
+    valuePieModalOverlay.classList.add('open');
+  }}
+  function closeValuePieModal() {{ valuePieModalOverlay.classList.remove('open'); }}
+  valueStat.addEventListener('click', openValuePieModal);
+  if (valuePieModalClose) valuePieModalClose.addEventListener('click', closeValuePieModal);
+  valuePieModalOverlay.addEventListener('click', (e) => {{ if (e.target === valuePieModalOverlay) closeValuePieModal(); }});
+  document.addEventListener('keydown', (e) => {{ if (e.key === 'Escape') closeValuePieModal(); }});
 }}
 
 document.querySelectorAll('.card.foil').forEach(card => {{
