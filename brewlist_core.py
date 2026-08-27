@@ -178,6 +178,8 @@ class CardResult:
     best: list[tuple[str, float, str]]  # (store, price, url), cheapest first
     owned_scryfall_id: str | None = None  # the exact printing you own, if known
     owned_is_foil: bool | None = None  # whether that owned printing is foil; None if not known
+    owned_set_code: str = ""  # set code of that same owned printing -- entry.set_code is whatever
+    owned_collector_number: str = ""  # printing the *source* decklist referenced, which can differ
     owned_value: float = 0.0  # today's market value of the copies you're using here
     reserved: int = 0  # copies subtracted from `have` because a saved override reserves them elsewhere
 
@@ -2178,8 +2180,13 @@ def build_comparison(
 
         owned_scryfall_id = picks[0][0].scryfall_id if picks else None
         owned_is_foil = picks[0][0].foil if picks else None
+        owned_set_code = picks[0][0].set_code if picks else ""
+        owned_collector_number = picks[0][0].collector_number if picks else ""
         buckets.setdefault(bucket, []).append(
-            CardResult(e, have, shortfall, prices, owned_scryfall_id, owned_is_foil, owned_value, reserved_qty)
+            CardResult(
+                e, have, shortfall, prices, owned_scryfall_id, owned_is_foil,
+                owned_set_code, owned_collector_number, owned_value, reserved_qty,
+            )
         )
 
     for cards in buckets.values():
@@ -3862,12 +3869,28 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
             group, subgroup = shopping_group(e)
             group_rank = shopping_group_rank(group, subgroup)
             norm_name_attr = html.escape(normalize_name(e.name))
+            # For an OWNED card, e.set_code/e.collector_number is whatever
+            # printing the *source* decklist referenced -- not necessarily
+            # anything you actually have (a Moxfield/Archidekt deck built
+            # by someone else can reference a totally different printing
+            # of a card you happen to own from a different set). Prefer
+            # the real owned printing (r.owned_set_code/collector_number,
+            # set alongside owned_scryfall_id above) so Copy Decklist
+            # exports what's actually in your binder, not what the
+            # original decklist happened to point at -- confirmed live as
+            # a real bug (a user's export said "Sol Ring (SLD) 2560" when
+            # every copy they actually own is EOC/FDC/FIC/LTC). Missing
+            # cards have no owned printing to prefer, so keep using the
+            # decklist's own reference there -- a reasonable default for
+            # something you're about to go buy anyway.
+            display_set_code = (r.owned_set_code if r.shortfall == 0 and r.owned_set_code else e.set_code)
+            display_cn = (r.owned_collector_number if r.shortfall == 0 and r.owned_collector_number else e.collector_number)
             shop_data_attrs = (
                 f'data-price-nonfoil="{price_nonfoil_attr}" data-price-foil="{price_foil_attr}" '
                 f'data-store-nonfoil="{store_nonfoil_attr}" data-store-foil="{store_foil_attr}" '
                 f'data-group="{html.escape(group)}" data-subgroup="{html.escape(subgroup)}" data-group-rank="{group_rank}" '
-                f'data-set-name="{html.escape(e.set_name)}" data-set-code="{html.escape(e.set_code)}" '
-                f'data-cn="{html.escape(e.collector_number)}" data-type="{html.escape(bucket)}" '
+                f'data-set-name="{html.escape(e.set_name)}" data-set-code="{html.escape(display_set_code)}" '
+                f'data-cn="{html.escape(display_cn)}" data-type="{html.escape(bucket)}" '
                 f'data-norm-name="{norm_name_attr}" data-deck-qty="{e.quantity}"'
             )
 
