@@ -2951,6 +2951,7 @@ footer {{
     </div>
     {shopping_button}
     {instore_button}
+    <button class="btn ghost" id="copy-decklist-btn" title="Copies a plain-text decklist (with exact set/collector number) of every card in this comparison -- owned and missing alike -- to paste into Moxfield or Archidekt">&#128203; Copy Decklist</button>
     <button class="btn ghost" id="save-overrides-btn" title="{save_overrides_title}">&#128190; Save Overrides</button>
     {cheapest_pricing_html}
   </div>
@@ -3264,6 +3265,44 @@ function downloadInStoreCsv() {{
 
 const instoreBtn = document.getElementById('instore-list-btn');
 if (instoreBtn) instoreBtn.addEventListener('click', downloadInStoreCsv);
+
+// Every card in the comparison, owned and missing alike -- deliberately
+// ALL `.card` elements regardless of any active hide/price filter, since
+// the point is a complete decklist to paste back into Moxfield/Archidekt,
+// not a snapshot of whatever the filters currently show. Uses
+// data-deck-qty (the deck's own full needed count) rather than data-qty,
+// which on a `.card.missing` tile is only the shortfall still left to
+// buy -- a partially-owned card would otherwise export short by however
+// many copies you already have. Same `qty Name (SET) CollectorNumber`
+// format the Deck Builder's own Copy Decklist already uses.
+function buildFullDecklistText() {{
+  const cards = Array.from(document.querySelectorAll('.card'));
+  return cards.map(el => {{
+    const qty = el.dataset.deckQty || el.dataset.qty;
+    const name = el.dataset.displayName;
+    const printing = (el.dataset.setCode && el.dataset.cn) ? ` (${{el.dataset.setCode.toUpperCase()}}) ${{el.dataset.cn}}` : '';
+    return `${{qty}} ${{name}}${{printing}}`;
+  }}).join('\\n');
+}}
+
+const copyDecklistBtn = document.getElementById('copy-decklist-btn');
+if (copyDecklistBtn) {{
+  copyDecklistBtn.addEventListener('click', () => {{
+    const text = buildFullDecklistText();
+    if (!text) return;
+    if (!navigator.clipboard || !navigator.clipboard.writeText) {{
+      alert('Clipboard access is not available in this browser.');
+      return;
+    }}
+    const original = copyDecklistBtn.textContent;
+    navigator.clipboard.writeText(text)
+      .then(() => {{
+        copyDecklistBtn.textContent = 'Copied!';
+        setTimeout(() => {{ copyDecklistBtn.textContent = original; }}, 1600);
+      }})
+      .catch(() => alert('Could not copy to clipboard.'));
+  }});
+}}
 
 const showAlmostCombos = document.getElementById('show-almost-combos');
 const almostCombosList = document.getElementById('almost-combos-list');
@@ -3829,7 +3868,7 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
                 f'data-group="{html.escape(group)}" data-subgroup="{html.escape(subgroup)}" data-group-rank="{group_rank}" '
                 f'data-set-name="{html.escape(e.set_name)}" data-set-code="{html.escape(e.set_code)}" '
                 f'data-cn="{html.escape(e.collector_number)}" data-type="{html.escape(bucket)}" '
-                f'data-norm-name="{norm_name_attr}"'
+                f'data-norm-name="{norm_name_attr}" data-deck-qty="{e.quantity}"'
             )
 
             if r.shortfall == 0:
