@@ -751,7 +751,7 @@ PRICE_INDEX_MAX_AGE_DAYS = 7
 # the "sets" field (set name + release date per set code) for the deck
 # builder's Set Selection filter. v16: added "card_count" (baseSetSize) to
 # each "sets" entry, for "N / M owned" in the Set filter popups.
-PRICE_INDEX_FORMAT_VERSION = 17
+PRICE_INDEX_FORMAT_VERSION = 18
 
 
 # --------------------------------------------------------------------------
@@ -1192,6 +1192,18 @@ def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[
                 if on_progress and cards_seen % 2000 == 0:
                     on_progress(cards_seen, total_cards, "processing")
                 if "paper" not in (card.get("availability") or []):
+                    continue
+                # Gold-bordered printings (World Championship deck promos,
+                # 1996-2004) are real, oracle-legal cards by the rules, but
+                # they're collector pieces, not something anyone actually
+                # sources/buys to build a deck -- treated here as if they
+                # don't exist at all (not just excluded from pricing) so a
+                # cheapest-price search can never link out to one (real
+                # bug, user-reported: Volrath's Stronghold's cheapest
+                # ManaPool price/link pointed at a WC99 gold-border copy)
+                # and a gold-border printing's scryfall_id can never become
+                # a card's "representative" image either.
+                if card.get("borderColor") == "gold":
                     continue
 
                 name = card.get("name") or ""
@@ -3176,7 +3188,36 @@ function bindHoverPreview(img) {{
     hoverPreview.classList.remove('show');
   }});
 }}
-document.querySelectorAll('.card-thumb[data-full], .alt-link[data-full]').forEach(bindHoverPreview);
+// Delegated (not bound per-image) so it still works in Compact view,
+// where .card-thumb is display:none (see body.compact CSS) and so can
+// never itself receive a mouseenter -- a hidden element gets no pointer
+// events at all. Each .card tile also carries its own data-full (see
+// card_full_attr in render_html) as a Compact-view fallback: match the
+// visible .card-thumb image first, and only fall back to the tile's own
+// data-full when that specific tile's own thumb is the hidden one --
+// same fix already applied once this session to the Deck Builder's card
+// grid, needed again here since this is a separate page/template.
+document.body.addEventListener('mousemove', (e) => {{
+  const thumb = e.target.closest('.card-thumb[data-full], .alt-link[data-full]');
+  let full = thumb ? thumb.dataset.full : null;
+  if (!full) {{
+    const tile = e.target.closest('[data-full]');
+    const tileThumb = tile && tile.querySelector('.card-thumb');
+    if (tile && tileThumb && getComputedStyle(tileThumb).display === 'none') {{
+      full = tile.dataset.full;
+    }}
+  }}
+  if (!full) {{ hoverPreview.classList.remove('show'); return; }}
+  hoverPreview.src = full;
+  hoverPreview.classList.add('show');
+  const pad = 18, w = 240, h = Math.round(w * 1.4);
+  let x = e.clientX + pad;
+  let y = e.clientY + pad;
+  if (x + w > window.innerWidth) x = e.clientX - w - pad;
+  if (y + h > window.innerHeight) y = window.innerHeight - h - pad;
+  hoverPreview.style.left = x + 'px';
+  hoverPreview.style.top = Math.max(0, y) + 'px';
+}});
 
 const SAMPLE_HAND_LIBRARY = {sample_hand_json};
 function scryfallImg(id, size) {{
@@ -3973,6 +4014,18 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
                 ) + '</span>'
 
             thumb_html = _thumb_html(_display_scryfall_id(r))
+            # Same image URL the inner .card-thumb img already carries in
+            # its own data-full -- duplicated onto the outer tile too, so
+            # Compact view (where .card-thumb is display:none, see
+            # body.compact CSS) still has something hoverable for the
+            # image preview. A hidden element can't receive pointer
+            # events at all, so binding hover only to .card-thumb itself
+            # (as this page used to) left Compact view's hover preview
+            # dead -- same bug/fix as the Deck Builder's card grid earlier
+            # this session, just needed separately here since this is a
+            # different page/template.
+            card_full_url = scryfall_image_url(_display_scryfall_id(r), size="normal")
+            card_full_attr = f' data-full="{html.escape(card_full_url)}"' if card_full_url else ""
 
             best_nonfoil, nonfoil_used_foil = priced_for_finish(e, want_foil=False)
             best_foil, foil_used_foil = priced_for_finish(e, want_foil=True)
@@ -4076,7 +4129,7 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
                     f' &middot; {r.reserved} reserved for another deck' if r.reserved > 0 else ''
                 )
                 card_tiles.append(f"""
-<div class="card owned{foil_class}" data-name="{name_esc.lower()}" data-qty="{e.quantity}" data-display-name="{name_esc}" data-owned-value="{r.owned_value:.2f}" data-reserved-qty="{reserved_flag}" {shop_data_attrs}>
+<div class="card owned{foil_class}" data-name="{name_esc.lower()}" data-qty="{e.quantity}" data-display-name="{name_esc}" data-owned-value="{r.owned_value:.2f}" data-reserved-qty="{reserved_flag}" {shop_data_attrs}{card_full_attr}>
   <label class="override-toggle">
     <input type="checkbox" class="need-override"{reserved_checked}> Need another copy (used elsewhere)
   </label>
@@ -4101,7 +4154,7 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
             else:
                 have_str = f" &middot; have {r.have}" if r.have else ""
                 card_tiles.append(f"""
-<div class="card missing{foil_class}" data-name="{name_esc.lower()}" data-qty="{r.shortfall}" data-display-name="{name_esc}" {shop_data_attrs}>
+<div class="card missing{foil_class}" data-name="{name_esc.lower()}" data-qty="{r.shortfall}" data-display-name="{name_esc}" {shop_data_attrs}{card_full_attr}>
   <div class="card-main">
     {thumb_html}
     <div class="card-body">
