@@ -3695,6 +3695,13 @@ def _open_browser_when_ready(url: str, timeout: float = 15.0) -> None:
             return
         except (urllib.error.URLError, OSError):
             time.sleep(0.3)
+    # Gave up without ever opening anything -- previously silent, so a
+    # real failure (e.g. a denied macOS Local Network permission blocking
+    # urlopen()'s own hostname resolution, even for 127.0.0.1 in some
+    # edge cases) looked identical to the app just not starting at all.
+    # The server itself may well be fine; say so and give the one thing
+    # that always works regardless of what broke the auto-open.
+    print(f"Could not open your browser automatically -- open {url} yourself.")
 
 
 if __name__ == "__main__":
@@ -3705,7 +3712,15 @@ if __name__ == "__main__":
     # with no known browser command, which would otherwise print a scary
     # traceback to the container logs on every launch for no benefit.
     if not os.environ.get("NO_BROWSER"):
-        threading.Thread(target=_open_browser_when_ready, args=(f"http://localhost:{port}",), daemon=True).start()
+        # Literal IP, not the "localhost" hostname -- still goes through
+        # getaddrinfo() resolution, which macOS's Local Network permission
+        # can gate for the whole process (confirmed live: a user who hit
+        # "Don't Allow" on that prompt had the server start fine but the
+        # auto-open silently never fire, since every poll attempt below
+        # just failed and got swallowed by the except clause). 127.0.0.1
+        # needs no resolution at all, so this now works regardless of
+        # that permission's state.
+        threading.Thread(target=_open_browser_when_ready, args=(f"http://127.0.0.1:{port}",), daemon=True).start()
     threading.Thread(target=_check_for_updates_on_launch, daemon=True).start()
     # use_reloader=False: the reloader runs the app in a child process and
     # respawns it on exit, which would silently undo the /shutdown route above.
