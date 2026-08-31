@@ -2740,6 +2740,15 @@ a.badge:hover {{ text-decoration: underline; }}
   text-transform: none;
   letter-spacing: normal;
 }}
+.badge.commander {{
+  background: var(--gold);
+  color: #1a1200;
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 700;
+  padding: 1px 8px 1px 5px;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--gold) 70%, transparent), 0 0 8px color-mix(in srgb, var(--gold) 50%, transparent);
+}}
 .combos-note {{ color: var(--text-dim); font-size: 0.85rem; margin: 4px 0 14px; }}
 .combo-list {{
   display: grid;
@@ -3987,7 +3996,7 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
             is_foil = r.owned_is_foil if r.shortfall == 0 and r.owned_is_foil is not None else e.is_foil
             badges = ""
             if e.section == "commander":
-                badges += '<span class="badge">Commander</span>'
+                badges += '<span class="badge commander">&#128081; Commander</span>'
             if is_foil:
                 badges += '<span class="badge">Foil</span>'
             if e.is_game_changer:
