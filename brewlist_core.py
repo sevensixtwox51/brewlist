@@ -4059,6 +4059,12 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
                         f'target="_blank" rel="noopener noreferrer">{label}</a>'
                     )
 
+                # title_attr scoped to just the label <span>, not the whole
+                # row -- it used to wrap the alt-link cards too, so hovering
+                # a specific card to see its #hover-preview image also
+                # fired this native tooltip at the same time, and the
+                # native one visually covered the image (real bug,
+                # user-reported).
                 owned_row_html = ""
                 if e.owned_alternatives:
                     owned_links = " &middot; ".join(
@@ -4066,7 +4072,7 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
                         for name, scryfall_id in e.owned_alternatives
                     )
                     owned_row_html = (
-                        f'<div {title_attr}>&#9989; You already own (tagged &quot;{tag_label}&quot;): {owned_links}</div>'
+                        f'<div><span {title_attr}>&#9989; You already own (tagged &quot;{tag_label}&quot;)</span>: {owned_links}</div>'
                     )
 
                 cheap_row_html = ""
@@ -4076,7 +4082,7 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
                         for name, price, scryfall_id in e.cheaper_alternatives
                     )
                     cheap_row_html = (
-                        f'<div {title_attr}>&#128161; Cheaper to buy (tagged &quot;{tag_label}&quot;): {cheap_links}</div>'
+                        f'<div><span {title_attr}>&#128161; Cheaper to buy (tagged &quot;{tag_label}&quot;)</span>: {cheap_links}</div>'
                     )
 
                 budget_alt_html = f'<div class="budget-alt-note">{owned_row_html}{cheap_row_html}</div>'
