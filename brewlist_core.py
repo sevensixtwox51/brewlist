@@ -2212,7 +2212,11 @@ def build_comparison(
         )
 
     for cards in buckets.values():
-        cards.sort(key=lambda r: r.entry.name)
+        # Commander first in whatever bucket its type line lands it in
+        # (e.g. "Creatures"), everything else alphabetical after it --
+        # not a separate bucket of its own, just the lead card within
+        # its natural one.
+        cards.sort(key=lambda r: (r.entry.section != "commander", r.entry.name))
 
     bucket_names = sorted(buckets.keys(), key=lambda b: BUCKET_ORDER.index(b) if b in BUCKET_ORDER else len(BUCKET_ORDER))
     return bucket_names, buckets, totals
