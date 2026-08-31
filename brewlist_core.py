@@ -2634,7 +2634,7 @@ details.combos-panel[open] > summary::before {{ transform: rotate(90deg); }}
   box-shadow: var(--shadow);
   position: relative;
 }}
-.card-main {{ display: flex; gap: 10px; }}
+.card-main {{ display: flex; gap: 10px; position: relative; }}
 .card.owned {{ border-left-color: var(--owned); }}
 .card.missing {{ border-left-color: var(--missing); }}
 .card.foil {{ overflow: hidden; --mx: 50%; --my: 50%; }}
@@ -2750,19 +2750,19 @@ a.badge:hover {{ text-decoration: underline; }}
 }}
 .commander-sticker {{
   position: absolute;
-  top: -10px;
-  left: -10px;
-  width: 30px;
-  height: 30px;
+  top: -4px;
+  left: -4px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   background: var(--bg-elevated);
   border: 2px solid var(--gold);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.05rem;
+  font-size: 0.8rem;
   line-height: 1;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.45);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.55);
   transform: rotate(-14deg);
   z-index: 2;
   pointer-events: none;
@@ -2841,6 +2841,7 @@ a.badge:hover {{ text-decoration: underline; }}
 
 body.compact .card {{ padding: 4px 10px; gap: 0; }}
 body.compact .card .card-thumb {{ display: none; }}
+body.compact .commander-sticker {{ display: none; }}
 body.compact .override-toggle {{ display: none; }}
 body.compact .qty {{ display: none; }}
 body.compact .budget-alt-note {{ display: none; }}
@@ -4184,11 +4185,11 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
                 )
                 card_tiles.append(f"""
 <div class="card owned{foil_class}" data-name="{name_esc.lower()}" data-qty="{e.quantity}" data-display-name="{name_esc}" data-owned-value="{r.owned_value:.2f}" data-reserved-qty="{reserved_flag}" {shop_data_attrs}{card_full_attr}>
-  {commander_sticker_html}
   <label class="override-toggle">
     <input type="checkbox" class="need-override"{reserved_checked}> Need another copy (used elsewhere)
   </label>
   <div class="card-main">
+    {commander_sticker_html}
     {thumb_html}
     <div class="card-body">
       <div class="card-info">
@@ -4210,8 +4211,8 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
                 have_str = f" &middot; have {r.have}" if r.have else ""
                 card_tiles.append(f"""
 <div class="card missing{foil_class}" data-name="{name_esc.lower()}" data-qty="{r.shortfall}" data-display-name="{name_esc}" {shop_data_attrs}{card_full_attr}>
-  {commander_sticker_html}
   <div class="card-main">
+    {commander_sticker_html}
     {thumb_html}
     <div class="card-body">
       <div class="card-info">
