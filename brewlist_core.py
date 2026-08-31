@@ -2746,8 +2746,26 @@ a.badge:hover {{ text-decoration: underline; }}
   text-transform: none;
   letter-spacing: normal;
   font-weight: 700;
-  padding: 1px 8px 1px 5px;
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--gold) 70%, transparent), 0 0 8px color-mix(in srgb, var(--gold) 50%, transparent);
+  padding: 1px 8px;
+}}
+.commander-sticker {{
+  position: absolute;
+  top: -10px;
+  left: -10px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--bg-elevated);
+  border: 2px solid var(--gold);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.05rem;
+  line-height: 1;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.45);
+  transform: rotate(-14deg);
+  z-index: 2;
+  pointer-events: none;
 }}
 .combos-note {{ color: var(--text-dim); font-size: 0.85rem; margin: 4px 0 14px; }}
 .combo-list {{
@@ -3995,8 +4013,15 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
             # itself references, e.g. when shopping to fill a shortfall).
             is_foil = r.owned_is_foil if r.shortfall == 0 and r.owned_is_foil is not None else e.is_foil
             badges = ""
+            commander_sticker_html = ""
             if e.section == "commander":
-                badges += '<span class="badge commander">&#128081; Commander</span>'
+                badges += '<span class="badge commander">Commander</span>'
+                # A gold emoji on a gold badge has near-zero contrast (real
+                # bug, user-reported) -- pulled out into its own corner
+                # "sticker" instead: a neutral circular chip peeking off
+                # the tile's edge, so the crown itself reads clearly
+                # rather than blending into the pill behind it.
+                commander_sticker_html = '<span class="commander-sticker" title="Commander">&#128081;</span>'
             if is_foil:
                 badges += '<span class="badge">Foil</span>'
             if e.is_game_changer:
@@ -4159,6 +4184,7 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
                 )
                 card_tiles.append(f"""
 <div class="card owned{foil_class}" data-name="{name_esc.lower()}" data-qty="{e.quantity}" data-display-name="{name_esc}" data-owned-value="{r.owned_value:.2f}" data-reserved-qty="{reserved_flag}" {shop_data_attrs}{card_full_attr}>
+  {commander_sticker_html}
   <label class="override-toggle">
     <input type="checkbox" class="need-override"{reserved_checked}> Need another copy (used elsewhere)
   </label>
@@ -4184,6 +4210,7 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
                 have_str = f" &middot; have {r.have}" if r.have else ""
                 card_tiles.append(f"""
 <div class="card missing{foil_class}" data-name="{name_esc.lower()}" data-qty="{r.shortfall}" data-display-name="{name_esc}" {shop_data_attrs}{card_full_attr}>
+  {commander_sticker_html}
   <div class="card-main">
     {thumb_html}
     <div class="card-body">
