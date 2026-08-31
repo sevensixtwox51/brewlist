@@ -1994,6 +1994,16 @@ def build_comparison(
 
         per_entry.append((e, have, shortfall, owned_used, picks, remainder, reserved_qty))
 
+    # Every card already in this decklist, by normalized name -- a budget
+    # alternative (see the owned_alternatives/cheaper_alternatives pass
+    # below) has to actually be something you could *add*, not a card
+    # that's already committed to the deck itself (real bug, user-
+    # reported: a "You already own" alternative for one missing card
+    # pointed at a totally different card that was already in the same
+    # deck -- since it's already in, it isn't a real substitution option
+    # for anything).
+    deck_names = {normalize_name(e.name) for e in entries}
+
     # Pass 2: price everything from the local MTGJSON-derived index (see
     # ensure_price_index) -- this covers owned-card exact-printing pricing
     # (matched by Scryfall ID), cheapest-across-printings pricing for every
@@ -2131,7 +2141,7 @@ def build_comparison(
                 owned_alts: list[tuple[str, str | None]] = []
                 cheap_candidates: list[tuple[str, float, str | None]] = []
                 for member_norm, member_display, member_is_land, member_scryfall_id in group:
-                    if member_norm == self_norm or member_is_land != self_is_land:
+                    if member_norm == self_norm or member_is_land != self_is_land or member_norm in deck_names:
                         continue
                     member_owned = owned_collection.get(member_norm)
                     if member_owned and member_owned.total > 0:
