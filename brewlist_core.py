@@ -839,10 +839,27 @@ def save_store_prefs(stores: list[str], path: str = STORE_PREFS_PATH) -> None:
 
 def price_index_built_at(path: str = PRICE_INDEX_PATH) -> datetime.datetime | None:
     """The local price index's build timestamp (UTC), or None if it doesn't
-    exist or can't be read."""
+    exist or can't be read.
+
+    Deliberately does NOT json.load() the whole file -- this is called on
+    every Setup-page load just to show one timestamp, and the index is
+    ~70MB+ (real bug, user-reported: the Setup page taking longer than
+    the browser-auto-open poll's own 0.5s timeout to render caused it to
+    keep retrying for the full 15s and then give up, purely from this one
+    full-file parse). "built_at" is always the 2nd key written by
+    rebuild_price_index() (right after "format_version", well before the
+    huge "prices"/"gameplay" blobs), so a small raw prefix read + regex
+    finds it without touching the rest of the file at all -- falls back
+    to a real (slow) full parse only if that ever doesn't match, e.g. a
+    hand-edited or differently-ordered file."""
     if not os.path.isfile(path):
         return None
     try:
+        with open(path, encoding="utf-8") as f:
+            prefix = f.read(2048)
+        m = re.search(r'"built_at"\s*:\s*"([^"]+)"', prefix)
+        if m:
+            return datetime.datetime.fromisoformat(m.group(1))
         with open(path, encoding="utf-8") as f:
             built_at = json.load(f).get("built_at")
         return datetime.datetime.fromisoformat(built_at)
