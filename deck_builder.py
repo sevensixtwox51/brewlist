@@ -773,6 +773,22 @@ def suggest_builder_cards(
             # candidates sitting right there. Reallocate the remainder to
             # any role with spare *pool* capacity beyond its own target,
             # biggest pool first, repeating until nothing more fits.
+            #
+            # "Lands" is excluded from ever receiving MORE than its own
+            # role_targets["Lands"] here -- a real, user-reported bug: a
+            # single Suggest click for Thranduil, the Elvenking (a 3-color
+            # commander whose owned card pool happened to have zero
+            # "Draw"-tagged candidates) landed 41 lands instead of the
+            # ~38 target, because "Lands" naturally has by far the
+            # largest, least-restricted candidate pool (any land is
+            # legal in any deck) and this loop hands leftover slots to
+            # whichever role has the biggest *pool*, round-robin, with no
+            # regard for whether going over that role's own target is
+            # actually harmless. It isn't, for lands specifically --
+            # flooding is a real functional downside a Suggest click
+            # should never introduce on its own, unlike "a few extra
+            # Ramp/Interaction/Synergy picks," which is just more good
+            # cards. Those roles keep the original uncapped behavior.
             changed = True
             while leftover > 0 and changed:
                 changed = False
@@ -781,7 +797,8 @@ def suggest_builder_cards(
                         break
                     if not role_candidates[role]:
                         continue
-                    if role_slots.get(role, 0) < len(role_candidates[role]):
+                    role_cap = role_targets.get(role) if role == "Lands" else len(role_candidates[role])
+                    if role_cap is not None and role_slots.get(role, 0) < min(role_cap, len(role_candidates[role])):
                         role_slots[role] = role_slots.get(role, 0) + 1
                         leftover -= 1
                         changed = True
