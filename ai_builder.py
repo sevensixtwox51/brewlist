@@ -333,6 +333,7 @@ def run_ai_build(
     on_progress: Callable[[int, int, str, list[str], list[dict]], None],
     wip_entries: list[CardEntry] | None = None,
     scope: str = "owned",
+    mode: str = "fresh",
 ) -> dict:
     """Runs the agentic build loop. Returns {"suggestions": [...] (same
     shape suggest_builder_cards()/optimize_builder_combos() already
@@ -342,12 +343,23 @@ def run_ai_build(
 
     `wip_entries`, if given, seeds the loop with an existing deck
     (commander + library) instead of starting from just the commander --
-    this is what makes "improve the current deck" and "import & improve a
-    decklist" both just different callers of the same loop rather than
-    separate code paths. `scope="any"` widens every search/add tool to the
-    full card database (see _full_card_pool) instead of the owned
-    collection -- used for the import/improve mode, where the point is
-    often to find cards worth *buying*, not just what's already owned.
+    this is what makes "build from commander", "improve the current deck",
+    and "import & improve a decklist" all just different callers of the
+    same loop rather than separate code paths. `scope="any"` widens every
+    search/add tool to the full card database (see _full_card_pool) instead
+    of the owned collection -- used for the import/improve mode, where the
+    point is often to find cards worth *buying*, not just what's already
+    owned.
+
+    `mode` ("fresh" | "improve" | "import") only changes the tone of the
+    deck_state_note (see below) when wip_entries already has cards beyond
+    the commander -- "fresh" and "import" are both assertive (existing
+    cards are a starting point, not a given, in service of the best
+    complete deck), "improve" is conservative (respect the player's own
+    picks, only touch what's clearly wrong). It has no effect at all when
+    the library is empty -- there's nothing to be assertive or
+    conservative *about* yet -- or on which tools/candidate pool are used
+    (that's `scope`, set by the caller per mode already).
 
     Never applies anything to a real saved brew -- this only ever builds
     up an in-memory wip_entries list and hands back suggestions for the
@@ -591,13 +603,35 @@ def run_ai_build(
 
     if starting_library_count == 0:
         deck_state_note = "The deck library is currently empty -- build it from scratch.\n"
-    elif scope == "owned":
-        # "Improve current deck" -- the player built this by hand, so stay
-        # conservative: respect their choices, just fill gaps.
+    elif mode == "improve":
+        # "Improve current deck" -- the player built this by hand and
+        # specifically asked to *improve* it, so stay conservative: respect
+        # their choices, just fill gaps.
         deck_state_note = (
             f"The deck library already has {starting_library_count} card(s) chosen -- keep them unless one is "
             "clearly wrong for the plan, and focus on filling the remaining slots and making targeted "
             "improvements rather than rebuilding from scratch.\n"
+        )
+    elif mode == "fresh":
+        # "Build from commander" -- picked to build (or rebuild) a complete
+        # deck around this commander, which now also picks up whatever's
+        # already been added rather than discarding it (a real user
+        # request: it used to always start from just the commander, even
+        # when cards were already chosen). Unlike "improve", the player
+        # didn't ask to keep their existing picks -- treat them as a
+        # reasonable starting point/head start, not a given, and swap out
+        # anything that isn't genuinely pulling weight in the best deck
+        # this commander can support. Same swap-pairing discipline as
+        # import mode below (add_card paired with remove_card) so the
+        # count doesn't overshoot when replacing rather than just filling.
+        deck_state_note = (
+            f"The deck library already has {starting_library_count} card(s) in it -- treat these as a starting "
+            "point, not a fixed given. Your job is to build the best complete deck this commander can support, so "
+            "keep anything that's genuinely good for the plan, but don't hesitate to swap out a card that's weak, "
+            "off-plan, or that a clearly better option exists for, exactly as you would if choosing it yourself "
+            "from scratch. When you do replace a card, pair that add_card with a remove_card for what it's "
+            "replacing (call them back to back) rather than adding first and cleaning up later, so the count "
+            "doesn't overshoot the target.\n"
         )
     else:
         # "Import & improve" -- this list came from an import (a paste or

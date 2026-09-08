@@ -245,7 +245,7 @@ def _run_brew_report_job(job_id, entries, owned, deck_id, deck_name, is_commande
 
 def _run_ai_build_job(job_id, commander, deck_format, target_format, target_size,
                        commander_color_identity, intended_bracket, user_notes, owned_view, api_key,
-                       wip_entries=None, scope="owned"):
+                       wip_entries=None, scope="owned", mode="fresh"):
     """Same JOBS/threading shape as _run_compare_job -- runs
     ai_builder.run_ai_build() (a multi-round-trip Claude tool-use loop, so
     genuinely slow) in a background thread. Unlike the compare/report jobs
@@ -255,10 +255,12 @@ def _run_ai_build_job(job_id, commander, deck_format, target_format, target_size
     /builder/ai-build/progress, a new route rather than widening
     /compare/progress's existing response shape.
 
-    `wip_entries`/`scope` are just threaded through to run_ai_build() --
-    see its own docstring for what "improve the current deck" (wip_entries
-    seeded from the WIP deck) and "import & improve" (scope="any", full
-    card database) actually change."""
+    `wip_entries`/`scope`/`mode` are just threaded through to
+    run_ai_build() -- see its own docstring for what "build from
+    commander" and "improve the current deck" (both now seed wip_entries
+    from the WIP deck, differing only in how assertively `mode` lets the
+    AI change what's already there) and "import & improve" (scope="any",
+    full card database) actually change."""
     def _on_progress(done, total, stage, log, deck_state):
         with _JOBS_LOCK:
             job = JOBS.get(job_id)
@@ -273,7 +275,7 @@ def _run_ai_build_job(job_id, commander, deck_format, target_format, target_size
         result = run_ai_build(
             commander, deck_format, target_format, target_size, commander_color_identity,
             intended_bracket, user_notes, owned_view, api_key, _on_progress,
-            wip_entries=wip_entries, scope=scope,
+            wip_entries=wip_entries, scope=scope, mode=mode,
         )
         with _JOBS_LOCK:
             job = JOBS.get(job_id)
@@ -1397,13 +1399,13 @@ def render_builder_page(deck_id: str | None = None) -> str:
       <div id="ai-mode-phase">
         <p class="hint" style="margin:0 0 10px;">Claude reads your commander's actual card text and searches for whatever it decides is relevant -- not limited to Suggest's fixed tag list.</p>
         <button type="button" class="btn" id="ai-mode-fresh-btn" style="display:block;width:100%;text-align:left;margin-bottom:8px;">
-          <strong>Build deck from chosen commander</strong><br><span class="hint" style="margin:0;">Starts fresh from just your commander.</span>
+          <strong>Build deck from chosen commander</strong><br><span class="hint" style="margin:0;">Builds toward the best complete deck around your commander -- picks up anything you've already added as a starting point, but may swap it out for something better.</span>
         </button>
         <button type="button" class="btn" id="ai-mode-improve-btn" style="display:block;width:100%;text-align:left;margin-bottom:8px;">
-          <strong>Improve/optimize current deck</strong><br><span class="hint" style="margin:0;">Keeps what you've already chosen and builds on it.</span>
+          <strong>Improve/optimize current deck</strong><br><span class="hint" style="margin:0;">Keeps what you've already chosen and only touches what's clearly wrong -- more conservative than building fresh.</span>
         </button>
         <button type="button" class="btn" id="ai-mode-import-btn" style="display:block;width:100%;text-align:left;">
-          <strong>Improve deck from import</strong><br><span class="hint" style="margin:0;">Paste a decklist or a Moxfield/Archidekt URL -- may include cards you don't own. Get a report of what to buy afterward.</span>
+          <strong>Finish &amp; improve an imported decklist</strong><br><span class="hint" style="margin:0;">Paste a decklist or a Moxfield/Archidekt URL -- may include cards you don't own. Fills it out to a complete, legal deck and looks for upgrades; get a report of what to buy afterward.</span>
         </button>
       </div>
 
@@ -3389,8 +3391,16 @@ def builder_ai_build_start():
 
     `mode` ("fresh" | "improve" | "import", default "fresh") picks which
     of the three modal options fired this call:
-    - "fresh": today's original behavior -- no wip_entries, starts from
-      just the commander.
+    - "fresh": seeds wip_entries from the WIP deck's own cards
+      (`body["cards"]`) exactly like "improve" does -- a real user
+      request: this used to always start from just the commander, silently
+      discarding anything already added, which made no sense once cards
+      were on the deck already. The two modes differ only in how
+      assertively run_ai_build()'s `mode` param lets the AI change what's
+      already there (see its own docstring) -- "fresh" builds toward the
+      best complete deck, treating existing picks as a head start it can
+      swap out; "improve" respects them, only touching what's clearly
+      wrong.
     - "improve": seeds wip_entries from the WIP deck's own cards
       (`body["cards"]`) via brew_to_card_entries(), same helper
       /builder/suggest and /builder/optimize already use -- so the loop
@@ -3425,7 +3435,7 @@ def builder_ai_build_start():
     import_unresolved: list[str] = []
     guessed_deck_name = None
 
-    if mode == "improve":
+    if mode in ("fresh", "improve"):
         wip_entries = brew_to_card_entries({"commander": commander, "cards": body.get("cards") or []})
     elif mode == "import":
         import_url = (body.get("import_url") or "").strip()
@@ -3491,7 +3501,7 @@ def builder_ai_build_start():
             body.get("intended_bracket") or None, (body.get("user_notes") or "").strip(),
             owned_view, api_key,
         ),
-        kwargs={"wip_entries": wip_entries, "scope": scope},
+        kwargs={"wip_entries": wip_entries, "scope": scope, "mode": mode},
         daemon=True,
     ).start()
 
