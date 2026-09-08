@@ -210,8 +210,12 @@ def _build_tools(scope: str) -> list[dict]:
         search_name = "search_owned_collection"
         search_desc = (
             "Search the player's owned, format-legal, color-identity-correct cards that aren't "
-            "already in the deck. Matches your query against each card's name, type line, and "
-            "full oracle (rules) text -- use this to look for anything relevant: a creature type "
+            "already in the deck. Each word of your query is matched independently across the "
+            "card's name, type line, and full oracle (rules) text combined -- not as one exact "
+            "phrase, and words can each match a different field (e.g. \"cavern souls choose "
+            "creature type\" still finds Cavern of Souls even though its name and its own rules "
+            "text -- which refers to itself as \"this land\", not its name -- never contain that "
+            "whole phrase together). Use this to look for anything relevant: a creature type "
             "(e.g. \"Elf\"), a mechanic or keyword (e.g. \"graveyard\", \"proliferate\", \"mill\"), "
             "a card's own name, or a broad category (e.g. \"land\", \"removal\"). Returns up to 25 "
             "matches with full oracle text so you can judge fit yourself."
@@ -221,11 +225,12 @@ def _build_tools(scope: str) -> list[dict]:
         search_name = "search_cards"
         search_desc = (
             "Search EVERY real, format-legal, color-identity-correct Magic card, owned or not, that "
-            "isn't already in the deck. Matches your query against each card's name, type line, and "
-            "full oracle (rules) text. Each result includes \"owned\": true/false and, when not "
-            "owned, a rough \"price_usd\" -- prefer an owned card when it's reasonably close in "
-            "quality to an unowned alternative, and mention price whenever you suggest buying "
-            "something new. Returns up to 25 matches."
+            "isn't already in the deck. Each word of your query is matched independently across the "
+            "card's name, type line, and full oracle (rules) text combined -- not as one exact "
+            "phrase, and words can each match a different field. Each result includes \"owned\": "
+            "true/false and, when not owned, a rough \"price_usd\" -- prefer an owned card when it's "
+            "reasonably close in quality to an unowned alternative, and mention price whenever you "
+            "suggest buying something new. Returns up to 25 matches."
         )
         add_desc = "Adds one real, legal, color-correct card to the deck library, owned or not. Must be a card name returned by search_cards."
     return [
@@ -440,10 +445,28 @@ def run_ai_build(
 
     def dispatch(tool_name: str, tool_input: dict) -> str:
         if tool_name in ("search_owned_collection", "search_cards"):
-            query = (tool_input.get("query") or "").strip().lower()
+            # Every word of the query has to appear SOMEWHERE across
+            # name+type_line+oracle_text combined, not all as one literal
+            # contiguous phrase in a single field -- the old exact-phrase
+            # check was a real, confirmed bug: a query like "cavern of
+            # souls choose a creature type" (part card name, part its own
+            # rules text) matched nothing at all, because "Cavern of
+            # Souls" only appears in the name while "choose a creature
+            # type" only appears in the oracle text (which itself says "As
+            # this land enters...", not the card's own name -- MTGJSON
+            # templates a permanent's own name out of its oracle text).
+            # Splitting into words and requiring each one to match
+            # somewhere in the combined text fixes that false-zero-result
+            # case while leaving every existing single-word query (by far
+            # the common case -- "ramp", "elf", "graveyard") unchanged,
+            # since a lone word is trivially "every word of the query."
+            query_words = [w for w in (tool_input.get("query") or "").strip().lower().split() if w]
             matches = [
                 c for c in current_pool()
-                if query in c["name"].lower() or query in (c.get("type_line") or "").lower() or query in (c.get("oracle_text") or "").lower()
+                if query_words and all(
+                    w in c["name"].lower() or w in (c.get("type_line") or "").lower() or w in (c.get("oracle_text") or "").lower()
+                    for w in query_words
+                )
             ][:25]
             emit(f'Searched {pool_label} for "{tool_input.get("query")}" -- {len(matches)} match(es)')
             return json.dumps([_card_summary(c, scope, owned_names, prices) for c in matches])
