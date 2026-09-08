@@ -2396,7 +2396,15 @@ optimizeBtn.addEventListener('click', () => {{
         const row = document.createElement('div');
         row.className = 'suggestion-row';
         row.dataset.full = scryfallImg(p.add.scryfall_id, 'normal') || '';
-        row.innerHTML = `<span class="row-name">${{thumbHtml(p.add.scryfall_id, 'card-thumb small')}}<span>+ ${{p.add.name}} ${{colorIconsHtml(p.add.color_identity)}}<div class="reason">${{p.reason}} &mdash; cuts ${{p.remove.name}}</div></span></span>`;
+        // Shows what the combo actually DOES (produces), not just which
+        // cards are involved -- a real user question this answers
+        // directly: "i dont understand this combo" for a proposal that
+        // previously only named the two cards with no payoff or
+        // explanation. Same details-link convention the Analyze modal's
+        // own Combo Reference section already uses.
+        const producesText = (p.produces && p.produces.length) ? ` &rarr; ${{p.produces.join(', ')}}` : '';
+        const detailsLink = p.url ? ` <a href="${{p.url}}" target="_blank" rel="noopener">(details)</a>` : '';
+        row.innerHTML = `<span class="row-name">${{thumbHtml(p.add.scryfall_id, 'card-thumb small')}}<span>+ ${{p.add.name}} ${{colorIconsHtml(p.add.color_identity)}}<div class="reason">${{p.reason}}${{producesText}} &mdash; cuts ${{p.remove.name}}${{detailsLink}}</div></span></span>`;
         const applyBtn = Object.assign(document.createElement('button'), {{
           className: 'btn ghost small', textContent: 'Apply',
           onclick: () => {{
@@ -2613,7 +2621,12 @@ function renderComboReference(data) {{
   const included = data.combos_included_list || [];
   const almost = data.combos_almost_list || [];
   let html = '';
-  const comboLine = c => `${{c.uses.join(' + ')}}<span class="combo-arrow">&rarr;</span>${{c.produces.join(', ')}}`;
+  // "uses" is only ever the specific named cards -- some real combos also
+  // need a generic template slot (e.g. a permanent castable for one
+  // colorless mana), a real extra card that just isn't a fixed one;
+  // showing it here matters just as much as it does for Optimize's own
+  // proposals (same reason).
+  const comboLine = c => `${{c.uses.concat(c.requires || []).join(' + ')}}<span class="combo-arrow">&rarr;</span>${{c.produces.join(', ')}}`;
   if (included.length) {{
     html += '<div class="combo-group"><h5>Already in your deck</h5>' + included.map(c => `
       <div class="combo-item"><span class="combo-uses">${{comboLine(c)}}</span>${{c.url ? ` <a href="${{c.url}}" target="_blank" rel="noopener">(details)</a>` : ''}}</div>
@@ -2754,7 +2767,7 @@ function buildBattleCardHtml(data) {{
   badges.push(`$${{data.deck_value.toFixed(2)}}`);
   const included = data.combos_included_list || [];
   const almost = data.combos_almost_list || [];
-  const comboLine = c => `${{c.uses.join(' + ')}} \\u2192 ${{c.produces.join(', ')}}`;
+  const comboLine = c => `${{c.uses.concat(c.requires || []).join(' + ')}} \\u2192 ${{c.produces.join(', ')}}`;
   return `
     <h1>${{name}}</h1>
     <div class="bc-sub">${{commanderLine}}</div>

@@ -110,31 +110,84 @@ CURATED_THEMES: dict[str, list[str]] = {
 DEFAULT_COMMANDER_MIX = {"Lands": 38, "Ramp": 10, "Draw": 10, "Interaction": 11}
 
 # Maps each non-land role bucket to the Oracle Tag label(s) that indicate
-# it -- reuses the exact same tag_by_name selection already computed for
-# budget-alternative suggestions (see _compute_budget_alt_groups in
-# brewlist_core.py), which already prioritizes picking one of these exact
-# labels as a card's "role" tag when applicable (BUDGET_ALT_PREFERRED_TAGS
-# there overlaps by design). Anything not matching one of these buckets
-# falls into "Synergy" -- the deck's actual engine pieces/win-cons.
+# it. Checked against real cards, not guessed -- and deliberately checked
+# via each tag's FULL membership list (_role_member_names, below), not a
+# card's single tag_by_name "representative" pick: a card can genuinely
+# belong to several Oracle Tags at once, but tag_by_name only ever records
+# one of them (whichever the underlying selection logic happened to
+# prefer), which is very often NOT the role-relevant one. Confirmed live,
+# a real bug this fixes -- these are each real staples' own tag_by_name
+# pick, none of which match ANY label below even though every one of them
+# is a genuine member of one of these tags' full list: Sign in Blood /
+# Night's Whisper / Read the Bones -> "life for cards"; Rhystic Study ->
+# "cast tax"; Phyrexian Arena -> "deal with the devil"; Arcane Signet ->
+# "commander identity matters"; Mind Stone -> "utility mana rock";
+# Cultivate -> "tutor-to-hand"; Rampant Growth -> "tutor-land-to-
+# battlefield"; Birds of Paradise -> "real life animal name". "draw" and
+# "spot removal" (the two tags this set used before) turned out to not
+# be real, populated tags at all -- 0 members each -- explaining why
+# "Draw" was silently *always* empty for every commander, not just a
+# color-sparse one; "pure draw" (also previously listed) is a real tag
+# ID but likewise has 0 members in the current data. Anything not
+# matching one of these buckets falls into "Synergy" -- the deck's
+# actual engine pieces/win-cons.
 _ROLE_TAG_LABELS = {
-    "Ramp": {"mana rock", "ramp"},
-    "Draw": {"draw", "pure draw"},
-    "Interaction": {"removal-exile", "spot removal", "sweeper", "counterspell", "counterspell-soft"},
+    "Ramp": {
+        "ramp", "mana rock", "utility mana rock", "mana rock with set's mechanic",
+        "mana dork", "mana dork egg", "land ramp", "multi land ramp",
+        "tutor-land-to-battlefield", "ramp with set's mechanic",
+    },
+    "Draw": {
+        "burst draw", "life for cards", "deal with the devil", "repeatable draw",
+        "drawlink", "gives drawlink", "impulsive draw", "repeatable impulsive draw",
+        "long term impulsive draw",
+    },
+    "Interaction": {
+        "removal-exile", "sweeper", "sweeper-one-sided", "sweeper-graveyard",
+        "counterspell", "counterspell-soft", "counterspell-reusable",
+        "multi removal", "removal-artifact", "removal-bounce", "removal-enchantment",
+        "removal-land", "removal-nonland", "removal-permanent", "removal-planeswalker",
+        "removal-sacrifice", "removal-tuck",
+    },
 }
 
 
-def _card_role(name: str, category: str, tag_by_name: dict, tag_labels: dict) -> str:
+def _role_member_names(groups: dict, tag_labels: dict) -> dict[str, frozenset[str]]:
+    """{role: {normalized_card_name, ...}} -- the real, full membership of
+    every _ROLE_TAG_LABELS tag for each role, from budget_alt_data_in_
+    index()'s `groups` (every card tagged with a given Oracle Tag, not
+    just each card's own single "representative" pick -- see
+    _ROLE_TAG_LABELS' own docstring for why that distinction is the whole
+    fix). `groups[tag_id]` entries are `[normalized_name, display_name,
+    ...]`; only the normalized name (index 0) is needed here."""
+    label_to_id = {label: tag_id for tag_id, label in tag_labels.items()}
+    result: dict[str, frozenset[str]] = {}
+    for role, labels in _ROLE_TAG_LABELS.items():
+        names: set[str] = set()
+        for label in labels:
+            tag_id = label_to_id.get(label)
+            if not tag_id:
+                continue
+            for entry in groups.get(tag_id) or []:
+                if entry:
+                    names.add(entry[0])
+        result[role] = frozenset(names)
+    return result
+
+
+def _card_role(name: str, category: str, role_members: dict[str, frozenset[str]]) -> str:
     """Buckets a card into the standard EDH deck-shape roles (Lands/Ramp/
     Draw/Interaction, else "Synergy" for everything else -- creatures,
     other spells, win conditions, theme pieces). Not a full archetype
     classifier, just enough to keep Suggest roughly on-shape for
-    DEFAULT_COMMANDER_MIX."""
+    DEFAULT_COMMANDER_MIX. `role_members` -- see _role_member_names --
+    checks a card's full real Oracle Tag membership per role, not just
+    its single tag_by_name pick."""
     if category in ("Lands", "Basic Lands"):
         return "Lands"
-    tag_id = tag_by_name.get(normalize_name(name))
-    label = tag_labels.get(tag_id) if tag_id else None
-    for role, labels in _ROLE_TAG_LABELS.items():
-        if label in labels:
+    nm = normalize_name(name)
+    for role, names in role_members.items():
+        if nm in names:
             return role
     return "Synergy"
 
@@ -162,8 +215,7 @@ def _synergy_reason(score: float | None) -> str | None:
 
 def role_counts_for_entries(
     entries: list[CardEntry],
-    tag_by_name: dict | None = None,
-    tag_labels: dict | None = None,
+    role_members: dict[str, frozenset[str]] | None = None,
     exclude_commander: bool = True,
 ) -> dict[str, int]:
     """Buckets a decklist into the standard EDH deck-shape roles (see
@@ -172,19 +224,18 @@ def role_counts_for_entries(
     Backs the Deck Builder's Analyze modal (showing the finished deck's
     shape against commander_deck_shape_targets, below).
 
-    `tag_by_name`/`tag_labels` (from budget_alt_data_in_index()) can be
-    passed in by a caller already holding them, to avoid re-reading the
-    price index file on every call; a one-off caller (a single Analyze
-    click) can omit both and this loads them fresh."""
-    if tag_by_name is None or tag_labels is None:
+    `role_members` (from _role_member_names) can be passed in by a caller
+    already holding it, to avoid re-reading the price index file on every
+    call; a one-off caller (a single Analyze click) can omit it and this
+    loads it fresh."""
+    if role_members is None:
         budget_alt = budget_alt_data_in_index()
-        tag_by_name = budget_alt["tag_by_name"]
-        tag_labels = budget_alt["tag_labels"]
+        role_members = _role_member_names(budget_alt["groups"], budget_alt["tag_labels"])
     counts = {"Lands": 0, "Ramp": 0, "Draw": 0, "Interaction": 0, "Synergy": 0}
     for e in entries:
         if exclude_commander and e.section == "commander":
             continue
-        role = _card_role(e.name, categorize(e.type_line), tag_by_name, tag_labels)
+        role = _card_role(e.name, categorize(e.type_line), role_members)
         counts[role] = counts.get(role, 0) + e.quantity
     return counts
 
@@ -455,6 +506,7 @@ def suggest_replacements(
     budget_alt = budget_alt_data_in_index()
     tag_by_name = budget_alt.get("tag_by_name") or {}
     tag_labels = budget_alt.get("tag_labels") or {}
+    role_members = _role_member_names(budget_alt.get("groups") or {}, tag_labels)
     game_changers = game_changers_in_index() if deck_format == "commander" else set()
 
     # Same real, per-commander EDHREC synergy signal suggest_builder_cards
@@ -471,7 +523,7 @@ def suggest_replacements(
     def role_of(name: str, category: str) -> str:
         if deck_format != "commander":
             return "Lands" if category in ("Lands", "Basic Lands") else "Synergy"
-        return _card_role(name, category, tag_by_name, tag_labels)
+        return _card_role(name, category, role_members)
 
     target_role = role_of(target_name, target_category)
     target_tag = tag_by_name.get(normalize_name(target_name))
@@ -620,6 +672,7 @@ def suggest_builder_cards(
     budget_alt = budget_alt_data_in_index()
     tag_by_name = budget_alt.get("tag_by_name") or {}
     tag_labels = budget_alt.get("tag_labels") or {}
+    role_members = _role_member_names(budget_alt.get("groups") or {}, tag_labels)
     if tag_by_name:
         wip_tag_counts: dict[str, int] = {}
         commander_tag_id = None
@@ -725,7 +778,7 @@ def suggest_builder_cards(
     def role_of(name: str, category: str) -> str:
         if deck_format != "commander":
             return "Lands" if category in ("Lands", "Basic Lands") else "Synergy"
-        return _card_role(name, category, tag_by_name, tag_labels)
+        return _card_role(name, category, role_members)
 
     current_role_counts: dict[str, int] = {}
     for e in wip_entries:
@@ -931,7 +984,26 @@ def optimize_builder_combos(
     combos = find_deck_combos(wip_entries)
     if not combos:
         return []
-    almost = [c for c in (combos.get("almost_included") or []) if len(c.get("missing") or []) == 1]
+    # Real, user-caught bug: a combo needing a generic template slot (e.g.
+    # "Permanent Castable for {C}") in ADDITION to its named cards isn't
+    # genuinely "one card away" just because only one *named* card is
+    # missing -- the template slot is a real, separate card the deck may
+    # or may not actually have. Confirmed concretely, not assumed: for a
+    # real Hullbreaker Horror + Sol Ring proposal, the only card in the
+    # whole 99 that satisfied "Permanent Castable for {C}" was Sol Ring
+    # itself -- which can't count twice, since the combo needs it on the
+    # battlefield at the same time a *different* card is cast from hand.
+    # There's no general, reliable way to evaluate an arbitrary Scryfall-
+    # style template against this app's own card data (that's a real
+    # query-language interpreter, not a lookup), so rather than propose
+    # something that might quietly still be missing a piece, combos with
+    # any such requirement are excluded from Optimize entirely -- only
+    # combos that are genuinely complete with named cards alone (no
+    # `requires`) get proposed as a clean, trustworthy swap.
+    almost = [
+        c for c in (combos.get("almost_included") or [])
+        if len(c.get("missing") or []) == 1 and not c.get("requires")
+    ]
     if not almost:
         return []
 
@@ -941,6 +1013,7 @@ def optimize_builder_combos(
     budget_alt = budget_alt_data_in_index()
     tag_by_name = budget_alt.get("tag_by_name") or {}
     tag_labels = budget_alt.get("tag_labels") or {}
+    role_members = _role_member_names(budget_alt.get("groups") or {}, tag_labels)
     game_changers = game_changers_in_index()
 
     # Same real per-commander EDHREC synergy data suggest_builder_cards/
@@ -955,7 +1028,7 @@ def optimize_builder_combos(
             synergy_by_name[nm] = info["synergy"]
 
     def role_of(name: str, category: str) -> str:
-        return _card_role(name, category, tag_by_name, tag_labels)
+        return _card_role(name, category, role_members)
 
     # Cards to protect from ever being cut: any combo piece already
     # contributing to an included combo or to any almost-included combo
@@ -1025,6 +1098,11 @@ def optimize_builder_combos(
             },
             "remove": {"name": cut.name, "scryfall_id": cut.scryfall_id, "category": categorize(cut.type_line)},
             "produces": combo.get("produces") or [],
+            # `almost` (above) already excludes any combo with a `requires`
+            # template slot, so every proposal reaching this point is a
+            # clean, fully-named-cards combo -- naming just the uses is
+            # accurate here, not an oversimplification.
             "reason": f"completes a combo with {', '.join(combo['uses'][:2])}",
+            "url": combo.get("url"),
         })
     return proposals

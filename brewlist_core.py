@@ -1616,6 +1616,19 @@ def _commander_spellbook_post(endpoint: str, payload: dict) -> dict | None:
 def _simplify_combo(raw: dict, deck_names: set[str] | None = None) -> dict:
     uses = [u["card"]["name"] for u in raw.get("uses", [])]
     produces = [p["feature"]["name"] for p in raw.get("produces", [])]
+    # Real, user-reported gap: "uses" is only ever the *named* cards --
+    # plenty of real combos also need a generic template slot ("Permanent
+    # Castable for {C}", "Creature with power 4 or greater", etc.), a real
+    # extra card that just isn't a specific one. Confirmed live against
+    # Commander Spellbook's own page for a combo this app proposed
+    # (Hullbreaker Horror + Sol Ring): its own title is literally
+    # "Hullbreaker Horror | Sol Ring (and one other card)", and the real
+    # steps need that third, template-matched permanent in hand for the
+    # loop to work at all -- something `uses` alone never discloses.
+    requires = [
+        r["template"]["name"] for r in raw.get("requires") or []
+        if r.get("template", {}).get("name")
+    ]
     # raw["id"] here is this specific card-combination's *variant* ID (e.g.
     # "513-5034--46") -- what commanderspellbook.com/combo/<id>/ actually
     # expects. raw["of"][0]["id"] looks similar but is the abstract combo
@@ -1626,6 +1639,7 @@ def _simplify_combo(raw: dict, deck_names: set[str] | None = None) -> dict:
     combo_id = raw.get("id")
     result = {
         "uses": uses,
+        "requires": requires,
         "produces": produces,
         "url": f"https://commanderspellbook.com/combo/{combo_id}/" if combo_id else None,
         "popularity": raw.get("popularity") or 0,
@@ -3855,7 +3869,13 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
             almost_total = combos_data.get("almost_total") or 0
 
             def _combo_item(c, show_missing=False):
-                title = " + ".join(html.escape(n) for n in c["uses"])
+                # "uses" is only ever the specific named cards -- some real
+                # combos also need a generic template slot (e.g. "Permanent
+                # Castable for {C}"), a real extra card that just isn't a
+                # fixed one; shown here too so this static report doesn't
+                # repeat the same "looks like 2 cards, actually needs 3"
+                # gap already fixed in the Deck Builder's own combo views.
+                title = " + ".join(html.escape(n) for n in c["uses"] + (c.get("requires") or []))
                 produces = ", ".join(html.escape(p) for p in c["produces"]) or "an effect"
                 link_html = (
                     f'<a href="{html.escape(c["url"])}" target="_blank" rel="noopener noreferrer" '
