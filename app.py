@@ -2562,6 +2562,29 @@ function deckColorIdentity() {{
   return ordered.length ? ordered : ['Colorless'];
 }}
 
+// Community-standard names for multicolor identities (Ravnica guilds, Alara
+// shards, Khans wedges, the Guildpact Nephilim 4-color cycle, WUBRG), keyed
+// by the WUBRG-ordered color letters. Verified against real card color
+// identities (e.g. Glint-Eye Nephilim is actually {{U}}{{B}}{{R}}{{G}}), not
+// guessed from memory. Mono-color and colorless have no guild-style name.
+const COLOR_COMBO_NAMES = {{
+  WU: 'Azorius', UB: 'Dimir', BR: 'Rakdos', RG: 'Gruul', WG: 'Selesnya',
+  WB: 'Orzhov', UR: 'Izzet', BG: 'Golgari', WR: 'Boros', UG: 'Simic',
+  WUG: 'Bant', WUB: 'Esper', UBR: 'Grixis', BRG: 'Jund', WRG: 'Naya',
+  WBG: 'Abzan', WUR: 'Jeskai', UBG: 'Sultai', WBR: 'Mardu', URG: 'Temur',
+  WBRG: 'Dune-Brood', UBRG: 'Glint-Eye', WURG: 'Ink-Treader', WUBG: 'Witch-Maw', WUBR: 'Yore-Tiller',
+  WUBRG: '5-Color',
+}};
+function colorComboName(identity) {{
+  const key = WUBRG.filter(c => identity.includes(c)).join('');
+  return COLOR_COMBO_NAMES[key] || null;
+}}
+function colorIdentityLabel(identity) {{
+  const names = identity.map(c => COLOR_NAMES[c] || c).join(' / ');
+  const combo = identity.length >= 2 ? colorComboName(identity) : null;
+  return combo ? `${{names}} (${{combo}})` : names;
+}}
+
 function statBadges(data) {{
   const badges = [
     {{ cls: 'highlight', label: `&#128176; $${{data.deck_value.toFixed(2)}}`, tip: "Total deck value at today's market price" }},
@@ -2603,7 +2626,7 @@ function statBadges(data) {{
 // budget alternatives). Just the objective numbers a real Rule 0 chat
 // covers, laid out as statements instead of badges.
 function rule0Items(data) {{
-  const items = [`<b>Colors:</b> ${{deckColorIdentity().map(c => COLOR_NAMES[c] || c).join(' / ')}}`];
+  const items = [`<b>Colors:</b> ${{colorIdentityLabel(deckColorIdentity())}}`];
   if (data.is_commander_format) {{
     if (data.wotc_bracket) {{
       items.push(`<b>Estimated Bracket ${{data.wotc_bracket[0]}}</b> (${{data.wotc_bracket[1]}}) -- WotC's own published rules, from this deck's Game Changers/combos/extra-turns/land-denial`);
@@ -2761,7 +2784,7 @@ function buildBattleCardHtml(data) {{
   const name = brew.deck_name || document.getElementById('deck-name').value || 'Untitled brew';
   const commanderLine = brew.commander ? `Commander: ${{brew.commander.name}}` : (brew.format === 'commander' ? 'No commander chosen' : '60-card constructed');
   const badges = [];
-  badges.push(`${{deckColorIdentity().map(c => COLOR_NAMES[c] || c).join(' / ')}}`);
+  badges.push(colorIdentityLabel(deckColorIdentity()));
   if (data.is_commander_format && data.wotc_bracket) badges.push(`Bracket ${{data.wotc_bracket[0]}} (${{data.wotc_bracket[1]}})`);
   if (data.bracket_tag) badges.push(BRACKET_TAG_LABELS[data.bracket_tag] || data.bracket_tag);
   badges.push(`$${{data.deck_value.toFixed(2)}}`);
