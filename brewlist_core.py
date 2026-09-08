@@ -751,7 +751,7 @@ PRICE_INDEX_MAX_AGE_DAYS = 7
 # the "sets" field (set name + release date per set code) for the deck
 # builder's Set Selection filter. v16: added "card_count" (baseSetSize) to
 # each "sets" entry, for "N / M owned" in the Set filter popups.
-PRICE_INDEX_FORMAT_VERSION = 18
+PRICE_INDEX_FORMAT_VERSION = 19
 
 
 # --------------------------------------------------------------------------
@@ -1256,6 +1256,19 @@ def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[
                         # scryfall_id (tied to an actual owned printing)
                         # can't provide.
                         "scryfall_id": card_scryfall_id or "",
+                        # "transform"/"modal_dfc" genuinely have a second,
+                        # separate card image (Scryfall serves it at the
+                        # same URL with /back/ swapped in for /front/) --
+                        # "adventure"/"split"/"aftermath" also join two
+                        # names with " // " but are single-sided, ONE
+                        # image, no back face to show at all. Verified
+                        # live against the real MTGJSON data for both:
+                        # Archangel Avacyn // Avacyn, the Purifier is
+                        # "transform" (real back image, confirmed 200);
+                        # My Precious // Allure of Power is "adventure"
+                        # (confirmed 404 on /back/) -- so the name alone
+                        # can't tell these apart, only this field can.
+                        "layout": card.get("layout") or "",
                     })
 
                 if card.get("isGameChanger"):
@@ -2784,6 +2797,27 @@ a.badge:hover {{ text-decoration: underline; }}
   z-index: 2;
   pointer-events: none;
 }}
+.flip-btn {{
+  position: absolute;
+  top: 45px;
+  left: 26px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid var(--card-border);
+  background: var(--bg-elevated);
+  color: var(--text);
+  font-size: 0.85rem;
+  line-height: 1;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+  z-index: 2;
+}}
+.flip-btn:hover {{ color: var(--accent); border-color: var(--accent); }}
 .combos-note {{ color: var(--text-dim); font-size: 0.85rem; margin: 4px 0 14px; }}
 .combo-list {{
   display: grid;
@@ -2851,6 +2885,8 @@ a.badge:hover {{ text-decoration: underline; }}
 .sample-hand {{ grid-column: 1 / -1; }}
 .sample-hand-cards {{ display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }}
 .sample-hand-thumb {{ width: 100px; height: 140px; border-radius: 6px; object-fit: cover; background: var(--card-border); cursor: zoom-in; }}
+.sample-hand-card {{ position: relative; width: 100px; height: 140px; }}
+.sample-hand-card .flip-btn {{ top: auto; bottom: 4px; left: 4px; }}
 .sample-hand-actions {{ display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }}
 
 .mana-cost-pips {{ display: none; align-items: center; gap: 1px; }}
@@ -2859,6 +2895,7 @@ a.badge:hover {{ text-decoration: underline; }}
 body.compact .card {{ padding: 4px 10px; gap: 0; }}
 body.compact .card .card-thumb {{ display: none; }}
 body.compact .commander-sticker {{ display: none; }}
+body.compact .flip-btn {{ display: none; }}
 body.compact .override-toggle {{ display: none; }}
 body.compact .qty {{ display: none; }}
 body.compact .budget-alt-note {{ display: none; }}
@@ -3279,9 +3316,10 @@ document.body.addEventListener('mousemove', (e) => {{
 }});
 
 const SAMPLE_HAND_LIBRARY = {sample_hand_json};
-function scryfallImg(id, size) {{
+const DFC_LAYOUTS = ['transform', 'modal_dfc'];
+function scryfallImg(id, size, face) {{
   if (!id) return null;
-  return 'https://cards.scryfall.io/' + size + '/front/' + id[0] + '/' + id[1] + '/' + id + '.jpg';
+  return 'https://cards.scryfall.io/' + size + '/' + (face || 'front') + '/' + id[0] + '/' + id[1] + '/' + id + '.jpg';
 }}
 function drawSampleHand() {{
   const pool = SAMPLE_HAND_LIBRARY.slice();
@@ -3294,9 +3332,18 @@ function drawSampleHand() {{
   container.innerHTML = pool.slice(0, 7).map(c => {{
     const small = scryfallImg(c.scryfall_id, 'small');
     const full = scryfallImg(c.scryfall_id, 'normal');
-    return small
-      ? `<img class="sample-hand-thumb card-thumb" src="${{small}}" data-full="${{full}}" alt="${{c.name}}" loading="lazy">`
-      : `<div class="sample-hand-thumb" title="${{c.name}}"></div>`;
+    if (!small) return `<div class="sample-hand-card"><div class="sample-hand-thumb" title="${{c.name}}"></div></div>`;
+    if (DFC_LAYOUTS.includes(c.layout)) {{
+      const backSmall = scryfallImg(c.scryfall_id, 'small', 'back');
+      const backFull = scryfallImg(c.scryfall_id, 'normal', 'back');
+      return `<div class="sample-hand-card">`
+        + `<img class="sample-hand-thumb card-thumb" src="${{small}}" data-full="${{full}}" `
+        + `data-front-small="${{small}}" data-front-full="${{full}}" data-back-small="${{backSmall}}" `
+        + `data-back-full="${{backFull}}" alt="${{c.name}}" loading="lazy">`
+        + `<button type="button" class="flip-btn" title="Show the other face">&#8635;</button>`
+        + `</div>`;
+    }}
+    return `<div class="sample-hand-card"><img class="sample-hand-thumb card-thumb" src="${{small}}" data-full="${{full}}" alt="${{c.name}}" loading="lazy"></div>`;
   }}).join('');
   container.querySelectorAll('.card-thumb[data-full]').forEach(bindHoverPreview);
 }}
@@ -3447,6 +3494,25 @@ if (valueStat && valuePieModalOverlay) {{
   valuePieModalOverlay.addEventListener('click', (e) => {{ if (e.target === valuePieModalOverlay) closeValuePieModal(); }});
   document.addEventListener('keydown', (e) => {{ if (e.key === 'Escape') closeValuePieModal(); }});
 }}
+
+// Flips a double-faced card's thumbnail between its two faces --
+// updates data-full in place too, so the existing delegated hover-
+// preview (see the mousemove listener above) picks up whichever face
+// is currently showing with no changes of its own needed. Delegated on
+// document.body (not bound per-button at load) so it also covers
+// flip-btns the sample-hand draw creates later via innerHTML.
+document.body.addEventListener('click', (e) => {{
+  const btn = e.target.closest('.flip-btn');
+  if (!btn) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const thumb = btn.previousElementSibling;
+  if (!thumb) return;
+  const showingBack = thumb.dataset.showingBack === '1';
+  thumb.src = showingBack ? thumb.dataset.frontSmall : thumb.dataset.backSmall;
+  thumb.dataset.full = showingBack ? thumb.dataset.frontFull : thumb.dataset.backFull;
+  thumb.dataset.showingBack = showingBack ? '0' : '1';
+}});
 
 document.querySelectorAll('.card.foil').forEach(card => {{
   card.addEventListener('mousemove', (e) => {{
@@ -3707,6 +3773,13 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
     other two.
     """
     further_optimizations = further_optimizations or []
+    # Loaded once, up front -- reused for both the flip-button layout
+    # check (_thumb_html, right below) and the mana-source heuristic
+    # further down (Deck Analysis section). This is a full parse of the
+    # whole price index file (gameplay is itself a huge nested dict, no
+    # way around deserializing it), so paying that cost twice in one
+    # render_html() call would be wasteful.
+    gameplay = gameplay_data_in_index()
     total_cards = totals["owned"] + totals["missing"]
     pct = (totals["owned"] / total_cards * 100) if total_cards else 100.0
     max_card_price = 0.0
@@ -3836,18 +3909,45 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
             return r.owned_scryfall_id
         return r.entry.scryfall_id
 
-    def _thumb_html(scryfall_id: str | None, css_class: str = "card-thumb") -> str:
+    # "transform"/"modal_dfc" genuinely have a second, separate card image
+    # (Scryfall's CDN serves it at the same URL with /back/ swapped in for
+    # /front/) -- "adventure"/"split"/"aftermath" ALSO join two names with
+    # " // " but are single-sided, one image, no back face at all. Verified
+    # live against real cards, not guessed: Archangel Avacyn // Avacyn, the
+    # Purifier is "transform" (a real 200 on /back/); My Precious // Allure
+    # of Power is "adventure" (a real 404 on /back/) -- so the name alone
+    # can't tell these apart, only MTGJSON's own layout field can
+    # (previously not captured at all -- see gameplay_by_name).
+    _DFC_LAYOUTS = ("transform", "modal_dfc")
+
+    def _thumb_html(scryfall_id: str | None, css_class: str = "card-thumb", name: str = "") -> str:
         img_url = scryfall_image_url(scryfall_id, size="normal")
         thumb_url = scryfall_image_url(scryfall_id, size="small")
-        if thumb_url:
+        if not thumb_url:
+            return f'<div class="{css_class}"></div>'
+        layout = (gameplay.get(normalize_name(name)) or {}).get("layout", "") if name else ""
+        if layout in _DFC_LAYOUTS:
+            back_thumb = thumb_url.replace("/front/", "/back/")
+            back_full = img_url.replace("/front/", "/back/")
             return (
                 f'<img class="{css_class}" src="{html.escape(thumb_url)}" '
-                f'data-full="{html.escape(img_url)}" alt="" loading="lazy" decoding="async">'
+                f'data-full="{html.escape(img_url)}" data-front-small="{html.escape(thumb_url)}" '
+                f'data-front-full="{html.escape(img_url)}" data-back-small="{html.escape(back_thumb)}" '
+                f'data-back-full="{html.escape(back_full)}" alt="" loading="lazy" decoding="async">'
+                f'<button type="button" class="flip-btn" title="Show the other face">&#8635;</button>'
             )
-        return f'<div class="{css_class}"></div>'
+        return (
+            f'<img class="{css_class}" src="{html.escape(thumb_url)}" '
+            f'data-full="{html.escape(img_url)}" alt="" loading="lazy" decoding="async">'
+        )
 
     commanders = [r for cards in buckets.values() for r in cards if r.entry.section == "commander"]
     commander_thumbs_html = "".join(
+        # No name= here on purpose -- this decorative header strip isn't
+        # inside a position:relative container the way .card-main is, so
+        # a flip button here would mis-position against the viewport
+        # instead of the thumbnail. The main card grid below is where
+        # flipping actually matters anyway.
         _thumb_html(_display_scryfall_id(r), css_class="card-thumb commander-thumb") for r in commanders
     )
 
@@ -3864,7 +3964,6 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
     # ----------------------------------------------------------------
     all_results = [r for cards in buckets.values() for r in cards]
     all_entries = [r.entry for r in all_results]
-    gameplay = gameplay_data_in_index()
 
     def _median(values: list[float]) -> float:
         if not values:
@@ -3922,7 +4021,11 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
     )
     avg_lands_in_hand = (7 * land_count / library_size) if library_size else 0.0
     sample_hand_pool = [
-        {"name": r.entry.name, "scryfall_id": _display_scryfall_id(r)}
+        {
+            "name": r.entry.name,
+            "scryfall_id": _display_scryfall_id(r),
+            "layout": (gameplay.get(normalize_name(r.entry.name)) or {}).get("layout", ""),
+        }
         for r in library_results for _ in range(r.entry.quantity)
     ]
     sample_hand_json = json.dumps(sample_hand_pool)
@@ -4079,7 +4182,7 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
                     for p in mana_pips
                 ) + '</span>'
 
-            thumb_html = _thumb_html(_display_scryfall_id(r))
+            thumb_html = _thumb_html(_display_scryfall_id(r), name=e.name)
             # Same image URL the inner .card-thumb img already carries in
             # its own data-full -- duplicated onto the outer tile too, so
             # Compact view (where .card-thumb is display:none, see
