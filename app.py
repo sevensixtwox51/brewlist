@@ -1283,9 +1283,9 @@ def render_builder_page(deck_id: str | None = None) -> str:
       <button type="button" class="btn ghost small" id="analyze-btn" style="margin-bottom:10px;">&#128269; Analyze Deck</button>
       <button type="button" class="btn ghost small" id="optimize-btn" style="margin-bottom:10px;" title="Looks for real, owned combos you're exactly one card away from completing, and proposes swaps to add them -- useful after Suggest cards has already filled the deck, since a full batch can't always see a combo piece it's about to add in that same batch">&#9889; Optimize Deck</button>
       <div id="commander-slot-wrap"></div>
+      <div id="suggestions-panel"></div>
       <button type="button" class="btn danger small" id="clear-cards-btn" style="display:none;margin-bottom:6px;">Clear All Cards</button>
       <div id="deck-list"></div>
-      <div id="suggestions-panel"></div>
     </div>
   </div>
 </main>
