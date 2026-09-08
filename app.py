@@ -61,6 +61,7 @@ from deck_builder import (
     suggest_replacements,
 )
 from ai_builder import clear_api_key, key_source, load_api_key, run_ai_build, save_api_key, validate_api_key
+from edhrec_data import bulk_commander_popularity
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(APP_DIR, "data")
@@ -926,6 +927,8 @@ body::after {
 .builder-tile .name { font-weight:600; margin-bottom:2px; padding-right:60px; }
 .builder-tile .meta { color:var(--text-dim); font-size:0.75rem; }
 .builder-tile .warn { color: var(--missing); font-size:0.72rem; margin-top:4px; }
+.builder-tile .edhrec-badge { display:inline-flex; align-items:center; gap:4px; font-size:0.72rem; margin-top:4px; color:var(--text-dim); }
+.builder-tile .edhrec-badge.ranked { color:var(--gold); font-weight:600; }
 .builder-tile.hidden { display:none; }
 .tile-corner-actions { position:absolute; top:6px; right:6px; display:flex; align-items:flex-end; gap:4px; }
 .tile-icon-stack { display:flex; flex-direction:column; gap:3px; }
@@ -1305,6 +1308,16 @@ def render_builder_page(deck_id: str | None = None) -> str:
           <button type="button" class="seg-btn" data-value="compact">Compact</button>
         </div>
       </div>
+      <div class="builder-filters" id="commander-popularity-controls" style="display:none;">
+        <select id="edhrec-window" title="Which EDHREC time window a commander's popularity rank is based on">
+          <option value="2years">Popularity: past 2 years</option>
+          <option value="month">Popularity: past month</option>
+          <option value="week">Popularity: past week</option>
+        </select>
+        <label class="exact-color-toggle" title="Sorts eligible commanders by their EDHREC rank (most popular first); ones with no rank in this window sort last">
+          <input type="checkbox" id="sort-by-rank"> Sort by rank
+        </label>
+      </div>
       <div class="collection-grid" id="collection-grid"><div class="hint">Loading your collection&hellip;</div></div>
     </div>
     <div class="card deck-panel">
@@ -1439,6 +1452,12 @@ let brew = {json.dumps(brew_state)};
 let collection = [];
 let themeLabelToIds = {{}};
 let themeRequestId = 0;
+// EDHREC popularity -- keyed by normalized name, filled in progressively
+// (see pollCommanderPopularity) since an uncached commander is a real live
+// request the server makes to edhrec.com, not something to wait on before
+// the grid can render at all.
+let commanderPopularity = {{}};
+let edhrecPollsLeft = 0;
 
 const errorBox = document.getElementById('error-box');
 function showError(message) {{ errorBox.textContent = message; errorBox.style.display = 'block'; }}
@@ -1880,33 +1899,74 @@ function matchesColorFilter(colorIdentity, filterValue, exact) {{
   return colorIdentity.every(c => filterValue.includes(c));
 }}
 
+function commanderPopularityFor(card) {{
+  return commanderPopularity[normalizeName(card.name)] || null;
+}}
+
 function renderGrid() {{
   const search = document.getElementById('search').value.trim().toLowerCase();
   const category = document.getElementById('filter-category').value;
   const color = document.getElementById('filter-color').value;
   const exactColor = document.getElementById('filter-color-exact').checked;
+  const edhrecWindow = document.getElementById('edhrec-window').value;
+  const sortByRank = category === 'Commander' && document.getElementById('sort-by-rank').checked;
   const grid = document.getElementById('collection-grid');
   grid.innerHTML = '';
   const frag = document.createDocumentFragment();
-  collection.forEach(card => {{
-    if (search && !card.name.toLowerCase().includes(search)) return;
-    if (category === 'Commander' && !isCommanderEligible(card)) return;
-    if (category && category !== 'Commander' && card.category !== category) return;
-    if (!matchesColorFilter(card.color_identity, color, exactColor)) return;
-    if (gridExcludedSetCodes.length && gridExcludedSetCodes.includes(card.set_code)) return;
 
+  const cards = collection.filter(card => {{
+    if (search && !card.name.toLowerCase().includes(search)) return false;
+    if (category === 'Commander' && !isCommanderEligible(card)) return false;
+    if (category && category !== 'Commander' && card.category !== category) return false;
+    if (!matchesColorFilter(card.color_identity, color, exactColor)) return false;
+    if (gridExcludedSetCodes.length && gridExcludedSetCodes.includes(card.set_code)) return false;
+    return true;
+  }});
+
+  if (sortByRank) {{
+    // Ranked (lower = more popular) sorts first; anything with no rank in
+    // this window sorts after, by raw deck count when known -- so a real,
+    // if unranked, commander (see edhrec_data.py's module docstring on why
+    // most owned commanders won't place in a Top 100 at all) still sorts
+    // above one with no EDHREC data at all rather than mixing randomly.
+    cards.sort((a, b) => {{
+      const pa = commanderPopularityFor(a), pb = commanderPopularityFor(b);
+      const ra = pa && pa.rank ? pa.rank[edhrecWindow] : undefined;
+      const rb = pb && pb.rank ? pb.rank[edhrecWindow] : undefined;
+      if (ra !== undefined && rb !== undefined) return ra - rb;
+      if (ra !== undefined) return -1;
+      if (rb !== undefined) return 1;
+      const da = (pa && pa.num_decks) || 0, db = (pb && pb.num_decks) || 0;
+      return db - da;
+    }});
+  }}
+
+  cards.forEach(card => {{
     const tile = document.createElement('div');
     tile.className = 'builder-tile';
     tile.dataset.full = scryfallImg(card.scryfall_id, 'normal') || '';
     const legality = legalityFor(card);
     const warnHtml = (legality && legality !== 'Legal') ? `<div class="warn">&#9888; ${{legality}} in ${{brew.format === 'commander' ? 'Commander' : brew.target_format}}</div>` : '';
     const inDeck = findCard(card.name);
+    // Rank only -- not the raw deck count. Most owned commanders won't
+    // place in a given window's Top 100 at all (see edhrec_data.py's
+    // module docstring), so showing nothing for those is the honest
+    // result, not a gap to paper over with a number that isn't the point.
+    let popularityHtml = '';
+    if (category === 'Commander' && isCommanderEligible(card)) {{
+      const pop = commanderPopularityFor(card);
+      const rank = pop && pop.rank ? pop.rank[edhrecWindow] : undefined;
+      if (rank !== undefined) {{
+        popularityHtml = `<div class="edhrec-badge ranked">&#127942; #${{rank}} popular commander</div>`;
+      }}
+    }}
     tile.innerHTML = `
       ${{thumbHtml(card.scryfall_id, 'card-thumb')}}
       <div class="tile-body">
         <div class="name"><span class="name-text">${{card.name}}</span></div>
         <div class="meta">${{card.type_line || 'Unknown type'}} &middot; CMC ${{card.cmc}} &middot; own ${{card.quantity}}</div>
         ${{warnHtml}}
+        ${{popularityHtml}}
       </div>
       <div class="tile-corner-actions">
         ${{manaCostPipsHtml(card.mana_cost)}}
@@ -2173,9 +2233,43 @@ fetch('/builder/collection-data')
   .catch(() => showError('Could not load your collection.'));
 
 document.getElementById('search').addEventListener('input', renderGrid);
-document.getElementById('filter-category').addEventListener('change', renderGrid);
+document.getElementById('filter-category').addEventListener('change', () => {{
+  updateCommanderPopularityControlsVisibility();
+  renderGrid();
+}});
 document.getElementById('filter-color').addEventListener('change', renderGrid);
 document.getElementById('filter-color-exact').addEventListener('change', renderGrid);
+document.getElementById('edhrec-window').addEventListener('change', renderGrid);
+document.getElementById('sort-by-rank').addEventListener('change', renderGrid);
+
+// Polls /builder/commander-popularity a handful of times a few seconds
+// apart -- each *uncached* legendary creature is a real live edhrec.com
+// request server-side (capped per call, see bulk_commander_popularity), so
+// a big collection's worth of candidates fills in progressively rather
+// than one call blocking on all of them. Stops after a fixed number of
+// rounds regardless of whether anything new came back, rather than trying
+// to detect "done" -- simple and bounded; revisiting the Commander filter
+// (or the page) later just picks up whatever the server has cached by then.
+function pollCommanderPopularity() {{
+  fetch('/builder/commander-popularity')
+    .then(r => r.json())
+    .then(data => {{
+      if (data.error) return;
+      Object.assign(commanderPopularity, data.popularity || {{}});
+      renderGrid();
+      edhrecPollsLeft--;
+      if (edhrecPollsLeft > 0) setTimeout(pollCommanderPopularity, 3000);
+    }})
+    .catch(() => {{}});
+}}
+function updateCommanderPopularityControlsVisibility() {{
+  const isCommanderFilter = document.getElementById('filter-category').value === 'Commander';
+  document.getElementById('commander-popularity-controls').style.display = isCommanderFilter ? 'flex' : 'none';
+  if (isCommanderFilter && edhrecPollsLeft <= 0) {{
+    edhrecPollsLeft = 5;
+    pollCommanderPopularity();
+  }}
+}}
 
 const saveBtn = document.getElementById('save-btn');
 const saveLabel = document.getElementById('save-label');
@@ -3051,6 +3145,30 @@ def builder_collection_data():
         return jsonify(error=str(e)), 400
     cards = owned_collection_gameplay_view(owned, gameplay_data_in_index())
     return jsonify(cards=cards)
+
+
+@app.route("/builder/commander-popularity", methods=["GET"])
+def builder_commander_popularity():
+    """How often each of the player's own eligible commanders is actually
+    played as one on EDHREC -- rank in the Top 100 (2 years/month/week) when
+    it places, otherwise just its own real deck count (see edhrec_data.py's
+    module docstring for why those are two genuinely different things, not
+    a formatting choice). Best-effort and capped per call (bulk_commander_
+    popularity's max_new_fetches) since a big collection can have dozens of
+    legendary creatures and each *uncached* one is a real live request to
+    edhrec.com -- the client re-polls this same endpoint while the
+    Commander filter is open to progressively fill in the rest rather than
+    this one call blocking on all of them."""
+    if not os.path.isfile(COLLECTION_PATH):
+        return jsonify(error="No ManaBox collection on file yet -- upload one from the home page first."), 400
+    try:
+        owned = load_collection(COLLECTION_PATH)
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+    cards = owned_collection_gameplay_view(owned, gameplay_data_in_index())
+    names = [c["name"] for c in cards if "Legendary" in c["type_line"] and "Creature" in c["type_line"]]
+    popularity = bulk_commander_popularity(names)
+    return jsonify(popularity={normalize_name(n): p for n, p in popularity.items()})
 
 
 @app.route("/builder/sets", methods=["GET"])
