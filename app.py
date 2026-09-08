@@ -294,6 +294,7 @@ def _run_ai_build_job(job_id, commander, deck_format, target_format, target_size
                     job["finished"] = result["finished"]
                     job["summary"] = result["summary"]
                     job["stop_reason"] = result.get("stop_reason") or "unknown"
+                    job["estimated_cost_usd"] = result.get("estimated_cost_usd")
     except Exception as e:  # noqa: BLE001 -- surface any failure to the polling client
         with _JOBS_LOCK:
             job = JOBS.get(job_id)
@@ -2749,6 +2750,9 @@ function renderAiSuggestions(data) {{
   if (data.summary) {{
     panel.innerHTML += `<p class="hint" style="margin:0 0 8px;">${{escapeHtml(data.summary)}}</p>`;
   }}
+  if (typeof data.estimated_cost_usd === 'number') {{
+    panel.innerHTML += `<p class="hint" style="margin:0 0 8px;">Estimated API cost for this build: $${{data.estimated_cost_usd.toFixed(2)}}</p>`;
+  }}
   if (!data.finished) {{
     // Specific, not a generic "hit some limit" guess -- a real user
     // question this exists to answer directly: was it a 7-minute wall-
@@ -3565,7 +3569,7 @@ def builder_ai_build_start():
             "status": "running", "done": 0, "total": 0, "stage": None,
             "log": [], "deck_state": [], "suggestions": None, "removed": [], "final_entries": [], "maybeboard": [],
             "finished": False, "summary": "", "error": None, "import_unresolved": import_unresolved, "mode": mode,
-            "guessed_deck_name": guessed_deck_name, "stop_reason": None,
+            "guessed_deck_name": guessed_deck_name, "stop_reason": None, "estimated_cost_usd": None,
         }
 
     threading.Thread(
@@ -3618,6 +3622,7 @@ def builder_ai_build_result(job_id):
         final_entries=job.get("final_entries") or [], mode=job.get("mode") or "fresh",
         guessed_deck_name=job.get("guessed_deck_name"), maybeboard=job.get("maybeboard") or [],
         stop_reason=job.get("stop_reason") or "unknown",
+        estimated_cost_usd=job.get("estimated_cost_usd"),
     )
 
 

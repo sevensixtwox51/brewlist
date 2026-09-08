@@ -63,6 +63,17 @@ _MAX_TURNS = 60
 _MAX_SECONDS = 420
 _MAX_TOKENS_PER_TURN = 4096
 
+# Claude Sonnet 5's published per-1M-token rates -- $/1M -- plus Anthropic's
+# documented prompt-caching multipliers on the base input rate (cache writes
+# ~1.25x for the default 5-minute TTL this loop uses; cache reads ~0.1x).
+# Used only to show the player a real, if approximate, dollar cost per build
+# (see the usage_totals tracking in run_ai_build) -- not used for billing,
+# just visibility, since a real user question this exists to answer is
+# "why did I burn through my API budget so fast with no way to see where it
+# went." Re-check against Anthropic's current pricing page if these ever
+# look off -- rates can change.
+_SONNET_5_RATE_PER_MTOK = {"input": 2.00, "output": 10.00, "cache_write": 2.50, "cache_read": 0.20}
+
 
 def load_api_key() -> str | None:
     """ANTHROPIC_API_KEY env var wins if set (same precedence as this
@@ -351,6 +362,12 @@ def run_ai_build(
     (not just inferred from `finished`/`error`) so a build that stopped
     short of the target size has one unambiguous, specific answer for why,
     surfaced to the player instead of a generic "hit some limit" guess.
+    "estimated_cost_usd": float, "usage_totals": {"input_tokens",
+    "cache_creation_input_tokens", "cache_read_input_tokens",
+    "output_tokens"}} -- a real, if approximate, dollar cost for this one
+    build (see _SONNET_5_RATE_PER_MTOK), computed from every turn's actual
+    response.usage rather than guessed, so a build that turns out expensive
+    is visible immediately instead of only showing up on the bill later.
 
     `wip_entries`, if given, seeds the loop with an existing deck
     (commander + library) instead of starting from just the commander --
@@ -756,6 +773,15 @@ def run_ai_build(
     finished = False
     summary = ""
     error = None
+    # Running usage totals across every turn -- the real cost driver in this
+    # loop is that the Messages API is stateless: every turn resends the
+    # entire growing conversation (system prompt + tools + every prior
+    # turn's messages), so an uncached N-turn build pays for that whole
+    # history N times over, not once -- cost grows roughly with the square
+    # of turn count, not linearly. Tracked here (not just logged) so a real
+    # dollar estimate can be shown at the end instead of the player finding
+    # out from their bill after the fact.
+    usage_totals = {"input_tokens": 0, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 0}
     # Distinct machine-readable reason for every way this loop can end,
     # threaded all the way to the client (see app.py's /builder/ai-build/
     # result and its stop-reason message) -- a real user question this
@@ -777,7 +803,22 @@ def run_ai_build(
             break
         try:
             response = client.messages.create(
-                model=_MODEL, max_tokens=_MAX_TOKENS_PER_TURN, system=system_prompt,
+                model=_MODEL, max_tokens=_MAX_TOKENS_PER_TURN,
+                # Prompt caching -- the single biggest lever for a loop shaped
+                # like this one (confirmed: no caching was ever enabled here
+                # before). Two breakpoints, per Anthropic's own recommended
+                # shape for agent loops: an explicit one on system+tools
+                # (identical on every turn of a build, never changes -- and
+                # since the wire order is tools -> system -> messages, a
+                # breakpoint on system also covers the tools schema above
+                # it), plus top-level automatic caching for the growing
+                # messages tail, so each turn only pays full price for
+                # what's actually new since the last turn, not the whole
+                # accumulated history again. Zero effect on what the model
+                # can do -- same model, same behavior, only how the
+                # repeated portion of the request is billed changes.
+                system=[{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}],
+                cache_control={"type": "ephemeral"},
                 messages=messages, tools=tools,
             )
         except Exception as e:
@@ -785,6 +826,11 @@ def run_ai_build(
             emit(f"Error calling Claude: {e}")
             stop_reason = "error"
             break
+
+        usage = getattr(response, "usage", None)
+        if usage:
+            for key in usage_totals:
+                usage_totals[key] += getattr(usage, key, 0) or 0
 
         messages.append({"role": "assistant", "content": response.content})
         tool_uses = [b for b in response.content if b.type == "tool_use"]
@@ -811,6 +857,22 @@ def run_ai_build(
     else:
         emit(f"Reached the {_MAX_TURNS}-turn limit -- stopping with whatever's been built so far.")
         stop_reason = "turn_limit"
+
+    estimated_cost_usd = round(sum(
+        usage_totals[key] / 1_000_000 * rate
+        for key, rate in (
+            ("input_tokens", _SONNET_5_RATE_PER_MTOK["input"]),
+            ("output_tokens", _SONNET_5_RATE_PER_MTOK["output"]),
+            ("cache_creation_input_tokens", _SONNET_5_RATE_PER_MTOK["cache_write"]),
+            ("cache_read_input_tokens", _SONNET_5_RATE_PER_MTOK["cache_read"]),
+        )
+    ), 4)
+    cache_read = usage_totals["cache_read_input_tokens"]
+    cache_write = usage_totals["cache_creation_input_tokens"]
+    emit(
+        f"Estimated cost: ${estimated_cost_usd:.2f} ({turn_ref['value']} turn(s), "
+        f"{cache_read:,} cached tokens read, {cache_write:,} written to cache)"
+    )
 
     suggestions = []
     for c in added_by_name.values():
@@ -843,5 +905,5 @@ def run_ai_build(
     return {
         "suggestions": suggestions, "removed": removed_names, "final_entries": final_entries,
         "maybeboard": maybeboard_out, "log": log, "finished": finished, "summary": summary, "error": error,
-        "stop_reason": stop_reason,
+        "stop_reason": stop_reason, "estimated_cost_usd": estimated_cost_usd, "usage_totals": usage_totals,
     }
