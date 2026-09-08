@@ -469,6 +469,33 @@ def run_ai_build(
                 )
             ][:25]
             emit(f'Searched {pool_label} for "{tool_input.get("query")}" -- {len(matches)} match(es)')
+            if not matches:
+                # A real, user-reported pattern: the static "don't guess
+                # specific card names" instruction in the system prompt
+                # (stated once, far from the moment it matters, competing
+                # with everything else in a long prompt) wasn't enough on
+                # its own -- the model kept guessing exact names (e.g.
+                # "Cavern of Souls choose creature type") that returned
+                # nothing anyway, over and over across a build. Correcting
+                # this in the tool result itself, right at the moment a
+                # search comes back empty, is a much stronger nudge than a
+                # rule stated once up front -- it's fresh context exactly
+                # when the decision is being made, not a rule to recall.
+                not_owned_note = (
+                    " If you were checking for a specific card by name, remember this only searches what's "
+                    "actually owned -- a real, legal card can still return nothing here just because it isn't "
+                    "owned."
+                ) if scope == "owned" else ""
+                return json.dumps({
+                    "matches": [],
+                    "note": (
+                        f"0 matches for \"{tool_input.get('query')}\".{not_owned_note} Don't retry with another "
+                        "specific guessed card name -- search by the EFFECT or ROLE you actually want instead "
+                        "(e.g. \"ramp\", \"destroy all creatures\", \"draw a card\", a creature type, a keyword "
+                        "like \"flying\" or \"proliferate\"). That surfaces every real option in one call instead "
+                        "of guessing names one at a time."
+                    ),
+                })
             return json.dumps([_card_summary(c, scope, owned_names, prices) for c in matches])
 
         if tool_name == "get_deck_state":
