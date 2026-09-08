@@ -2248,6 +2248,11 @@ saveBtn.addEventListener('click', () => {{
 const suggestBtn = document.getElementById('suggest-btn');
 suggestBtn.addEventListener('click', () => {{
   suggestBtn.disabled = true;
+  // Same "don't leave the panel blank/stale while a live call is in
+  // flight" fix as Optimize -- usually fast (local heuristics), but a
+  // commander whose EDHREC synergy data isn't cached yet costs a real
+  // live fetch first.
+  document.getElementById('suggestions-panel').innerHTML = '<div class="hint" style="margin:0;">Finding suggestions...</div>';
   fetch('/builder/suggest', {{
     method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
     body: JSON.stringify({{
@@ -2332,6 +2337,13 @@ suggestBtn.addEventListener('click', () => {{
 const optimizeBtn = document.getElementById('optimize-btn');
 optimizeBtn.addEventListener('click', () => {{
   optimizeBtn.disabled = true;
+  // Real, user-reported gap: this makes a live Commander Spellbook API
+  // call (genuinely a couple of seconds, not instant) with zero visual
+  // feedback otherwise -- the panel was left however "Add All"/a prior
+  // click had cleared it (usually blank), so a slow-but-working request
+  // looked indistinguishable from "nothing happened." Same loading-hint
+  // pattern the Analyze modal's own live Commander Spellbook call uses.
+  document.getElementById('suggestions-panel').innerHTML = '<div class="hint" style="margin:0;">Checking Commander Spellbook for combos... (live API call, may take a few seconds)</div>';
   fetch('/builder/optimize', {{
     method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
     body: JSON.stringify({{
