@@ -62,6 +62,8 @@ from deck_builder import (
 )
 from ai_builder import clear_api_key, key_source, load_api_key, run_ai_build, save_api_key, validate_api_key
 from edhrec_data import bulk_commander_popularity
+from edhrec_data import refresh_all as edhrec_refresh_all
+from edhrec_data import top_list_status as edhrec_top_list_status
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(APP_DIR, "data")
@@ -1317,6 +1319,8 @@ def render_builder_page(deck_id: str | None = None) -> str:
         <label class="exact-color-toggle" title="Sorts eligible commanders by their EDHREC rank (most popular first); ones with no rank in this window sort last">
           <input type="checkbox" id="sort-by-rank"> Sort by rank
         </label>
+        <button type="button" class="btn ghost small" id="edhrec-refresh-btn" title="EDHREC data only updates when you click this -- it never refetches on its own">&#8635; Refresh rankings</button>
+        <span class="hint" id="edhrec-status" style="margin:0;"></span>
       </div>
       <div class="collection-grid" id="collection-grid"><div class="hint">Loading your collection&hellip;</div></div>
     </div>
@@ -1452,12 +1456,11 @@ let brew = {json.dumps(brew_state)};
 let collection = [];
 let themeLabelToIds = {{}};
 let themeRequestId = 0;
-// EDHREC popularity -- keyed by normalized name, filled in progressively
-// (see pollCommanderPopularity) since an uncached commander is a real live
-// request the server makes to edhrec.com, not something to wait on before
-// the grid can render at all.
+// EDHREC popularity -- keyed by normalized name. Only ever refetched on a
+// one-time bootstrap or an explicit refresh-icon click (see
+// updateCommanderPopularityControlsVisibility/pollCommanderPopularity) --
+// never on a timer.
 let commanderPopularity = {{}};
-let edhrecPollsLeft = 0;
 
 const errorBox = document.getElementById('error-box');
 function showError(message) {{ errorBox.textContent = message; errorBox.style.display = 'block'; }}
@@ -2242,34 +2245,77 @@ document.getElementById('filter-color-exact').addEventListener('change', renderG
 document.getElementById('edhrec-window').addEventListener('change', renderGrid);
 document.getElementById('sort-by-rank').addEventListener('change', renderGrid);
 
-// Polls /builder/commander-popularity a handful of times a few seconds
-// apart -- each *uncached* legendary creature is a real live edhrec.com
-// request server-side (capped per call, see bulk_commander_popularity), so
-// a big collection's worth of candidates fills in progressively rather
-// than one call blocking on all of them. Stops after a fixed number of
-// rounds regardless of whether anything new came back, rather than trying
-// to detect "done" -- simple and bounded; revisiting the Commander filter
-// (or the page) later just picks up whatever the server has cached by then.
-function pollCommanderPopularity() {{
+// EDHREC data is deliberately never refreshed on a timer (see
+// edhrec_data.py's module docstring) -- the only two times a background
+// fetch runs at all are a one-time bootstrap (a window that's never been
+// fetched at all, e.g. the very first time the Commander filter is ever
+// opened) and an explicit click on the refresh icon. Either way it's a
+// real live edhrec.com fetch taking several seconds, so this polls every
+// 3s only WHILE the server reports one in progress, stopping the moment
+// it's done (or after a generous safety cap, in case something wedges).
+let edhrecPolling = false;
+function formatRelativeTime(epochSeconds) {{
+  if (!epochSeconds) return null;
+  const diff = Math.max(0, Date.now() / 1000 - epochSeconds);
+  if (diff < 90) return 'just now';
+  if (diff < 3600) return Math.round(diff / 60) + 'm ago';
+  if (diff < 86400) return Math.round(diff / 3600) + 'h ago';
+  return Math.round(diff / 86400) + 'd ago';
+}}
+function updateEdhrecStatus(data) {{
+  const statusEl = document.getElementById('edhrec-status');
+  const btn = document.getElementById('edhrec-refresh-btn');
+  if (data.refreshing) {{
+    statusEl.textContent = 'Refreshing rankings from EDHREC...';
+    btn.disabled = true;
+    return;
+  }}
+  btn.disabled = false;
+  const win = (data.windows || {{}})[document.getElementById('edhrec-window').value];
+  const when = win ? formatRelativeTime(win.fetched_at) : null;
+  statusEl.textContent = when ? `Rankings last updated ${{when}}` : '';
+}}
+function pollCommanderPopularity(attemptsLeft) {{
   fetch('/builder/commander-popularity')
     .then(r => r.json())
     .then(data => {{
       if (data.error) return;
       Object.assign(commanderPopularity, data.popularity || {{}});
+      updateEdhrecStatus(data);
       renderGrid();
-      edhrecPollsLeft--;
-      if (edhrecPollsLeft > 0) setTimeout(pollCommanderPopularity, 3000);
+      if (data.refreshing && attemptsLeft > 0) {{
+        edhrecPolling = true;
+        setTimeout(() => pollCommanderPopularity(attemptsLeft - 1), 3000);
+      }} else {{
+        edhrecPolling = false;
+      }}
     }})
-    .catch(() => {{}});
+    .catch(() => {{ edhrecPolling = false; }});
 }}
 function updateCommanderPopularityControlsVisibility() {{
   const isCommanderFilter = document.getElementById('filter-category').value === 'Commander';
   document.getElementById('commander-popularity-controls').style.display = isCommanderFilter ? 'flex' : 'none';
-  if (isCommanderFilter && edhrecPollsLeft <= 0) {{
-    edhrecPollsLeft = 5;
-    pollCommanderPopularity();
+  if (isCommanderFilter && !edhrecPolling) {{
+    pollCommanderPopularity(60);
   }}
 }}
+document.getElementById('edhrec-refresh-btn').addEventListener('click', () => {{
+  const statusEl = document.getElementById('edhrec-status');
+  const btn = document.getElementById('edhrec-refresh-btn');
+  btn.disabled = true;
+  fetch('/builder/commander-popularity/refresh', {{ method: 'POST' }})
+    .then(r => r.json())
+    .then(data => {{
+      if (!data.started) {{
+        const mins = Math.ceil((data.retry_after_seconds || 0) / 60);
+        statusEl.textContent = `Refreshed too recently -- try again in about ${{mins}}m.`;
+        btn.disabled = false;
+        return;
+      }}
+      pollCommanderPopularity(60);
+    }})
+    .catch(() => {{ btn.disabled = false; }});
+}});
 
 const saveBtn = document.getElementById('save-btn');
 const saveLabel = document.getElementById('save-label');
@@ -3150,15 +3196,15 @@ def builder_collection_data():
 @app.route("/builder/commander-popularity", methods=["GET"])
 def builder_commander_popularity():
     """How often each of the player's own eligible commanders is actually
-    played as one on EDHREC -- rank in the Top 100 (2 years/month/week) when
-    it places, otherwise just its own real deck count (see edhrec_data.py's
-    module docstring for why those are two genuinely different things, not
-    a formatting choice). Best-effort and capped per call (bulk_commander_
-    popularity's max_new_fetches) since a big collection can have dozens of
-    legendary creatures and each *uncached* one is a real live request to
-    edhrec.com -- the client re-polls this same endpoint while the
-    Commander filter is open to progressively fill in the rest rather than
-    this one call blocking on all of them."""
+    played as one on EDHREC -- real rank (not just Top 100; see
+    edhrec_data.py's module docstring for the full-ranking-chain approach)
+    in each of 3 time windows, for every commander that's been played at
+    all in that window. Also reports refresh status (last-fetched time per
+    window, whether a background fetch is currently running) so the client
+    can show "last updated" and drive the refresh icon's state -- this
+    module deliberately never refreshes on a timer (see its docstring), so
+    that status is the only thing telling the player whether the data is
+    ever going to change without them clicking refresh."""
     if not os.path.isfile(COLLECTION_PATH):
         return jsonify(error="No ManaBox collection on file yet -- upload one from the home page first."), 400
     try:
@@ -3168,7 +3214,23 @@ def builder_commander_popularity():
     cards = owned_collection_gameplay_view(owned, gameplay_data_in_index())
     names = [c["name"] for c in cards if "Legendary" in c["type_line"] and "Creature" in c["type_line"]]
     popularity = bulk_commander_popularity(names)
-    return jsonify(popularity={normalize_name(n): p for n, p in popularity.items()})
+    status = edhrec_top_list_status()
+    return jsonify(
+        popularity={normalize_name(n): p for n, p in popularity.items()},
+        refreshing=status["refreshing"],
+        windows=status["windows"],
+    )
+
+
+@app.route("/builder/commander-popularity/refresh", methods=["POST"])
+def builder_commander_popularity_refresh():
+    """Manual refresh -- the UI's refresh icon. Never fires automatically
+    (see edhrec_data.py's module docstring); throttled server-side
+    (edhrec_refresh_all's own cooldown, persisted across restarts) so
+    repeated clicks can't hammer edhrec.com, which has no official
+    rate-limit contract to lean on."""
+    result = edhrec_refresh_all()
+    return jsonify(result)
 
 
 @app.route("/builder/sets", methods=["GET"])
