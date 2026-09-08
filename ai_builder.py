@@ -48,10 +48,11 @@ from brewlist_core import (
 )
 from deck_builder import (
     CONSTRUCTED_LAND_FRACTION,
-    _card_role,
     _filter_candidates,
     _INTENDED_BRACKET_GC_CAP,
+    ai_builder_deck_shape_targets,
     categorize,
+    role_counts_for_entries,
 )
 
 _MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -416,13 +417,7 @@ def run_ai_build(
     _tag_labels = _budget_alt["tag_labels"]
 
     def role_counts(entries: list[CardEntry]) -> dict[str, int]:
-        counts = {"Lands": 0, "Ramp": 0, "Draw": 0, "Interaction": 0, "Synergy": 0}
-        for e in entries:
-            if e.section == "commander":
-                continue
-            role = _card_role(e.name, categorize(e.type_line), _tag_by_name, _tag_labels)
-            counts[role] = counts.get(role, 0) + e.quantity
-        return counts
+        return role_counts_for_entries(entries, tag_by_name=_tag_by_name, tag_labels=_tag_labels)
 
     # emit() can log several tool calls within one API turn (Claude often
     # batches multiple tool_use blocks in a single response) -- done/total
@@ -589,20 +584,17 @@ def run_ai_build(
 
     # Explicit deck-shape targets -- see the finish_deck floor check above
     # for why this exists at all: without ANY guidance here, a real build
-    # finished at the right card count with only 19 lands out of 100. The
-    # numbers themselves are the player's own stated guidelines, not a
-    # guess: ~37 lands/10 ramp/10 draw/15 removal+wipes/rest win-cons for a
-    # 100-card Commander deck (this app's "Interaction" role bucket
-    # deliberately covers both spot removal and board wipes, so 15 =
-    # their 10 removal + 5 wipes combined), scaled proportionally for a
-    # different target size; CONSTRUCTED_LAND_FRACTION (0.40, already used
-    # elsewhere in this app -- see deck_builder.py) for non-Commander.
+    # finished at the right card count with only 19 lands out of 100.
+    # ai_builder_deck_shape_targets (deck_builder.py) is the single source
+    # for these numbers -- the player's own stated guidelines, not a guess
+    # (see its own docstring) -- shared with the Analyze modal's deck-shape
+    # breakdown so the two can never quietly drift apart.
+    shape_targets = ai_builder_deck_shape_targets(deck_format, target_size)
     if deck_format == "commander":
-        land_target = round(target_size * 0.37)
-        ramp_target = round(target_size * 0.10)
-        draw_target = round(target_size * 0.10)
-        interaction_target = round(target_size * 0.15)
-        synergy_target = target_size - land_target - ramp_target - draw_target - interaction_target
+        land_target, ramp_target, draw_target, interaction_target, synergy_target = (
+            shape_targets["Lands"], shape_targets["Ramp"], shape_targets["Draw"],
+            shape_targets["Interaction"], shape_targets["Synergy"],
+        )
         shape_note = (
             f"DECK SHAPE -- take this as seriously as legality/color identity, not a nice-to-have: a real "
             f"Commander deck needs a proper mana base and role balance, not just {library_target} cards that "
@@ -620,7 +612,7 @@ def run_ai_build(
             "finish_deck already rejects it for exactly that reason.\n\n"
         )
     else:
-        land_target = round(target_size * CONSTRUCTED_LAND_FRACTION)
+        land_target = shape_targets["Lands"]
         shape_note = (
             f"DECK SHAPE: aim for roughly {land_target} lands out of {target_size} cards (~"
             f"{CONSTRUCTED_LAND_FRACTION:.0%}), plus a reasonable mix of removal/interaction and card advantage "

@@ -52,11 +52,13 @@ from brewlist_core import (
     update_from_git,
 )
 from deck_builder import (
+    ai_builder_deck_shape_targets,
     brew_to_card_entries,
     list_theme_options,
     optimize_builder_combos,
     owned_collection_gameplay_view,
     owned_set_options,
+    role_counts_for_entries,
     suggest_builder_cards,
     suggest_replacements,
 )
@@ -1019,6 +1021,14 @@ body::after {
 .color-row .mana-icon { width:16px; height:16px; flex-shrink:0; }
 .color-bar-track { flex:1; height:7px; border-radius:4px; background:var(--card-border); overflow:hidden; }
 .color-bar { height:100%; border-radius:4px; background:var(--accent); }
+.shape-row { display:flex; align-items:center; gap:10px; margin-bottom:6px; font-size:0.82rem; }
+.shape-row .shape-label { width:80px; flex-shrink:0; }
+.shape-bar-track { flex:1; height:9px; border-radius:5px; background:var(--card-border); overflow:hidden; }
+.shape-bar { height:100%; border-radius:5px; }
+.shape-bar.under { background:var(--missing); }
+.shape-bar.near { background:var(--owned); }
+.shape-bar.over { background:var(--gold); }
+.shape-row .shape-count { width:80px; text-align:right; flex-shrink:0; color:var(--text-dim); }
 .sample-hand-cards { display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
 .sample-hand-thumb { width:64px; height:89px; border-radius:5px; object-fit:cover; background:var(--card-border); cursor:zoom-in; }
 body.compact .builder-tile { padding:4px 10px; min-height:36px; align-items:center; }
@@ -1364,6 +1374,10 @@ def render_builder_page(deck_id: str | None = None) -> str:
 
       <h4 class="analysis-heading">Rule 0 summary</h4>
       <ul class="rule0-list" id="rule0-list"></ul>
+
+      <h4 class="analysis-heading">&#9878;&#65039; Deck Shape</h4>
+      <p class="hint" style="margin:0 0 8px;">Actual card counts against the rough Commander template (~37 lands, ~10 ramp, ~10 draw, ~15 removal/wipes, rest win-cons &amp; synergy) -- guidelines, not hard walls.</p>
+      <div id="deck-shape-breakdown"></div>
 
       <h4 class="analysis-heading">&#128202; Mana Curve &amp; Colors</h4>
       <div class="analysis-stat-line" id="analysis-stat-line"></div>
@@ -3033,11 +3047,44 @@ analyzeBtn.addEventListener('click', () => {{
         `<span class="bv-badge ${{b.cls || ''}}">${{b.label}}<span class="tooltip-popup">${{b.tip}}</span></span>`
       ).join('');
       document.getElementById('rule0-list').innerHTML = rule0Items(data).map(t => `<li>${{t}}</li>`).join('');
+      renderDeckShape(data);
       renderComboReference(data);
       printBattleCardBtn.disabled = false;
     }})
     .catch(() => {{ document.getElementById('analyze-loading').style.display = 'none'; showError('Could not reach the server.'); }});
 }});
+
+// Actual role counts (Lands/Ramp/Draw/Interaction/Synergy -- see
+// deck_builder.role_counts_for_entries) against the player's own stated
+// target ratios (ai_builder_deck_shape_targets -- the same numbers the AI
+// builder itself targets, so this is a genuine "how close to the template"
+// check, not a second, differently-tuned one). Constructed only gets a
+// Lands target (role_targets' other keys are null there -- see its
+// docstring), so those rows just show the raw count with no bar/target.
+function renderDeckShape(data) {{
+  const container = document.getElementById('deck-shape-breakdown');
+  const counts = data.role_counts || {{}};
+  const targets = data.role_targets || {{}};
+  const order = ['Lands', 'Ramp', 'Draw', 'Interaction', 'Synergy'];
+  container.innerHTML = order.map(role => {{
+    const actual = counts[role] || 0;
+    const target = targets[role];
+    if (target === null || target === undefined) {{
+      return `<div class="shape-row"><span class="shape-label">${{role}}</span><span class="shape-count">${{actual}} card(s)</span></div>`;
+    }}
+    const ratio = target ? actual / target : (actual ? 2 : 0);
+    let cls = 'near';
+    if (ratio < 0.8) cls = 'under';
+    else if (ratio > 1.3) cls = 'over';
+    const widthPct = Math.min(100, ratio * 100);
+    return `
+      <div class="shape-row" title="${{actual}} of a ~${{target}} target">
+        <span class="shape-label">${{role}}</span>
+        <div class="shape-bar-track"><div class="shape-bar ${{cls}}" style="width:${{widthPct}}%"></div></div>
+        <span class="shape-count">${{actual}} / ~${{target}}</span>
+      </div>`;
+  }}).join('');
+}}
 
 // Delegated (badges are re-rendered wholesale on every Analyze click, so
 // per-element listeners would leak/duplicate) hover-tooltip positioning
@@ -3650,6 +3697,14 @@ def builder_stats():
     is_commander_format = deck_format == "commander"
     _, _, totals = build_comparison(entries, owned, ignore_basics=False, is_commander_format=is_commander_format)
     combos = totals.get("combos") or {}
+    # Deck-shape breakdown for the Analyze modal -- actual role counts
+    # (Lands/Ramp/Draw/Interaction/Synergy) against the player's own
+    # stated target ratios (see ai_builder_deck_shape_targets), the same
+    # numbers the AI builder itself now targets -- so a hand-built deck
+    # (or one you've since tweaked after an AI build) gets the identical
+    # "how close is this to the template" comparison, not a second,
+    # differently-tuned one.
+    target_size = 100 if is_commander_format else 60
     return jsonify(
         deck_value=totals["deck_value"],
         game_changers=totals["game_changers"],
@@ -3669,6 +3724,8 @@ def builder_stats():
         mass_land_denial=totals.get("mass_land_denial") or False,
         extra_turn_count=totals.get("extra_turn_count") or 0,
         is_commander_format=is_commander_format,
+        role_counts=role_counts_for_entries(entries),
+        role_targets=ai_builder_deck_shape_targets(deck_format, target_size),
     )
 
 

@@ -138,6 +138,62 @@ def _card_role(name: str, category: str, tag_by_name: dict, tag_labels: dict) ->
     return "Synergy"
 
 
+def role_counts_for_entries(
+    entries: list[CardEntry],
+    tag_by_name: dict | None = None,
+    tag_labels: dict | None = None,
+    exclude_commander: bool = True,
+) -> dict[str, int]:
+    """Buckets a decklist into the standard EDH deck-shape roles (see
+    _card_role) and sums quantities per role -- {"Lands", "Ramp", "Draw",
+    "Interaction", "Synergy"}, always all 5 keys even if a role has 0.
+    Shared by ai_builder.py (checking the WIP deck's own shape mid-build)
+    and the Deck Builder's Analyze modal (showing the finished deck's
+    shape against ai_builder_deck_shape_targets, below) -- one
+    classifier, not two copies that could quietly drift apart.
+
+    `tag_by_name`/`tag_labels` (from budget_alt_data_in_index()) can be
+    passed in by a caller already holding them (ai_builder.py's loop calls
+    this many times per build and shouldn't re-read the price index file
+    every time); a one-off caller (a single Analyze click) can omit both
+    and this loads them fresh."""
+    if tag_by_name is None or tag_labels is None:
+        budget_alt = budget_alt_data_in_index()
+        tag_by_name = budget_alt["tag_by_name"]
+        tag_labels = budget_alt["tag_labels"]
+    counts = {"Lands": 0, "Ramp": 0, "Draw": 0, "Interaction": 0, "Synergy": 0}
+    for e in entries:
+        if exclude_commander and e.section == "commander":
+            continue
+        role = _card_role(e.name, categorize(e.type_line), tag_by_name, tag_labels)
+        counts[role] = counts.get(role, 0) + e.quantity
+    return counts
+
+
+def ai_builder_deck_shape_targets(deck_format: str, target_size: int) -> dict[str, int | None]:
+    """Rough per-role target counts for a deck of this size/format -- the
+    player's own stated deck-building guidelines (not this app's own
+    earlier default, DEFAULT_COMMANDER_MIX -- deliberately a separate,
+    slightly different set of numbers, since these are the exact ratios
+    the player gave directly and ai_builder.py's system prompt already
+    targets verbatim; changing DEFAULT_COMMANDER_MIX's own longstanding
+    Suggest/Optimize behavior was never asked for). For a 100-card
+    Commander deck: ~37 lands, ~10 ramp, ~10 card draw, ~15 removal +
+    board wipes combined (the player's own 10 removal + 5 wipes), and the
+    rest as win conditions/synergy -- scaled proportionally for a
+    different target size. Non-Commander just gets a lands target
+    (CONSTRUCTED_LAND_FRACTION) -- constructed archetypes vary too much
+    for a single generic ramp/draw/interaction split to mean anything."""
+    if deck_format == "commander":
+        lands = round(target_size * 0.37)
+        ramp = round(target_size * 0.10)
+        draw = round(target_size * 0.10)
+        interaction = round(target_size * 0.15)
+        return {"Lands": lands, "Ramp": ramp, "Draw": draw, "Interaction": interaction, "Synergy": target_size - lands - ramp - draw - interaction}
+    lands = round(target_size * CONSTRUCTED_LAND_FRACTION)
+    return {"Lands": lands, "Ramp": None, "Draw": None, "Interaction": None, "Synergy": target_size - lands}
+
+
 def _is_basic_land(type_line: str) -> bool:
     return "Basic" in type_line and "Land" in type_line
 
