@@ -25,6 +25,7 @@ from brewlist_core import (
     game_changers_in_index,
     normalize_name,
 )
+from edhrec_data import commander_synergy_cards
 
 # WOTC_BRACKET_GAME_CHANGER_MAX is keyed 1/2/3 (brackets 1-2 share a cap
 # of 0 per WotC's own rules; 4-5 have no cap at all -- see its definition
@@ -147,16 +148,13 @@ def role_counts_for_entries(
     """Buckets a decklist into the standard EDH deck-shape roles (see
     _card_role) and sums quantities per role -- {"Lands", "Ramp", "Draw",
     "Interaction", "Synergy"}, always all 5 keys even if a role has 0.
-    Shared by ai_builder.py (checking the WIP deck's own shape mid-build)
-    and the Deck Builder's Analyze modal (showing the finished deck's
-    shape against ai_builder_deck_shape_targets, below) -- one
-    classifier, not two copies that could quietly drift apart.
+    Backs the Deck Builder's Analyze modal (showing the finished deck's
+    shape against commander_deck_shape_targets, below).
 
     `tag_by_name`/`tag_labels` (from budget_alt_data_in_index()) can be
-    passed in by a caller already holding them (ai_builder.py's loop calls
-    this many times per build and shouldn't re-read the price index file
-    every time); a one-off caller (a single Analyze click) can omit both
-    and this loads them fresh."""
+    passed in by a caller already holding them, to avoid re-reading the
+    price index file on every call; a one-off caller (a single Analyze
+    click) can omit both and this loads them fresh."""
     if tag_by_name is None or tag_labels is None:
         budget_alt = budget_alt_data_in_index()
         tag_by_name = budget_alt["tag_by_name"]
@@ -170,14 +168,13 @@ def role_counts_for_entries(
     return counts
 
 
-def ai_builder_deck_shape_targets(deck_format: str, target_size: int) -> dict[str, int | None]:
+def commander_deck_shape_targets(deck_format: str, target_size: int) -> dict[str, int | None]:
     """Rough per-role target counts for a deck of this size/format -- the
     player's own stated deck-building guidelines (not this app's own
     earlier default, DEFAULT_COMMANDER_MIX -- deliberately a separate,
     slightly different set of numbers, since these are the exact ratios
-    the player gave directly and ai_builder.py's system prompt already
-    targets verbatim; changing DEFAULT_COMMANDER_MIX's own longstanding
-    Suggest/Optimize behavior was never asked for). For a 100-card
+    the player gave directly; changing DEFAULT_COMMANDER_MIX's own
+    longstanding Suggest/Optimize behavior was never asked for). For a 100-card
     Commander deck: ~37 lands, ~10 ramp, ~10 card draw, ~15 removal +
     board wipes combined (the player's own 10 removal + 5 wipes), and the
     rest as win conditions/synergy -- scaled proportionally for a
@@ -204,10 +201,9 @@ def owned_collection_gameplay_view(owned: dict[str, OwnedCard], gameplay: dict[s
     JSON-ready dicts for the builder's collection browser: {name,
     quantity, type_line, cmc, mana_cost, color_identity, category,
     scryfall_id, set_code, collector_number, legalities, oracle_text}.
-    oracle_text exists here purely for ai_builder.py's free-text
-    collection search (see search_owned_collection) -- nothing else in
-    the builder UI reads it, but it costs nothing extra since gameplay
-    already carries it. Owned cards with
+    oracle_text is carried here at no extra cost (gameplay already has
+    it) since nothing currently reads it, but it's available for any
+    future free-text search over the owned collection. Owned cards with
     no gameplay match (tokens, Un-cards, anything MTGJSON doesn't carry)
     are skipped -- there's nothing to build a real deck with for those
     anyway. set_code/collector_number identify the *exact* printing you
@@ -440,6 +436,17 @@ def suggest_replacements(
     tag_labels = budget_alt.get("tag_labels") or {}
     game_changers = game_changers_in_index() if deck_format == "commander" else set()
 
+    # Same real, per-commander EDHREC synergy signal suggest_builder_cards
+    # uses -- a replacement that's independently popular with this exact
+    # commander is worth ranking above one that merely shares a generic
+    # role tag with the card being swapped out.
+    synergy_by_name: dict[str, float] = {}
+    commander_entry = next((e for e in wip_entries if e.section == "commander"), None)
+    if deck_format == "commander" and commander_entry:
+        for nm, info in commander_synergy_cards(commander_entry.name).items():
+            if info["synergy"] > 0:
+                synergy_by_name[nm] = info["synergy"]
+
     def role_of(name: str, category: str) -> str:
         if deck_format != "commander":
             return "Lands" if category in ("Lands", "Basic Lands") else "Synergy"
@@ -452,7 +459,7 @@ def suggest_replacements(
     def rank_key(c: dict):
         nm = normalize_name(c["name"])
         shares_tag = target_tag is not None and tag_by_name.get(nm) == target_tag
-        return (not shares_tag, nm not in game_changers, c["name"])
+        return (-synergy_by_name.get(nm, 0.0), not shares_tag, nm not in game_changers, c["name"])
 
     same_role.sort(key=rank_key)
     tag_label = tag_labels.get(target_tag) if target_tag else None
@@ -461,7 +468,8 @@ def suggest_replacements(
         nm = normalize_name(c["name"])
         shares_tag = target_tag is not None and tag_by_name.get(nm) == target_tag
         reason = (
-            f'shares the "{tag_label}" role with {target_name}' if shares_tag and tag_label
+            f'high synergy with your commander (per EDHREC)' if nm in synergy_by_name
+            else f'shares the "{tag_label}" role with {target_name}' if shares_tag and tag_label
             else f'fills the same {target_role} role as {target_name}'
         )
         results.append({
@@ -559,6 +567,24 @@ def suggest_builder_cards(
                     nm = normalize_name(missing_name)
                     reason_by_name.setdefault(nm, f"completes a combo with {', '.join(combo['uses'][:2])}")
 
+    # Commander-specific synergy, straight from EDHREC's own real-decklist
+    # statistics -- not a guess, not a generic Oracle-Tag category match.
+    # This is the free, non-AI replacement for what the (now-removed) AI
+    # builder existed to do: understand what actually goes well with THIS
+    # specific commander's own text, not just "ramp"/"removal" categories.
+    # Positive synergy means over-represented in real decks running this
+    # commander versus the overall population -- see commander_synergy_cards'
+    # own docstring for a real confirmed example. Best-effort: an unplayed/
+    # brand-new commander or a network hiccup just yields {}, and every
+    # candidate falls through to the existing theme/GC signals below.
+    synergy_by_name: dict[str, float] = {}
+    commander_entry = next((e for e in wip_entries if e.section == "commander"), None)
+    if deck_format == "commander" and commander_entry:
+        synergy_data = commander_synergy_cards(commander_entry.name)
+        for nm, info in synergy_data.items():
+            if info["synergy"] > 0:
+                synergy_by_name[nm] = info["synergy"]
+
     # Theme/synergy signal -- reuses the exact same Oracle Tags data the
     # budget-alternative suggestions already use (one representative
     # "role" tag per card, e.g. "mana rock"/"ramp"/"tokens matter"; see
@@ -619,7 +645,12 @@ def suggest_builder_cards(
 
     def rank_key(c: dict):
         nm = normalize_name(c["name"])
-        return (nm not in reason_by_name, nm not in theme_reason_by_name, nm not in game_changers, c["name"])
+        # EDHREC synergy sits right after combo-completion and ahead of the
+        # generic theme signal -- a real, commander-specific number beats a
+        # generic tag-category match. Negated so a HIGHER synergy score
+        # sorts EARLIER (ascending sort, same convention every other field
+        # here already uses via `not in`).
+        return (nm not in reason_by_name, -synergy_by_name.get(nm, 0.0), nm not in theme_reason_by_name, nm not in game_changers, c["name"])
 
     # Combo-completing candidates are pulled in up front, ahead of the
     # role-shape apportionment below -- rank_key only sorts them to the
@@ -794,6 +825,8 @@ def suggest_builder_cards(
         nm = normalize_name(c["name"])
         role = role_of(c["name"], c["category"])
         fallback_reason = f"fills out {role}" if deck_format == "commander" else f"fills out {c['category']}"
+        synergy_score = synergy_by_name.get(nm)
+        synergy_reason = f"high synergy with your commander (per EDHREC, {synergy_score:.0%})" if synergy_score else None
         suggestions.append({
             "name": c["name"],
             "scryfall_id": c["scryfall_id"],
@@ -804,7 +837,7 @@ def suggest_builder_cards(
             "mana_cost": c["mana_cost"],
             "set_code": c["set_code"],
             "collector_number": c["collector_number"],
-            "reason": reason_by_name.get(nm) or theme_reason_by_name.get(nm) or fallback_reason,
+            "reason": reason_by_name.get(nm) or synergy_reason or theme_reason_by_name.get(nm) or fallback_reason,
         })
     return suggestions
 
@@ -872,6 +905,17 @@ def optimize_builder_combos(
     tag_labels = budget_alt.get("tag_labels") or {}
     game_changers = game_changers_in_index()
 
+    # Same real per-commander EDHREC synergy data suggest_builder_cards/
+    # suggest_replacements use -- here it picks which card to CUT, not add:
+    # among several same-role candidates safe to cut, prefer cutting the
+    # one EDHREC says is least synergistic with this exact commander,
+    # rather than an arbitrary alphabetical pick.
+    synergy_by_name: dict[str, float] = {}
+    commander_entry = next((e for e in wip_entries if e.section == "commander"), None)
+    if commander_entry:
+        for nm, info in commander_synergy_cards(commander_entry.name).items():
+            synergy_by_name[nm] = info["synergy"]
+
     def role_of(name: str, category: str) -> str:
         return _card_role(name, category, tag_by_name, tag_labels)
 
@@ -927,7 +971,7 @@ def optimize_builder_combos(
                 and normalize_name(e.name) not in game_changers
                 and role_of(e.name, categorize(e.type_line)) == add_role
             ),
-            key=lambda e: e.name,
+            key=lambda e: (synergy_by_name.get(normalize_name(e.name), 0.0), e.name),
         )
         if not cut_pool:
             continue  # no safe filler to cut in this role -- skip, don't force a cross-role cut

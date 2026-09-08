@@ -151,19 +151,15 @@ page).
   in the same role, never a Game Changer or another combo's own card) —
   catches combos Suggest can miss in a single big batch, or once the
   deck's already full and Suggest has nothing left to fill
-- **✨ Build with AI** hands Claude real tools over your owned collection
-  (search by name/type/oracle text, add/remove cards, check combos) and
-  lets it build a deck across multiple turns by actually reading your
-  commander's card text — not limited to Suggest's fixed Oracle Tag
-  vocabulary, so it can catch a synergy no tag captures (e.g. a commander
-  whose power is tied to a specific creature type sitting in the
-  graveyard). Optional and off by default: uses your own Anthropic API
-  key (entered once, saved locally, never committed — see
-  [.gitignore](.gitignore)), costs a small amount per build on your own
-  account, and nothing is applied until you review and approve the
-  result, same as Suggest/Optimize. **Unlike everything else in this
-  app, this feature's output genuinely is AI-generated** — see
-  [AI disclosure](#ai-disclosure) below
+- Suggest, Optimize, and the ⇄ replacement button all also weigh a real
+  **EDHREC synergy score** for your exact commander (see
+  [`edhrec_data.py`](edhrec_data.py)) ahead of the generic Oracle Tag
+  signal — a statistic computed by EDHREC from tens of thousands of real
+  decklists, not a category match, so it can surface a card that's
+  genuinely good with *this* commander specifically even when nothing in
+  Suggest's fixed tag vocabulary would catch it. No API key, no per-build
+  cost, and nothing is applied until you review and approve it, same as
+  every other suggestion in this app.
 - An optional **Intended bracket** (1-2 / 3 / 4+) keeps Suggest from
   recommending more Game Changers than WotC's own published bracket rules
   allow for that bracket; leave it on "No preference" to build freely — the
@@ -382,16 +378,13 @@ python3 brewlist_cli.py --help
 ## Where your data lives
 
 Everything the app remembers — your uploaded collection, any saved
-per-deck overrides, your store-pricing preference, the local card
-database (see above), and (if you set one up) your Anthropic API key —
-is stored locally under `data/`, which is excluded from version control
-(`.gitignore`). Nothing leaves your machine except the calls to Moxfield's,
-Archidekt's, Scryfall's, MTGJSON's, and (for Commander decks) Commander
-Spellbook's public APIs needed to fetch decklists, prices, and combos —
-**with one opt-in exception**: using **Build with AI** sends your
-commander's card text and the relevant slice of your owned collection to
-Anthropic's API, since that's how the feature works. It's off unless you
-explicitly set up a key and click the button.
+per-deck overrides, your store-pricing preference, and the local card
+database (see above) — is stored locally under `data/`, which is
+excluded from version control (`.gitignore`). Nothing leaves your
+machine except the calls to Moxfield's, Archidekt's, Scryfall's,
+MTGJSON's, EDHREC's, and (for Commander decks) Commander Spellbook's
+public APIs/pages needed to fetch decklists, prices, combos, and
+commander popularity/synergy data.
 
 ## Uninstalling
 
@@ -426,8 +419,8 @@ appreciated!
 | File | Purpose |
 | --- | --- |
 | `brewlist_core.py` | Shared logic: Moxfield/Archidekt/Scryfall/MTGJSON fetching, ManaBox parsing, price comparison, HTML report rendering. No UI dependencies — imported by both entry points below. |
-| `deck_builder.py` | Deck Builder logic: owned-collection browsing data, the fill-the-gaps Suggest heuristic, the Optimize combo-completion pass, brew-to-report conversion. No UI dependencies — imported by `app.py` only (the Deck Builder is web-app only). |
-| `ai_builder.py` | Build with AI: the agentic Claude tool-use loop, plus local Anthropic API key storage. Optional — only used if you set up a key. No UI dependencies — imported by `app.py` only. |
+| `deck_builder.py` | Deck Builder logic: owned-collection browsing data, the fill-the-gaps Suggest heuristic (now synergy-weighted, see `edhrec_data.py`), the Optimize combo-completion pass, brew-to-report conversion. No UI dependencies — imported by `app.py` only (the Deck Builder is web-app only). |
+| `edhrec_data.py` | EDHREC commander-popularity ranks and per-commander card synergy scores — the real, non-AI data source behind the Deck Builder picker's popularity badges and Suggest/Optimize's synergy weighting. No UI dependencies — imported by `deck_builder.py`/`app.py`. |
 | `app.py` | Flask web app, including the Deck Builder (`/builder`). |
 | `brewlist_cli.py` | Terminal CLI (interactive menu or scriptable flags). |
 | `Brewlist.command` | macOS double-click launcher for the web app. |
@@ -439,14 +432,14 @@ appreciated!
 This project is built almost entirely by AI (Claude Code) — see
 [AI-DECLARATION.md](AI-DECLARATION.md) for what that means in practice.
 That's about the *code*, though — every feature the app itself runs
-(pricing, legality, budget alternatives, Suggest, Optimize) is a
-deterministic heuristic over real data (Scryfall Oracle Tags, MTGJSON,
-Commander Spellbook), explicitly *not* an AI guess, with one deliberate
-exception: **Build with AI** (see [Deck Builder](#deck-builder) above)
-is opt-in, off by default, and its output is genuinely AI-generated —
-Claude reads your commander's card text and searches your collection
-itself, rather than matching a fixed tag list. It's labeled as such in
-the app and never applies anything without your review.
+(pricing, legality, budget alternatives, Suggest, Optimize, commander
+popularity/synergy) is a deterministic heuristic over real data
+(Scryfall Oracle Tags, MTGJSON, Commander Spellbook, EDHREC), explicitly
+*not* an AI guess. An earlier version of this app had an opt-in "Build
+with AI" mode whose output genuinely was AI-generated (an agentic Claude
+loop reading a commander's card text); it was removed in favor of real
+EDHREC synergy data, which turned out to cover the same need for free
+and without an ongoing API cost.
 
 <p align="center">
   <a href="AI-DECLARATION.md"><img src="https://img.shields.io/badge/%E4%B7%BC%20AI--DECLARATION-auto-ede9fe?labelColor=ede9fe" alt="AI-DECLARATION: auto" height="28"></a>

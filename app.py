@@ -52,7 +52,7 @@ from brewlist_core import (
     update_from_git,
 )
 from deck_builder import (
-    ai_builder_deck_shape_targets,
+    commander_deck_shape_targets,
     brew_to_card_entries,
     list_theme_options,
     optimize_builder_combos,
@@ -62,7 +62,6 @@ from deck_builder import (
     suggest_builder_cards,
     suggest_replacements,
 )
-from ai_builder import clear_api_key, key_source, load_api_key, run_ai_build, save_api_key, validate_api_key
 from edhrec_data import bulk_commander_popularity
 from edhrec_data import refresh_all as edhrec_refresh_all
 from edhrec_data import top_list_status as edhrec_top_list_status
@@ -237,64 +236,6 @@ def _run_brew_report_job(job_id, entries, owned, deck_id, deck_name, is_commande
             if job:
                 job["status"] = "done"
                 job["html"] = html_report
-    except Exception as e:  # noqa: BLE001 -- surface any failure to the polling client
-        with _JOBS_LOCK:
-            job = JOBS.get(job_id)
-            if job:
-                job["status"] = "error"
-                job["error"] = str(e)
-
-
-def _run_ai_build_job(job_id, commander, deck_format, target_format, target_size,
-                       commander_color_identity, intended_bracket, user_notes, owned_view, api_key,
-                       wip_entries=None, scope="owned", mode="fresh"):
-    """Same JOBS/threading shape as _run_compare_job -- runs
-    ai_builder.run_ai_build() (a multi-round-trip Claude tool-use loop, so
-    genuinely slow) in a background thread. Unlike the compare/report jobs
-    this also tracks a running `log` (list of one-line tool-call
-    summaries) and `deck_state` (current WIP cards) so the client can
-    render live progress, not just a done/total counter -- see
-    /builder/ai-build/progress, a new route rather than widening
-    /compare/progress's existing response shape.
-
-    `wip_entries`/`scope`/`mode` are just threaded through to
-    run_ai_build() -- see its own docstring for what "build from
-    commander" and "improve the current deck" (both now seed wip_entries
-    from the WIP deck, differing only in how assertively `mode` lets the
-    AI change what's already there) and "import & improve" (scope="any",
-    full card database) actually change."""
-    def _on_progress(done, total, stage, log, deck_state):
-        with _JOBS_LOCK:
-            job = JOBS.get(job_id)
-            if job:
-                job["done"] = done
-                job["total"] = total
-                job["stage"] = stage
-                job["log"] = log
-                job["deck_state"] = deck_state
-
-    try:
-        result = run_ai_build(
-            commander, deck_format, target_format, target_size, commander_color_identity,
-            intended_bracket, user_notes, owned_view, api_key, _on_progress,
-            wip_entries=wip_entries, scope=scope, mode=mode,
-        )
-        with _JOBS_LOCK:
-            job = JOBS.get(job_id)
-            if job:
-                if result.get("error"):
-                    job["status"] = "error"
-                    job["error"] = result["error"]
-                else:
-                    job["status"] = "done"
-                    job["suggestions"] = result["suggestions"]
-                    job["removed"] = result["removed"]
-                    job["final_entries"] = result["final_entries"]
-                    job["maybeboard"] = result.get("maybeboard") or []
-                    job["finished"] = result["finished"]
-                    job["summary"] = result["summary"]
-                    job["stop_reason"] = result.get("stop_reason") or "unknown"
-                    job["estimated_cost_usd"] = result.get("estimated_cost_usd")
     except Exception as e:  # noqa: BLE001 -- surface any failure to the polling client
         with _JOBS_LOCK:
             job = JOBS.get(job_id)
@@ -1283,7 +1224,6 @@ def render_builder_page(deck_id: str | None = None) -> str:
     <div class="builder-top-row builder-actions">
       <div class="action-group">
         <button type="button" class="btn ghost" id="suggest-btn">Suggest cards</button>
-        <button type="button" class="btn ghost" id="ai-build-btn" title="Claude reads your commander's actual card text and searches your collection for whatever it decides is relevant -- not limited to the fixed tag list Suggest uses. Uses your own Anthropic API key.">&#10024; Build with AI</button>
         <div class="theme-picker">
           <input type="text" id="theme-input" placeholder="Preferred theme (optional)" autocomplete="off">
           <div class="theme-dropdown" id="theme-dropdown"></div>
@@ -1399,69 +1339,6 @@ def render_builder_page(deck_id: str | None = None) -> str:
     </div>
     <div class="modal-footer">
       <button type="button" class="btn ghost small" id="print-battle-card-btn">&#128424; Print Battle Card</button>
-    </div>
-  </div>
-</div>
-
-<div class="modal-overlay" id="ai-modal">
-  <div class="modal-box">
-    <div class="modal-header">
-      <h3>&#10024; Build with AI</h3>
-      <button type="button" class="modal-close" id="ai-modal-close" aria-label="Close">&times;</button>
-    </div>
-    <div class="modal-body">
-      <div class="error" id="ai-modal-error" style="display:none;"></div>
-
-      <div id="ai-mode-phase">
-        <p class="hint" style="margin:0 0 10px;">Claude reads your commander's actual card text and searches for whatever it decides is relevant -- not limited to Suggest's fixed tag list.</p>
-        <button type="button" class="btn" id="ai-mode-fresh-btn" style="display:block;width:100%;text-align:left;margin-bottom:8px;">
-          <strong>Build deck from chosen commander</strong><br><span class="hint" style="margin:0;">Builds toward the best complete deck around your commander -- picks up anything you've already added as a starting point, but may swap it out for something better.</span>
-        </button>
-        <button type="button" class="btn" id="ai-mode-improve-btn" style="display:block;width:100%;text-align:left;margin-bottom:8px;">
-          <strong>Improve/optimize current deck</strong><br><span class="hint" style="margin:0;">Keeps what you've already chosen and only touches what's clearly wrong -- more conservative than building fresh.</span>
-        </button>
-        <button type="button" class="btn" id="ai-mode-import-btn" style="display:block;width:100%;text-align:left;">
-          <strong>Finish &amp; improve an imported decklist</strong><br><span class="hint" style="margin:0;">Paste a decklist or a Moxfield/Archidekt URL -- may include cards you don't own. Fills it out to a complete, legal deck and looks for upgrades; get a report of what to buy afterward.</span>
-        </button>
-      </div>
-
-      <div id="ai-import-phase" style="display:none;">
-        <p class="hint" style="margin:0 0 8px;">Fill in either one -- not both.</p>
-        <label for="ai-import-url-input" style="font-size:0.85rem;font-weight:600;">Moxfield or Archidekt URL</label>
-        <input type="text" id="ai-import-url-input" placeholder="https://moxfield.com/decks/..." style="width:100%;box-sizing:border-box;margin:6px 0 10px;">
-        <label for="ai-import-text-input" style="font-size:0.85rem;font-weight:600;">Or paste a decklist</label>
-        <textarea id="ai-import-text-input" rows="6" placeholder="1 Sol Ring&#10;1 Command Tower&#10;..." style="width:100%;box-sizing:border-box;margin:6px 0 10px;font-family:monospace;font-size:0.82rem;"></textarea>
-        <p class="hint" style="margin:0 0 12px;">A pasted list doesn't carry a commander -- your already-chosen commander is used. A Commander-format URL import uses its own commander automatically.</p>
-        <button type="button" class="btn" id="ai-import-continue-btn">Continue</button>
-        <button type="button" class="btn ghost small" id="ai-import-back-btn">&larr; Back</button>
-      </div>
-
-      <div id="ai-setup-phase" style="display:none;">
-        <p class="hint" style="margin:0 0 10px;">This calls the Anthropic API using your own key, which needs its own billing set up and costs a small amount per build (typically well under a dollar).</p>
-        <ol style="margin:0 0 12px;padding-left:20px;font-size:0.85rem;">
-          <li>Go to <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com/settings/keys</a> and sign in (or create an account).</li>
-          <li>Add billing under Settings &rarr; Billing if you haven't already.</li>
-          <li>Click "Create Key", give it any name, then copy the key it shows you.</li>
-          <li>Paste it below. It's saved locally on your machine only -- never sent anywhere but Anthropic, and never included if you share this app's code.</li>
-        </ol>
-        <input type="password" id="ai-key-input" placeholder="sk-ant-..." autocomplete="off" style="width:100%;box-sizing:border-box;margin-bottom:8px;">
-        <button type="button" class="btn" id="ai-key-save-btn">Save Key</button>
-        <span class="hint" id="ai-key-status" style="margin-left:8px;"></span>
-      </div>
-
-      <div id="ai-confirm-phase" style="display:none;">
-        <p class="hint" style="margin:0 0 8px;" id="ai-key-configured-note"></p>
-        <label for="ai-notes-input" style="font-size:0.85rem;font-weight:600;">Anything specific you want this deck to do? (optional)</label>
-        <textarea id="ai-notes-input" rows="3" placeholder="e.g. lean into graveyard recursion, keep it low to the ground, prioritize card draw" style="width:100%;box-sizing:border-box;margin:6px 0 10px;font-family:inherit;"></textarea>
-        <p class="hint" style="margin:0 0 12px;" id="ai-confirm-note">This can take several minutes (up to 7) and makes many real API calls on your account. The result won't be applied until you review and approve it.</p>
-        <button type="button" class="btn" id="ai-start-btn">Start Build</button>
-        <button type="button" class="btn ghost small" id="ai-change-key-btn">Change / Remove Key</button>
-      </div>
-
-      <div id="ai-progress-phase" style="display:none;">
-        <p class="hint" id="ai-progress-count" style="margin:0 0 8px;"></p>
-        <div id="ai-log" style="max-height:320px;overflow-y:auto;font-size:0.82rem;font-family:monospace;background:var(--bg);border:1px solid var(--card-border);border-radius:8px;padding:10px;"></div>
-      </div>
     </div>
   </div>
 </div>
@@ -2503,213 +2380,6 @@ function escapeHtml(s) {{
   return div.innerHTML;
 }}
 
-const aiModal = document.getElementById('ai-modal');
-const aiModalError = document.getElementById('ai-modal-error');
-const aiModePhase = document.getElementById('ai-mode-phase');
-const aiImportPhase = document.getElementById('ai-import-phase');
-const aiSetupPhase = document.getElementById('ai-setup-phase');
-const aiConfirmPhase = document.getElementById('ai-confirm-phase');
-const aiProgressPhase = document.getElementById('ai-progress-phase');
-const aiKeyInput = document.getElementById('ai-key-input');
-const aiKeyStatus = document.getElementById('ai-key-status');
-const aiKeyConfiguredNote = document.getElementById('ai-key-configured-note');
-let aiMode = 'fresh';  // 'fresh' | 'improve' | 'import'
-
-function closeAiModal() {{ aiModal.classList.remove('show'); }}
-document.getElementById('ai-modal-close').addEventListener('click', closeAiModal);
-aiModal.addEventListener('click', (e) => {{ if (e.target === aiModal) closeAiModal(); }});
-document.addEventListener('keydown', (e) => {{ if (e.key === 'Escape' && aiModal.classList.contains('show')) closeAiModal(); }});
-
-function showAiError(msg) {{ aiModalError.textContent = msg; aiModalError.style.display = 'block'; }}
-function hideAiError() {{ aiModalError.style.display = 'none'; }}
-function showAiPhase(phase) {{
-  aiModePhase.style.display = phase === 'mode' ? 'block' : 'none';
-  aiImportPhase.style.display = phase === 'import' ? 'block' : 'none';
-  aiSetupPhase.style.display = phase === 'setup' ? 'block' : 'none';
-  aiConfirmPhase.style.display = phase === 'confirm' ? 'block' : 'none';
-  aiProgressPhase.style.display = phase === 'progress' ? 'block' : 'none';
-}}
-
-document.getElementById('ai-build-btn').addEventListener('click', () => {{
-  hideAiError();
-  aiKeyInput.value = '';
-  aiKeyStatus.textContent = '';
-  document.getElementById('ai-import-url-input').value = '';
-  document.getElementById('ai-import-text-input').value = '';
-  document.getElementById('ai-mode-improve-btn').style.display = brew.cards.length ? '' : 'none';
-  aiModal.classList.add('show');
-  showAiPhase('mode');
-}});
-
-function aiProceedAfterMode() {{
-  if (aiMode !== 'import' && brew.format === 'commander' && !brew.commander) {{ closeAiModal(); showError('Choose a commander first.'); return; }}
-  fetch('/ai/status')
-    .then(r => r.json())
-    .then(data => {{
-      if (data.configured) {{
-        aiKeyConfiguredNote.textContent = data.source === 'env'
-          ? 'Using the ANTHROPIC_API_KEY environment variable.' : 'Using your saved API key.';
-        const notes = {{
-          fresh: 'This can take several minutes (up to 7) and makes many real API calls on your account. The result won’t be applied until you review and approve it.',
-          improve: `Your existing ${{brew.cards.length}} card(s) are kept unless there’s a clear reason to change one. Can take several minutes and makes many real API calls on your account. Nothing changes until you review and approve it.`,
-          import: 'May suggest cards you don’t own -- nothing is applied until you review it, and once applied you can use Save + View full report to see what’s already owned vs. what to buy. Can take several minutes and makes many real API calls on your account.',
-        }};
-        document.getElementById('ai-confirm-note').textContent = notes[aiMode] || notes.fresh;
-        showAiPhase('confirm');
-      }} else {{
-        showAiPhase('setup');
-      }}
-    }})
-    .catch(() => showAiError('Could not reach the server.'));
-}}
-
-document.getElementById('ai-mode-fresh-btn').addEventListener('click', () => {{ aiMode = 'fresh'; aiProceedAfterMode(); }});
-document.getElementById('ai-mode-improve-btn').addEventListener('click', () => {{ aiMode = 'improve'; aiProceedAfterMode(); }});
-document.getElementById('ai-mode-import-btn').addEventListener('click', () => {{ aiMode = 'import'; showAiPhase('import'); }});
-document.getElementById('ai-import-back-btn').addEventListener('click', () => {{ showAiPhase('mode'); }});
-document.getElementById('ai-import-continue-btn').addEventListener('click', () => {{
-  const url = document.getElementById('ai-import-url-input').value.trim();
-  const text = document.getElementById('ai-import-text-input').value.trim();
-  if (!url && !text) {{ showAiError('Paste a decklist or provide a URL first.'); return; }}
-  hideAiError();
-  aiMode = 'import';
-  aiProceedAfterMode();
-}});
-
-document.getElementById('ai-key-save-btn').addEventListener('click', () => {{
-  const key = aiKeyInput.value.trim();
-  if (!key) {{ aiKeyStatus.textContent = 'Paste a key first.'; return; }}
-  aiKeyStatus.textContent = 'Checking…';
-  fetch('/ai/key', {{
-    method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
-    body: JSON.stringify({{ api_key: key }}),
-  }})
-    .then(r => r.json())
-    .then(data => {{
-      if (data.error) {{ aiKeyStatus.textContent = data.error; return; }}
-      aiKeyInput.value = '';
-      aiProceedAfterMode();
-    }})
-    .catch(() => {{ aiKeyStatus.textContent = 'Could not reach the server.'; }});
-}});
-
-document.getElementById('ai-change-key-btn').addEventListener('click', () => {{
-  if (!confirm('Remove the saved API key? You can enter a new one right after.')) return;
-  fetch('/ai/key/clear', {{ method: 'POST' }})
-    .then(() => {{ aiKeyInput.value = ''; aiKeyStatus.textContent = ''; showAiPhase('setup'); }})
-    .catch(() => showAiError('Could not reach the server.'));
-}});
-
-let aiPollTimer = null;
-document.getElementById('ai-start-btn').addEventListener('click', () => {{
-  hideAiError();
-  showAiPhase('progress');
-  document.getElementById('ai-log').innerHTML = '';
-  document.getElementById('ai-progress-count').textContent = 'Starting…';
-  fetch('/builder/ai-build/start', {{
-    method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
-    body: JSON.stringify({{
-      cards: brew.cards, commander: brew.commander, format: brew.format, target_format: brew.target_format,
-      intended_bracket: brew.intended_bracket, user_notes: document.getElementById('ai-notes-input').value,
-      mode: aiMode,
-      import_url: document.getElementById('ai-import-url-input').value.trim(),
-      import_text: document.getElementById('ai-import-text-input').value.trim(),
-    }}),
-  }})
-    .then(r => r.json())
-    .then(data => {{
-      if (data.error) {{ showAiError(data.error); showAiPhase('confirm'); return; }}
-      pollAiBuild(data.job_id);
-    }})
-    .catch(() => {{ showAiError('Could not reach the server.'); showAiPhase('confirm'); }});
-}});
-
-function pollAiBuild(jobId) {{
-  clearTimeout(aiPollTimer);
-  fetch('/builder/ai-build/progress/' + jobId)
-    .then(r => r.json())
-    .then(data => {{
-      if (data.status === 'not_found') {{ showAiError('That build expired.'); showAiPhase('confirm'); return; }}
-      const logEl = document.getElementById('ai-log');
-      logEl.innerHTML = (data.log || []).map(l => `<div>${{escapeHtml(l)}}</div>`).join('');
-      logEl.scrollTop = logEl.scrollHeight;
-      const deckCount = (data.deck_state || []).filter(c => c.section !== 'commander').reduce((s, c) => s + c.quantity, 0);
-      document.getElementById('ai-progress-count').textContent = `${{deckCount}} card(s) so far — turn ${{data.done}}/${{data.total}}`;
-      if (data.status === 'done' || data.status === 'error') {{ fetchAiResult(jobId); return; }}
-      aiPollTimer = setTimeout(() => pollAiBuild(jobId), 1500);
-    }})
-    .catch(() => {{ aiPollTimer = setTimeout(() => pollAiBuild(jobId), 1500); }});
-}}
-
-function fetchAiResult(jobId) {{
-  fetch('/builder/ai-build/result/' + jobId)
-    .then(r => r.json())
-    .then(data => {{
-      if (data.error) {{ showAiError(data.error); showAiPhase('confirm'); return; }}
-      closeAiModal();
-      if (data.mode === 'import') {{
-        applyAiImportResult(data);
-      }} else {{
-        renderAiSuggestions(data);
-      }}
-    }})
-    .catch(() => {{ showAiError('Could not reach the server.'); showAiPhase('confirm'); }});
-}}
-
-// Import & improve is a different shape of result than fresh/improve:
-// the point was never to keep hand-picking individual suggestions in the
-// builder (there's nothing to "do" with a bare list there) -- it's to
-// end up with a real deck you can immediately see owned-vs-missing for.
-// So this replaces the WIP deck outright with the AI's full final list
-// (commander + everything it kept or added -- see run_ai_build's
-// final_entries, which exists specifically because the originally
-// imported/pasted cards were otherwise never sent back to the client at
-// all), names it, saves it, and jumps straight into the existing
-// compare/report view -- same one-click flow "View full report" already
-// uses, just triggered automatically instead of requiring Save then
-// View full report by hand afterward.
-function applyAiImportResult(data) {{
-  if (data.summary) {{ brew.ai_summary = data.summary; }}
-  brew.further_optimizations = [];  // fresh AI-built deck -- no stale trail from whatever was here before
-  brew.maybeboard = data.maybeboard || [];
-  const commanderEntry = (data.final_entries || []).find(c => c.section === 'commander');
-  const libraryEntries = (data.final_entries || []).filter(c => c.section !== 'commander');
-  brew.commander = commanderEntry ? {{
-    name: commanderEntry.name, scryfall_id: commanderEntry.scryfall_id, type_line: commanderEntry.type_line,
-    color_identity: commanderEntry.color_identity, cmc: commanderEntry.cmc, mana_cost: commanderEntry.mana_cost,
-    category: commanderEntry.category, quantity: 1, set_code: commanderEntry.set_code,
-    collector_number: commanderEntry.collector_number,
-  }} : null;
-  brew.cards = libraryEntries.map(c => ({{
-    name: c.name, quantity: c.quantity, scryfall_id: c.scryfall_id, cmc: c.cmc, mana_cost: c.mana_cost,
-    type_line: c.type_line, color_identity: c.color_identity, category: c.category,
-    set_code: c.set_code, collector_number: c.collector_number,
-  }}));
-  if (data.guessed_deck_name) {{
-    brew.deck_name = data.guessed_deck_name;
-    document.getElementById('deck-name').value = data.guessed_deck_name;
-  }}
-  renderAll();
-  // Same specific stop-reason messages renderAiSuggestions uses -- import
-  // mode used to give zero indication a build stopped early at all, since
-  // it jumps straight to the report with no equivalent of that panel's
-  // own "!data.finished" warning.
-  const importStopMessages = {{
-    time_limit: 'Stopped after hitting the 7-minute time limit before finishing this deck.',
-    turn_limit: 'Stopped after reaching the 60-turn limit before finishing this deck.',
-    no_tool_use: 'Claude stopped on its own without finishing this deck (never called finish).',
-  }};
-  const warnings = [];
-  if (!data.finished) {{
-    warnings.push((importStopMessages[data.stop_reason] || 'Stopped before finishing this deck.') + ' This list may be short of a full deck -- use Improve/Optimize to keep building from here, or try again.');
-  }}
-  if (data.import_unresolved && data.import_unresolved.length) {{
-    warnings.push(`Couldn't recognize ${{data.import_unresolved.length}} line(s) from your import: ${{data.import_unresolved.slice(0, 5).join('; ')}}`);
-  }}
-  if (warnings.length) {{ showError(warnings.join(' ')); }}
-  saveThenViewReport();
-}}
-
 // Maybeboard entries are informational + actionable (unlike the static
 // Further Optimizations trail) -- each gets its own "+ Add" since the
 // whole point is the player deciding, not the AI committing a swap it
@@ -2736,99 +2406,6 @@ function renderMaybeboard() {{
     }});
     row.appendChild(addBtn);
     container.appendChild(row);
-  }});
-}}
-
-function renderAiSuggestions(data) {{
-  // Persisted onto the brew (not just shown here) so it survives past
-  // this transient panel -- Analyze Deck and the full report's Deck
-  // Analysis section both surface it once the deck is saved, instead of
-  // the AI's own reasoning being lost the moment this panel is dismissed.
-  if (data.summary) {{ brew.ai_summary = data.summary; brew.further_optimizations = []; }}
-  const panel = document.getElementById('suggestions-panel');
-  panel.innerHTML = '<h4 style="font-size:0.8rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.03em;">&#10024; AI-Built Deck</h4>';
-  if (data.summary) {{
-    panel.innerHTML += `<p class="hint" style="margin:0 0 8px;">${{escapeHtml(data.summary)}}</p>`;
-  }}
-  if (typeof data.estimated_cost_usd === 'number') {{
-    panel.innerHTML += `<p class="hint" style="margin:0 0 8px;">Estimated API cost for this build: $${{data.estimated_cost_usd.toFixed(2)}}</p>`;
-  }}
-  if (!data.finished) {{
-    // Specific, not a generic "hit some limit" guess -- a real user
-    // question this exists to answer directly: was it a 7-minute wall-
-    // clock timeout, the 60-turn cap, or something else entirely (Claude
-    // just stopping without calling finish). Each has a genuinely
-    // different fix (retry vs. use Improve/Optimize to keep going vs. add
-    // a clearer note), so lumping them into one sentence isn't just vague,
-    // it's actively unhelpful.
-    const stopMessages = {{
-      time_limit: 'Stopped after hitting the 7-minute time limit before finishing this deck.',
-      turn_limit: 'Stopped after reaching the 60-turn limit before finishing this deck.',
-      no_tool_use: 'Claude stopped on its own without finishing this deck (never called finish).',
-    }};
-    const stopMsg = stopMessages[data.stop_reason] || 'Stopped before finishing this deck.';
-    panel.innerHTML += `<p class="hint" style="margin:0 0 8px;color:var(--missing);">${{stopMsg}} This list may be short of a full deck -- use Improve/Optimize to keep building from here, or try again.</p>`;
-  }}
-  if (data.import_unresolved && data.import_unresolved.length) {{
-    panel.innerHTML += `<p class="hint" style="margin:0 0 8px;color:var(--missing);">Couldn’t recognize ${{data.import_unresolved.length}} line(s) from your import: ${{escapeHtml(data.import_unresolved.slice(0, 5).join('; '))}}</p>`;
-  }}
-  if (!data.suggestions.length && !(data.removed || []).length) {{
-    panel.innerHTML += '<div class="hint" style="margin:0;">Claude didn’t change anything -- try again, or add a note about what you want.</div>';
-    return;
-  }}
-
-  if ((data.removed || []).length) {{
-    const removeHeader = document.createElement('div');
-    removeHeader.className = 'hint';
-    removeHeader.style.margin = '0 0 6px';
-    removeHeader.textContent = 'Suggested cuts:';
-    panel.appendChild(removeHeader);
-    data.removed.forEach(name => {{
-      const row = document.createElement('div');
-      row.className = 'suggestion-row';
-      row.innerHTML = `<span class="row-name"><span>${{escapeHtml(name)}}</span></span>`;
-      const cutBtn = Object.assign(document.createElement('button'), {{
-        className: 'btn ghost small', textContent: 'Remove',
-        onclick: () => {{ removeCard(name); row.remove(); }},
-      }});
-      row.appendChild(cutBtn);
-      panel.appendChild(row);
-    }});
-  }}
-
-  if (!data.suggestions.length) return;
-  let remaining = data.suggestions.slice();
-  const addAllBtn = Object.assign(document.createElement('button'), {{
-    className: 'btn ghost small', style: 'margin-bottom:8px;margin-right:8px;',
-    onclick: () => {{ remaining.forEach(addCard); panel.innerHTML = ''; }},
-  }});
-  const dismissAllBtn = Object.assign(document.createElement('button'), {{
-    className: 'btn ghost small', textContent: 'Dismiss All', style: 'margin-bottom:8px;',
-    onclick: () => {{ panel.innerHTML = ''; }},
-  }});
-  function refreshAddAllBtn() {{
-    addAllBtn.textContent = `+ Add All (${{remaining.length}})`;
-    addAllBtn.style.display = remaining.length ? '' : 'none';
-    dismissAllBtn.style.display = remaining.length ? '' : 'none';
-  }}
-  refreshAddAllBtn();
-  panel.append(addAllBtn, dismissAllBtn);
-  data.suggestions.forEach(s => {{
-    const row = document.createElement('div');
-    row.className = 'suggestion-row';
-    row.dataset.full = scryfallImg(s.scryfall_id, 'normal') || '';
-    row.innerHTML = `<span class="row-name">${{thumbHtml(s.scryfall_id, 'card-thumb small')}}<span>${{escapeHtml(s.name)}} ${{colorIconsHtml(s.color_identity)}}<div class="reason">${{escapeHtml(s.reason)}}</div></span></span>`;
-    const addBtn = Object.assign(document.createElement('button'), {{
-      className: 'btn ghost small', textContent: '+ Add',
-      onclick: () => {{
-        addCard(s);
-        row.remove();
-        remaining = remaining.filter(x => x !== s);
-        refreshAddAllBtn();
-      }},
-    }});
-    row.appendChild(addBtn);
-    panel.appendChild(row);
   }});
 }}
 
@@ -3060,7 +2637,7 @@ analyzeBtn.addEventListener('click', () => {{
 
 // Actual role counts (Lands/Ramp/Draw/Interaction/Synergy -- see
 // deck_builder.role_counts_for_entries) against the player's own stated
-// target ratios (ai_builder_deck_shape_targets -- the same numbers the AI
+// target ratios (commander_deck_shape_targets -- the same numbers the AI
 // builder itself targets, so this is a genuine "how close to the template"
 // check, not a second, differently-tuned one). Constructed only gets a
 // Lands target (role_targets' other keys are null there -- see its
@@ -3433,198 +3010,6 @@ def builder_optimize():
     return jsonify(proposals=proposals)
 
 
-@app.route("/ai/status", methods=["GET"])
-def ai_status():
-    """Whether an Anthropic API key is configured, and where it came
-    from -- never the key itself. env always wins over a locally-saved
-    file (see ai_builder.load_api_key)."""
-    source = key_source()
-    return jsonify(configured=source is not None, source=source)
-
-
-@app.route("/ai/key", methods=["POST"])
-def ai_key_save():
-    body = request.get_json(silent=True) or {}
-    api_key = (body.get("api_key") or "").strip()
-    if not api_key:
-        return jsonify(error="Paste your Anthropic API key first."), 400
-    validation_error = validate_api_key(api_key)
-    if validation_error:
-        return jsonify(error=validation_error), 400
-    save_api_key(api_key)
-    return jsonify(ok=True)
-
-
-@app.route("/ai/key/clear", methods=["POST"])
-def ai_key_clear():
-    clear_api_key()
-    return jsonify(ok=True)
-
-
-@app.route("/builder/ai-build/start", methods=["POST"])
-def builder_ai_build_start():
-    """Kicks off the agentic "Build with AI" loop (see ai_builder.py) in a
-    background thread -- same JOBS/threading/poll shape /compare/start
-    already established, since a multi-round-trip Claude tool-use build
-    genuinely takes a while and shouldn't block one long request.
-
-    `mode` ("fresh" | "improve" | "import", default "fresh") picks which
-    of the three modal options fired this call:
-    - "fresh": seeds wip_entries from the WIP deck's own cards
-      (`body["cards"]`) exactly like "improve" does -- a real user
-      request: this used to always start from just the commander, silently
-      discarding anything already added, which made no sense once cards
-      were on the deck already. The two modes differ only in how
-      assertively run_ai_build()'s `mode` param lets the AI change what's
-      already there (see its own docstring) -- "fresh" builds toward the
-      best complete deck, treating existing picks as a head start it can
-      swap out; "improve" respects them, only touching what's clearly
-      wrong.
-    - "improve": seeds wip_entries from the WIP deck's own cards
-      (`body["cards"]`) via brew_to_card_entries(), same helper
-      /builder/suggest and /builder/optimize already use -- so the loop
-      builds on what's already chosen instead of discarding it.
-    - "import": seeds wip_entries from a Moxfield/Archidekt URL
-      (`import_url`, reusing parse_deck_ref/fetch_deck/extract_entries
-      exactly like /compare does) or a pasted plain-text decklist
-      (`import_text`, via parse_pasted_decklist()) and runs with
-      scope="any" -- the candidate pool becomes every real, legal card,
-      not just owned ones, since the point is often to find what's worth
-      *buying*. A Commander-format import's own commander (tagged via
-      extract_entries' section=="commander") is used directly; otherwise
-      falls back to whatever commander the builder already has set."""
-    body = request.get_json(silent=True) or {}
-    deck_format = body.get("format") if body.get("format") in ("commander", "constructed") else "commander"
-    mode = body.get("mode") if body.get("mode") in ("fresh", "improve", "import") else "fresh"
-    commander = body.get("commander") or {}
-
-    api_key = load_api_key()
-    if not api_key:
-        return jsonify(error="No Anthropic API key configured yet."), 400
-    if not os.path.isfile(COLLECTION_PATH):
-        return jsonify(error="No ManaBox collection on file yet -- upload one from the home page first."), 400
-    try:
-        owned = load_collection(COLLECTION_PATH)
-    except ValueError as e:
-        return jsonify(error=str(e)), 400
-    owned_view = owned_collection_gameplay_view(owned, gameplay_data_in_index())
-
-    wip_entries = None
-    scope = "owned"
-    import_unresolved: list[str] = []
-    guessed_deck_name = None
-
-    if mode in ("fresh", "improve"):
-        wip_entries = brew_to_card_entries({"commander": commander, "cards": body.get("cards") or []})
-    elif mode == "import":
-        import_url = (body.get("import_url") or "").strip()
-        import_text = (body.get("import_text") or "").strip()
-        if import_url:
-            try:
-                source, deck_id = parse_deck_ref(import_url)
-                deck = fetch_deck(source, deck_id)
-            except ValueError as e:
-                return jsonify(error=str(e)), 400
-            wip_entries = extract_entries(source, deck, include_sideboard=False, include_maybeboard=False)
-            guessed_deck_name = deck.get("name") or deck_id
-        elif import_text:
-            parsed = parse_pasted_decklist(import_text)
-            import_unresolved = parsed["unresolved"]
-            commander_entry = CardEntry(
-                name=commander.get("name", ""), quantity=1, type_line=commander.get("type_line", ""),
-                is_foil=False, section="commander", scryfall_id=commander.get("scryfall_id"),
-                color_identity=commander.get("color_identity") or [],
-                set_code=commander.get("set_code", ""), collector_number=commander.get("collector_number", ""),
-            )
-            wip_entries = [commander_entry] + parsed["entries"] if commander.get("name") else parsed["entries"]
-        else:
-            return jsonify(error="Paste a decklist or provide a Moxfield/Archidekt URL first."), 400
-
-        imported_commander = next((e for e in wip_entries if e.section == "commander"), None)
-        if imported_commander:
-            commander = {
-                "name": imported_commander.name, "type_line": imported_commander.type_line,
-                "color_identity": imported_commander.color_identity, "scryfall_id": imported_commander.scryfall_id,
-                "set_code": imported_commander.set_code, "collector_number": imported_commander.collector_number,
-            }
-            deck_format = "commander"
-        if not guessed_deck_name and commander.get("name"):
-            guessed_deck_name = f"{commander['name']} (AI-improved)"
-        scope = "any"
-
-    if deck_format == "commander" and not commander.get("name"):
-        return jsonify(error="Choose a commander first." if mode != "import" else "This import has no commander -- choose one in the builder first, or import a Commander deck/list."), 400
-
-    # The commander's own oracle text is what ai_builder actually reasons
-    # over (see its system prompt) -- look it up fresh from the gameplay
-    # index rather than trusting whatever the client happened to have
-    # cached, since that's the one payload this whole feature depends on.
-    gp = gameplay_data_in_index().get(normalize_name(commander["name"])) if commander.get("name") else {}
-    commander_full = {**commander, "oracle_text": (gp or {}).get("oracle_text", "")}
-    target_size = 100 if deck_format == "commander" else 60
-
-    job_id = uuid.uuid4().hex
-    with _JOBS_LOCK:
-        JOBS[job_id] = {
-            "status": "running", "done": 0, "total": 0, "stage": None,
-            "log": [], "deck_state": [], "suggestions": None, "removed": [], "final_entries": [], "maybeboard": [],
-            "finished": False, "summary": "", "error": None, "import_unresolved": import_unresolved, "mode": mode,
-            "guessed_deck_name": guessed_deck_name, "stop_reason": None, "estimated_cost_usd": None,
-        }
-
-    threading.Thread(
-        target=_run_ai_build_job,
-        args=(
-            job_id, commander_full, deck_format, body.get("target_format"), target_size,
-            commander.get("color_identity") if deck_format == "commander" else None,
-            body.get("intended_bracket") or None, (body.get("user_notes") or "").strip(),
-            owned_view, api_key,
-        ),
-        kwargs={"wip_entries": wip_entries, "scope": scope, "mode": mode},
-        daemon=True,
-    ).start()
-
-    return jsonify(job_id=job_id)
-
-
-@app.route("/builder/ai-build/progress/<job_id>", methods=["GET"])
-def builder_ai_build_progress(job_id):
-    """Separate from /compare/progress on purpose -- that route's response
-    shape is depended on by the compare/report flows, and this job tracks
-    more (a running tool-call log + live deck state) than a plain
-    done/total counter."""
-    with _JOBS_LOCK:
-        job = JOBS.get(job_id)
-        if not job:
-            return jsonify(status="not_found"), 404
-        status, done, total, error = job["status"], job["done"], job["total"], job["error"]
-        stage, log, deck_state = job.get("stage"), job.get("log") or [], job.get("deck_state") or []
-    return jsonify(status=status, done=done, total=total, stage=stage, log=log, deck_state=deck_state, error=error)
-
-
-@app.route("/builder/ai-build/result/<job_id>", methods=["GET"])
-def builder_ai_build_result(job_id):
-    """Single-use, same convention as /compare/result -- deleted from JOBS
-    once fetched, whether it finished or errored."""
-    with _JOBS_LOCK:
-        job = JOBS.get(job_id)
-        if job and job["status"] in ("done", "error"):
-            del JOBS[job_id]
-    if not job:
-        return jsonify(error="That build has expired or wasn't found -- try again."), 404
-    if job["status"] == "error":
-        return jsonify(error=job.get("error") or "The AI build failed."), 400
-    if job["status"] != "done":
-        return jsonify(error="That build hasn't finished yet."), 409
-    return jsonify(
-        suggestions=job["suggestions"], removed=job.get("removed") or [], finished=job["finished"],
-        summary=job["summary"], import_unresolved=job.get("import_unresolved") or [],
-        final_entries=job.get("final_entries") or [], mode=job.get("mode") or "fresh",
-        guessed_deck_name=job.get("guessed_deck_name"), maybeboard=job.get("maybeboard") or [],
-        stop_reason=job.get("stop_reason") or "unknown",
-        estimated_cost_usd=job.get("estimated_cost_usd"),
-    )
-
 
 @app.route("/builder/themes", methods=["POST"])
 def builder_themes():
@@ -3704,7 +3089,7 @@ def builder_stats():
     combos = totals.get("combos") or {}
     # Deck-shape breakdown for the Analyze modal -- actual role counts
     # (Lands/Ramp/Draw/Interaction/Synergy) against the player's own
-    # stated target ratios (see ai_builder_deck_shape_targets), the same
+    # stated target ratios (see commander_deck_shape_targets), the same
     # numbers the AI builder itself now targets -- so a hand-built deck
     # (or one you've since tweaked after an AI build) gets the identical
     # "how close is this to the template" comparison, not a second,
@@ -3730,7 +3115,7 @@ def builder_stats():
         extra_turn_count=totals.get("extra_turn_count") or 0,
         is_commander_format=is_commander_format,
         role_counts=role_counts_for_entries(entries),
-        role_targets=ai_builder_deck_shape_targets(deck_format, target_size),
+        role_targets=commander_deck_shape_targets(deck_format, target_size),
     )
 
 

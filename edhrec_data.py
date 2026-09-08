@@ -46,6 +46,8 @@ import time
 import urllib.error
 import urllib.request
 
+from brewlist_core import normalize_name
+
 _MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
 CACHE_PATH = os.path.join(_MODULE_DIR, "data", "edhrec_cache.json")
 
@@ -306,3 +308,95 @@ def bulk_commander_popularity(names: list[str]) -> dict[str, dict]:
         if popularity is not None:
             results[name] = popularity
     return results
+
+
+def _slugify(name: str) -> str:
+    """Best-effort fallback slug guess, used only when a commander doesn't
+    show up anywhere in the cached rankings (so commander_synergy_cards has
+    no real slug to reuse from commander_popularity) -- reverse-engineered
+    from real slugs on the live site: lowercase, apostrophes dropped
+    outright, every other run of non-alphanumeric characters collapsed to
+    one hyphen. See commander_popularity's docstring for confirmed
+    examples (DFCs, in-name hyphens, etc.)."""
+    s = name.lower().replace("'", "")
+    s = re.sub(r"[^a-z0-9]+", "-", s)
+    return s.strip("-")
+
+
+_SYNERGY_CACHE_MAX_AGE = 90 * 24 * 3600  # commander synergy data drifts slowly -- 90 days is plenty
+
+
+def commander_synergy_cards(commander_name: str) -> dict[str, dict]:
+    """Real, per-commander card synergy data straight from that commander's
+    own EDHREC page -- {normalized_card_name: {"name", "synergy" (float,
+    roughly -1..1, how over/under-represented this card is in decks with
+    this commander versus the overall population), "num_decks"}}. This is
+    the actual free, non-AI alternative to an LLM's guess at "what goes
+    well with this commander": a statistical signal computed by EDHREC from
+    tens of thousands of real decklists, not a generic Oracle-Tag category
+    match and not a model's reasoning. Confirmed live for Sauron, the Dark
+    Lord: Call of the Ring at 0.70 synergy (in 30,733 of 39,251 decks
+    running that commander), a real, specific number no generic tag could
+    produce.
+
+    Combines every cardlist on the commander's page (High Synergy Cards,
+    Top Cards, and every type-category breakdown -- Creatures, Instants,
+    etc., confirmed live to run up to 50 cards deep each) rather than just
+    the curated top-10 "High Synergy" list, since most owned collections
+    won't contain those exact top picks -- the full category lists are
+    what actually let this catch real overlap with what a player owns.
+    Deduped by name, keeping the highest synergy score seen if a card
+    appears in more than one list (it commonly does, e.g. in both a
+    category list and "Top Cards").
+
+    Cached indefinitely per commander once fetched (synergy data drifts
+    slowly -- new sets shift it gradually, not day to day) -- best-effort,
+    returns {} on any failure rather than raising, same as the rest of
+    this module. Does not participate in the Top-100/full-ranking refresh
+    machinery above; a commander not yet cached is fetched synchronously
+    on first use (typically under a second for one page)."""
+    nm = commander_name.strip().lower()
+    cache = _load_cache()
+    synergy_cache = cache.setdefault("synergy", {})
+    cached = synergy_cache.get(nm)
+    now = time.time()
+    if cached and now - cached.get("fetched_at", 0) < _SYNERGY_CACHE_MAX_AGE:
+        return cached.get("cards") or {}
+
+    # Reuse a real slug from the cached rankings when this commander is in
+    # them (nearly always, for anything actually played) rather than
+    # guessing -- only fall back to _slugify for a commander so obscure or
+    # new it doesn't show up in any of the 3 full ranking chains yet.
+    popularity = commander_popularity(commander_name)
+    candidates = [popularity["slug"]] if popularity and popularity.get("slug") else []
+    if " // " in commander_name:
+        candidates.append(_slugify(commander_name.split(" // ")[0]))
+    candidates.append(_slugify(commander_name))
+
+    cards: dict[str, dict] = {}
+    found = False
+    for slug in candidates:
+        data = _fetch_next_data(f"https://edhrec.com/commanders/{slug}")
+        if not data:
+            continue
+        try:
+            cardlists = data["props"]["pageProps"]["data"]["container"]["json_dict"]["cardlists"]
+        except (KeyError, TypeError):
+            continue
+        found = True
+        for cl in cardlists:
+            for c in cl.get("cardviews") or []:
+                card_name = c.get("name") or ""
+                card_nm = normalize_name(card_name)
+                synergy = c.get("synergy")
+                if not card_nm or synergy is None:
+                    continue
+                existing = cards.get(card_nm)
+                if existing is None or synergy > existing["synergy"]:
+                    cards[card_nm] = {"name": card_name, "synergy": synergy, "num_decks": c.get("num_decks")}
+        break  # first slug that actually resolves to a real page wins
+
+    if found:
+        synergy_cache[nm] = {"fetched_at": now, "cards": cards}
+        _save_cache(cache)
+    return cards
