@@ -1415,6 +1415,11 @@ function scryfallImg(scryfallId, size) {{
   return `https://cards.scryfall.io/${{size}}/front/${{scryfallId[0]}}/${{scryfallId[1]}}/${{scryfallId}}.jpg`;
 }}
 
+// Same category order as brewlist_core.BUCKET_ORDER (the compare report's
+// own bucket ordering) -- reused so Suggest's grouped results read in the
+// same order a saved deck's own report groups its cards.
+const BUCKET_ORDER = ['Planeswalkers', 'Battles', 'Creatures', 'Sorceries', 'Instants', 'Artifacts', 'Enchantments', 'Lands', 'Basic Lands', 'Other'];
+
 // Same convention as the compare report's card tiles: one icon per color-
 // identity letter (not a full parse of the mana cost string's pip counts).
 const WUBRG = ['W', 'U', 'B', 'R', 'G'];
@@ -2283,22 +2288,41 @@ suggestBtn.addEventListener('click', () => {{
       }}
       refreshAddAllBtn();
       panel.append(addAllBtn, dismissAllBtn);
-      data.suggestions.forEach(s => {{
-        const row = document.createElement('div');
-        row.className = 'suggestion-row';
-        row.dataset.full = scryfallImg(s.scryfall_id, 'normal') || '';
-        row.innerHTML = `<span class="row-name">${{thumbHtml(s.scryfall_id, 'card-thumb small')}}<span>${{s.name}} ${{colorIconsHtml(s.color_identity)}}<div class="reason">${{s.reason}}</div></span></span>`;
-        const addBtn = Object.assign(document.createElement('button'), {{
-          className: 'btn ghost small', textContent: '+ Add',
-          onclick: () => {{
-            addCard(s);
-            row.remove();
-            remaining = remaining.filter(x => x !== s);
-            refreshAddAllBtn();
-          }},
+      // Grouped by card type (same order as a saved deck's own report --
+      // see BUCKET_ORDER above) instead of one flat list, so a batch of
+      // suggestions reads as organized sections rather than creatures,
+      // lands, and instants all interleaved in whatever order the
+      // heuristic happened to pick them.
+      const byCategory = {{}};
+      data.suggestions.forEach(s => {{ (byCategory[s.category] = byCategory[s.category] || []).push(s); }});
+      const categoriesPresent = BUCKET_ORDER.filter(cat => byCategory[cat] && byCategory[cat].length);
+      Object.keys(byCategory).forEach(cat => {{ if (!categoriesPresent.includes(cat)) categoriesPresent.push(cat); }});
+      categoriesPresent.forEach(cat => {{
+        const header = document.createElement('div');
+        header.className = 'hint';
+        header.style.cssText = 'margin:10px 0 4px;font-weight:600;';
+        let catRemaining = byCategory[cat].length;
+        header.textContent = `${{cat}} (${{catRemaining}})`;
+        panel.appendChild(header);
+        byCategory[cat].forEach(s => {{
+          const row = document.createElement('div');
+          row.className = 'suggestion-row';
+          row.dataset.full = scryfallImg(s.scryfall_id, 'normal') || '';
+          row.innerHTML = `<span class="row-name">${{thumbHtml(s.scryfall_id, 'card-thumb small')}}<span>${{s.name}} ${{colorIconsHtml(s.color_identity)}}<div class="reason">${{s.reason}}</div></span></span>`;
+          const addBtn = Object.assign(document.createElement('button'), {{
+            className: 'btn ghost small', textContent: '+ Add',
+            onclick: () => {{
+              addCard(s);
+              row.remove();
+              remaining = remaining.filter(x => x !== s);
+              refreshAddAllBtn();
+              catRemaining -= 1;
+              if (catRemaining <= 0) header.remove(); else header.textContent = `${{cat}} (${{catRemaining}})`;
+            }},
+          }});
+          row.appendChild(addBtn);
+          panel.appendChild(row);
         }});
-        row.appendChild(addBtn);
-        panel.appendChild(row);
       }});
     }})
     .catch(() => showError('Could not reach the server.'))
