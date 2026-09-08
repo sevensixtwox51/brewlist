@@ -1663,10 +1663,31 @@ def find_deck_combos(entries: list[CardEntry], max_almost: int = 8) -> dict | No
         return None
     results = data.get("results") or {}
     deck_names = {normalize_name(e.name) for e in entries}
-    included = [_simplify_combo(c) for c in results.get("included") or []]
+    # Real, user-caught gap, and it applied to BOTH buckets, not just
+    # "almost included": Commander Spellbook's own "included" (this deck
+    # has every piece) only ever checks the specific *named* cards --
+    # a combo that also needs a generic template slot (e.g. "Permanent
+    # Castable for {C}") can show up as "included" the moment its named
+    # cards are both in the deck, even though nothing here confirms the
+    # deck actually has a real card satisfying that template too.
+    # Confirmed live: after adding Hullbreaker Horror and Sol Ring, that
+    # exact combo appeared under "Already in your deck" -- genuinely
+    # untrue as a claim of "you have this combo," for the same reason it
+    # was untrue as an Optimize proposal. There's no general way to
+    # verify an arbitrary Scryfall-style template against this app's own
+    # card data, so -- for the same reason optimize_builder_combos
+    # excludes these from its swap proposals -- both "included" and
+    # "almost_included" exclude any combo with a `requires` entry here,
+    # at the shared source, so every consumer (Optimize, the Analyze
+    # modal's Combo Reference, the static report, the battle card) stays
+    # consistent automatically rather than needing the same fix in four
+    # separate places.
+    included = [c for c in (_simplify_combo(c) for c in results.get("included") or []) if not c.get("requires")]
     almost_raw = sorted(results.get("almostIncluded") or [], key=lambda c: c.get("popularity") or 0, reverse=True)
-    almost_total = len(almost_raw)
-    almost = [_simplify_combo(c, deck_names) for c in almost_raw[:max_almost]]
+    almost_simplified = [_simplify_combo(c, deck_names) for c in almost_raw]
+    almost_simplified = [c for c in almost_simplified if not c.get("requires")]
+    almost_total = len(almost_simplified)
+    almost = almost_simplified[:max_almost]
     return {"included": included, "almost_included": almost, "almost_total": almost_total}
 
 
