@@ -2190,8 +2190,15 @@ function pollCommanderPopularity(attemptsLeft) {{
 function updateCommanderPopularityControlsVisibility() {{
   const isCommanderFilter = document.getElementById('filter-category').value === 'Commander';
   document.getElementById('commander-popularity-controls').style.display = isCommanderFilter ? 'flex' : 'none';
-  if (isCommanderFilter && !edhrecPolling) {{
-    pollCommanderPopularity(60);
+  if (isCommanderFilter) {{
+    // Defaults on every time the Commander filter is chosen -- ranked
+    // (most popular first) is almost always more useful than whatever
+    // order the collection happened to load in. renderGrid() (called
+    // right after this by the filter-category change listener) reads
+    // the checkbox live, so setting it here is enough -- no extra
+    // re-render needed.
+    document.getElementById('sort-by-rank').checked = true;
+    if (!edhrecPolling) pollCommanderPopularity(60);
   }}
 }}
 document.getElementById('edhrec-refresh-btn').addEventListener('click', () => {{
