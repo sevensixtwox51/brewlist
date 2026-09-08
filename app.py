@@ -1283,7 +1283,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
         <button type="button" class="btn ghost small" id="edhrec-refresh-btn" title="EDHREC data only updates when you click this -- it never refetches on its own">&#8635; Refresh rankings</button>
         <span class="hint" id="edhrec-status" style="margin:0;"></span>
       </div>
-      <div class="collection-grid" id="collection-grid"><div class="hint">Loading your collection&hellip;</div></div>
+      <div class="collection-grid" id="collection-grid"><div class="hint" style="margin-top:50px;">Loading your collection&hellip;</div></div>
     </div>
     <div class="card deck-panel">
       <div class="deck-stats" id="deck-stats"></div>
