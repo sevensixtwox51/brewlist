@@ -139,6 +139,27 @@ def _card_role(name: str, category: str, tag_by_name: dict, tag_labels: dict) ->
     return "Synergy"
 
 
+def _synergy_reason(score: float | None) -> str | None:
+    """Wording for an EDHREC synergy score, tiered so the label never
+    overstates a weak number -- real, user-reported bug: Sol Ring (a
+    universal staple played regardless of commander, so its synergy with
+    any *specific* one is naturally near zero) was showing up as "high
+    synergy with your commander (per EDHREC, 1%)", which reads as a
+    contradiction -- 1% isn't "high" by any reasonable standard, it's
+    just barely positive. Calibrated against real observed scores (a
+    genuine standout pick for a commander is typically >=20%; the ~5-15%
+    range is a real but modest edge; anything under that is closer to
+    noise -- a card that's simply fine everywhere, not on the commander's
+    own theme). None below the noise floor -- callers fall through to
+    their own next-best reason (a role/tag match, or a generic fallback)
+    rather than mentioning EDHREC at all for a score this weak."""
+    if score is None or score < 0.08:
+        return None
+    if score >= 0.20:
+        return f"high synergy with your commander (per EDHREC, {score:.0%})"
+    return f"synergizes with your commander (per EDHREC, {score:.0%})"
+
+
 def role_counts_for_entries(
     entries: list[CardEntry],
     tag_by_name: dict | None = None,
@@ -467,10 +488,11 @@ def suggest_replacements(
     for c in same_role[:limit]:
         nm = normalize_name(c["name"])
         shares_tag = target_tag is not None and tag_by_name.get(nm) == target_tag
+        synergy_reason = _synergy_reason(synergy_by_name.get(nm))
         reason = (
-            f'high synergy with your commander (per EDHREC)' if nm in synergy_by_name
-            else f'shares the "{tag_label}" role with {target_name}' if shares_tag and tag_label
-            else f'fills the same {target_role} role as {target_name}'
+            synergy_reason
+            or (f'shares the "{tag_label}" role with {target_name}' if shares_tag and tag_label else None)
+            or f'fills the same {target_role} role as {target_name}'
         )
         results.append({
             "name": c["name"], "scryfall_id": c["scryfall_id"], "category": c["category"],
@@ -842,8 +864,7 @@ def suggest_builder_cards(
         nm = normalize_name(c["name"])
         role = role_of(c["name"], c["category"])
         fallback_reason = f"fills out {role}" if deck_format == "commander" else f"fills out {c['category']}"
-        synergy_score = synergy_by_name.get(nm)
-        synergy_reason = f"high synergy with your commander (per EDHREC, {synergy_score:.0%})" if synergy_score else None
+        synergy_reason = _synergy_reason(synergy_by_name.get(nm))
         suggestions.append({
             "name": c["name"],
             "scryfall_id": c["scryfall_id"],
