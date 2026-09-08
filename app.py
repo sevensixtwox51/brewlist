@@ -1026,6 +1026,12 @@ body.compact .deck-row .card-thumb { display:none; }
   border-radius:999px; background:var(--bg); border:1px solid var(--card-border);
   font-size:0.78rem; color:var(--text); position:relative; cursor:help;
 }
+.combo-pill {
+  display:inline-block; padding:1px 8px; margin-left:6px; border-radius:999px;
+  background:color-mix(in srgb, var(--accent) 15%, transparent);
+  border:1px solid color-mix(in srgb, var(--accent) 45%, var(--card-border));
+  color:var(--accent); font-size:0.78rem; font-weight:600; vertical-align:1px;
+}
 .bv-badge b { font-weight:600; }
 .bv-badge.warn { border-color:color-mix(in srgb, var(--missing) 45%, var(--card-border)); color:var(--missing); }
 .bv-badge.good { border-color:color-mix(in srgb, var(--owned) 45%, var(--card-border)); color:var(--owned); }
@@ -1088,6 +1094,7 @@ body.compact .deck-row .card-thumb { display:none; }
   #battle-card li { margin-bottom:4px; }
   #battle-card .bc-combo { font-size:0.82rem; margin-bottom:5px; }
   #battle-card .bc-badges span { display:inline-block; border:1px solid #999; border-radius:999px; padding:2px 9px; margin:0 6px 6px 0; font-size:0.78rem; }
+  #battle-card .combo-pill { border:1px solid #999; background:none; color:#111; }
 }
 """
 
@@ -2582,7 +2589,7 @@ function colorComboName(identity) {{
 function colorIdentityLabel(identity) {{
   const names = identity.map(c => COLOR_NAMES[c] || c).join(' / ');
   const combo = identity.length >= 2 ? colorComboName(identity) : null;
-  return combo ? `${{names}} (${{combo}})` : names;
+  return combo ? `${{names}} <span class="combo-pill">${{combo}}</span>` : names;
 }}
 
 function statBadges(data) {{
