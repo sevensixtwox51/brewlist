@@ -291,6 +291,7 @@ def _run_ai_build_job(job_id, commander, deck_format, target_format, target_size
                     job["maybeboard"] = result.get("maybeboard") or []
                     job["finished"] = result["finished"]
                     job["summary"] = result["summary"]
+                    job["stop_reason"] = result.get("stop_reason") or "unknown"
     except Exception as e:  # noqa: BLE001 -- surface any failure to the polling client
         with _JOBS_LOCK:
             job = JOBS.get(job_id)
@@ -2674,9 +2675,23 @@ function applyAiImportResult(data) {{
     document.getElementById('deck-name').value = data.guessed_deck_name;
   }}
   renderAll();
-  if (data.import_unresolved && data.import_unresolved.length) {{
-    showError(`Couldn't recognize ${{data.import_unresolved.length}} line(s) from your import: ${{data.import_unresolved.slice(0, 5).join('; ')}}`);
+  // Same specific stop-reason messages renderAiSuggestions uses -- import
+  // mode used to give zero indication a build stopped early at all, since
+  // it jumps straight to the report with no equivalent of that panel's
+  // own "!data.finished" warning.
+  const importStopMessages = {{
+    time_limit: 'Stopped after hitting the 7-minute time limit before finishing this deck.',
+    turn_limit: 'Stopped after reaching the 60-turn limit before finishing this deck.',
+    no_tool_use: 'Claude stopped on its own without finishing this deck (never called finish).',
+  }};
+  const warnings = [];
+  if (!data.finished) {{
+    warnings.push((importStopMessages[data.stop_reason] || 'Stopped before finishing this deck.') + ' This list may be short of a full deck -- use Improve/Optimize to keep building from here, or try again.');
   }}
+  if (data.import_unresolved && data.import_unresolved.length) {{
+    warnings.push(`Couldn't recognize ${{data.import_unresolved.length}} line(s) from your import: ${{data.import_unresolved.slice(0, 5).join('; ')}}`);
+  }}
+  if (warnings.length) {{ showError(warnings.join(' ')); }}
   saveThenViewReport();
 }}
 
@@ -2721,7 +2736,20 @@ function renderAiSuggestions(data) {{
     panel.innerHTML += `<p class="hint" style="margin:0 0 8px;">${{escapeHtml(data.summary)}}</p>`;
   }}
   if (!data.finished) {{
-    panel.innerHTML += '<p class="hint" style="margin:0 0 8px;color:var(--missing);">Claude hit the time/turn limit before calling finish -- this list may be short of a full deck.</p>';
+    // Specific, not a generic "hit some limit" guess -- a real user
+    // question this exists to answer directly: was it a 7-minute wall-
+    // clock timeout, the 60-turn cap, or something else entirely (Claude
+    // just stopping without calling finish). Each has a genuinely
+    // different fix (retry vs. use Improve/Optimize to keep going vs. add
+    // a clearer note), so lumping them into one sentence isn't just vague,
+    // it's actively unhelpful.
+    const stopMessages = {{
+      time_limit: 'Stopped after hitting the 7-minute time limit before finishing this deck.',
+      turn_limit: 'Stopped after reaching the 60-turn limit before finishing this deck.',
+      no_tool_use: 'Claude stopped on its own without finishing this deck (never called finish).',
+    }};
+    const stopMsg = stopMessages[data.stop_reason] || 'Stopped before finishing this deck.';
+    panel.innerHTML += `<p class="hint" style="margin:0 0 8px;color:var(--missing);">${{stopMsg}} This list may be short of a full deck -- use Improve/Optimize to keep building from here, or try again.</p>`;
   }}
   if (data.import_unresolved && data.import_unresolved.length) {{
     panel.innerHTML += `<p class="hint" style="margin:0 0 8px;color:var(--missing);">Couldn’t recognize ${{data.import_unresolved.length}} line(s) from your import: ${{escapeHtml(data.import_unresolved.slice(0, 5).join('; '))}}</p>`;
@@ -3490,7 +3518,7 @@ def builder_ai_build_start():
             "status": "running", "done": 0, "total": 0, "stage": None,
             "log": [], "deck_state": [], "suggestions": None, "removed": [], "final_entries": [], "maybeboard": [],
             "finished": False, "summary": "", "error": None, "import_unresolved": import_unresolved, "mode": mode,
-            "guessed_deck_name": guessed_deck_name,
+            "guessed_deck_name": guessed_deck_name, "stop_reason": None,
         }
 
     threading.Thread(
@@ -3542,6 +3570,7 @@ def builder_ai_build_result(job_id):
         summary=job["summary"], import_unresolved=job.get("import_unresolved") or [],
         final_entries=job.get("final_entries") or [], mode=job.get("mode") or "fresh",
         guessed_deck_name=job.get("guessed_deck_name"), maybeboard=job.get("maybeboard") or [],
+        stop_reason=job.get("stop_reason") or "unknown",
     )
 
 

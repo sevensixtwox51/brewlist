@@ -344,7 +344,12 @@ def run_ai_build(
     shape suggest_builder_cards()/optimize_builder_combos() already
     return, so the existing suggestions-panel JS works unmodified),
     "removed": [names of cards the AI cut from a pre-existing deck],
-    "log": [...], "finished": bool, "summary": str, "error": str|None}.
+    "log": [...], "finished": bool, "summary": str, "error": str|None,
+    "stop_reason": "finished" | "time_limit" | "turn_limit" | "no_tool_use"
+    | "error" | "unknown"} -- the real reason the loop ended, always set
+    (not just inferred from `finished`/`error`) so a build that stopped
+    short of the target size has one unambiguous, specific answer for why,
+    surfaced to the player instead of a generic "hit some limit" guess.
 
     `wip_entries`, if given, seeds the loop with an existing deck
     (commander + library) instead of starting from just the commander --
@@ -732,13 +737,24 @@ def run_ai_build(
     finished = False
     summary = ""
     error = None
+    # Distinct machine-readable reason for every way this loop can end,
+    # threaded all the way to the client (see app.py's /builder/ai-build/
+    # result and its stop-reason message) -- a real user question this
+    # exists to answer directly instead of leaving them guessing: a build
+    # that stopped short used to always show the exact same generic "hit
+    # the time/turn limit" text regardless of which of these actually
+    # happened (including a 4th, previously silent case below -- the model
+    # just stopping without ever calling finish_deck at all -- which had no
+    # log message of its own before this).
+    stop_reason = "unknown"
     start = time.monotonic()
     emit(f"Reading {commander['name']}'s card text...")
 
     for turn in range(_MAX_TURNS):
         turn_ref["value"] = turn + 1
         if time.monotonic() - start > _MAX_SECONDS:
-            emit("Time limit reached -- stopping with whatever's been built so far.")
+            emit(f"Time limit reached ({_MAX_SECONDS}s) -- stopping with whatever's been built so far.")
+            stop_reason = "time_limit"
             break
         try:
             response = client.messages.create(
@@ -748,11 +764,14 @@ def run_ai_build(
         except Exception as e:
             error = str(e)
             emit(f"Error calling Claude: {e}")
+            stop_reason = "error"
             break
 
         messages.append({"role": "assistant", "content": response.content})
         tool_uses = [b for b in response.content if b.type == "tool_use"]
         if not tool_uses:
+            emit("Claude stopped without calling finish_deck -- stopping with whatever's been built so far.")
+            stop_reason = "no_tool_use"
             break
 
         tool_results = []
@@ -768,9 +787,11 @@ def run_ai_build(
                     stop = True
         messages.append({"role": "user", "content": tool_results})
         if stop:
+            stop_reason = "finished"
             break
     else:
         emit(f"Reached the {_MAX_TURNS}-turn limit -- stopping with whatever's been built so far.")
+        stop_reason = "turn_limit"
 
     suggestions = []
     for c in added_by_name.values():
@@ -803,4 +824,5 @@ def run_ai_build(
     return {
         "suggestions": suggestions, "removed": removed_names, "final_entries": final_entries,
         "maybeboard": maybeboard_out, "log": log, "finished": finished, "summary": summary, "error": error,
+        "stop_reason": stop_reason,
     }
