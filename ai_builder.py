@@ -39,13 +39,20 @@ import anthropic
 
 from brewlist_core import (
     CardEntry,
+    budget_alt_data_in_index,
     find_deck_combos,
     game_changers_in_index,
     gameplay_data_in_index,
     normalize_name,
     prices_data_in_index,
 )
-from deck_builder import _filter_candidates, _INTENDED_BRACKET_GC_CAP, categorize
+from deck_builder import (
+    CONSTRUCTED_LAND_FRACTION,
+    _card_role,
+    _filter_candidates,
+    _INTENDED_BRACKET_GC_CAP,
+    categorize,
+)
 
 _MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
 AI_CONFIG_PATH = os.path.join(_MODULE_DIR, "data", "ai_config.json")
@@ -369,6 +376,32 @@ def run_ai_build(
     search_tool_name = tools[0]["name"]
     pool_label = "owned collection" if scope == "owned" else "full card database"
 
+    # Role classification (Lands/Ramp/Draw/Interaction/Synergy) -- the same
+    # bucketing Suggest/Optimize already use (see deck_builder._card_role),
+    # reused here so the agentic loop can self-monitor its own deck shape
+    # instead of just chasing a raw card count. Real, user-reported bug this
+    # closes: a fresh Commander build finished at the right card count with
+    # only 19 lands (should be ~37) because nothing in the loop ever tracked
+    # -- or even mentioned -- a mana base at all, just "reach N cards."
+    # tag_by_name/tag_labels come from the Oracle Tags snapshot in the price
+    # index (best-effort -- empty if that download ever failed) -- Lands
+    # detection has no dependency on it (categorize() alone is enough), so
+    # the one check that actually matters (the finish_deck land floor below)
+    # still works even in that degraded case; only Ramp/Draw/Interaction
+    # would undercount into Synergy instead.
+    _budget_alt = budget_alt_data_in_index()
+    _tag_by_name = _budget_alt["tag_by_name"]
+    _tag_labels = _budget_alt["tag_labels"]
+
+    def role_counts(entries: list[CardEntry]) -> dict[str, int]:
+        counts = {"Lands": 0, "Ramp": 0, "Draw": 0, "Interaction": 0, "Synergy": 0}
+        for e in entries:
+            if e.section == "commander":
+                continue
+            role = _card_role(e.name, categorize(e.type_line), _tag_by_name, _tag_labels)
+            counts[role] = counts.get(role, 0) + e.quantity
+        return counts
+
     # emit() can log several tool calls within one API turn (Claude often
     # batches multiple tool_use blocks in a single response) -- done/total
     # need to reflect actual API turns against _MAX_TURNS, not len(log)
@@ -404,7 +437,12 @@ def run_ai_build(
             return json.dumps([_card_summary(c, scope, owned_names, prices) for c in matches])
 
         if tool_name == "get_deck_state":
-            return json.dumps(_deck_state_view(wip_entries))
+            return json.dumps({
+                "cards": _deck_state_view(wip_entries),
+                "library_count": library_count(),
+                "library_target": library_target,
+                "role_counts": role_counts(wip_entries),
+            })
 
         if tool_name == "add_card":
             name = (tool_input.get("name") or "").strip()
@@ -485,12 +523,72 @@ def run_ai_build(
                 diff = library_target - count
                 verb = "add" if diff > 0 else "remove"
                 return json.dumps({"ok": False, "error": f"Deck has {count} library cards, needs exactly {library_target} -- {verb} {abs(diff)} more before finishing."})
-            emit(f"Deck complete at {count} cards.")
+            # Hard safety net, not just prompt guidance -- prompt-only
+            # guidance already failed once for real (a shipped 100-card
+            # Commander deck with only 19 lands, no mana-base guidance
+            # existed anywhere in this loop before this fix). Floors are
+            # deliberately generous -- well below even the "trim to 35 for
+            # a fast, low-curve deck" case the player's own guidelines
+            # describe -- so this only ever fires on a genuinely broken
+            # mana base, never a legitimate aggressive build.
+            lands = role_counts(wip_entries)["Lands"]
+            min_lands = max(30, round(target_size * 0.30)) if deck_format == "commander" else round(target_size * 0.25)
+            if lands < min_lands:
+                return json.dumps({"ok": False, "error": (
+                    f"Only {lands} lands in a {target_size}-card deck -- that's too thin a mana base to "
+                    f"reliably function (needs at least {min_lands}; ~{round(target_size * 0.37) if deck_format == 'commander' else round(target_size * CONSTRUCTED_LAND_FRACTION)} "
+                    "is the normal target). Add more lands (or, if you'd rather lean on ramp spells "
+                    "instead, add ramp) before finishing."
+                )})
+            emit(f"Deck complete at {count} cards ({lands} lands).")
             return json.dumps({"ok": True})
 
         return json.dumps({"error": f"Unknown tool {tool_name}"})
 
     pool_desc = "the player's owned cards" if scope == "owned" else "any real Magic card, owned or not (each search result says whether it's owned and, if not, a rough price)"
+
+    # Explicit deck-shape targets -- see the finish_deck floor check above
+    # for why this exists at all: without ANY guidance here, a real build
+    # finished at the right card count with only 19 lands out of 100. The
+    # numbers themselves are the player's own stated guidelines, not a
+    # guess: ~37 lands/10 ramp/10 draw/15 removal+wipes/rest win-cons for a
+    # 100-card Commander deck (this app's "Interaction" role bucket
+    # deliberately covers both spot removal and board wipes, so 15 =
+    # their 10 removal + 5 wipes combined), scaled proportionally for a
+    # different target size; CONSTRUCTED_LAND_FRACTION (0.40, already used
+    # elsewhere in this app -- see deck_builder.py) for non-Commander.
+    if deck_format == "commander":
+        land_target = round(target_size * 0.37)
+        ramp_target = round(target_size * 0.10)
+        draw_target = round(target_size * 0.10)
+        interaction_target = round(target_size * 0.15)
+        synergy_target = target_size - land_target - ramp_target - draw_target - interaction_target
+        shape_note = (
+            f"DECK SHAPE -- take this as seriously as legality/color identity, not a nice-to-have: a real "
+            f"Commander deck needs a proper mana base and role balance, not just {library_target} cards that "
+            f"each individually seem good. Rough target for this {target_size}-card deck: ~{land_target} lands, "
+            f"~{ramp_target} mana ramp (rocks/dorks/ramp spells), ~{draw_target} card draw, "
+            f"~{interaction_target} removal/interaction (spot removal, board wipes, protection), and the "
+            f"remaining ~{synergy_target} as win conditions and synergy pieces actually built around the "
+            "commander's own plan. These aren't rigid walls -- a low-curve, fast deck can trim toward 35 lands "
+            "and lean on ramp spells instead, a high-curve deck wants closer to 38-39, and a landfall deck can "
+            "run as many as 42 -- but do NOT finish anywhere near the low-20s in lands; that is a real bug this "
+            "app has already shipped once (a 100-card deck built with only 19 lands), not a valid build style. "
+            "Call get_deck_state periodically to check your actual land/ramp/draw/interaction counts as you go "
+            "(it returns a role_counts breakdown, not just the total), not just the overall card count -- it's "
+            "easy to fill slots with only spells and creatures and only notice the mana base is thin once "
+            "finish_deck already rejects it for exactly that reason.\n\n"
+        )
+    else:
+        land_target = round(target_size * CONSTRUCTED_LAND_FRACTION)
+        shape_note = (
+            f"DECK SHAPE: aim for roughly {land_target} lands out of {target_size} cards (~"
+            f"{CONSTRUCTED_LAND_FRACTION:.0%}), plus a reasonable mix of removal/interaction and card advantage "
+            "alongside your win conditions -- don't finish a spell-heavy deck with too thin a mana base to "
+            "reliably cast them. Call get_deck_state periodically to check your actual land count as you go, "
+            "not just the overall card count.\n\n"
+        )
+
     if starting_library_count == 0:
         deck_state_note = "The deck library is currently empty -- build it from scratch.\n"
     elif scope == "owned":
@@ -538,7 +636,8 @@ def run_ai_build(
         f"Oracle text: {commander.get('oracle_text', '') or '(not available)'}\n"
         f"Color identity: {', '.join(commander_color_identity or []) or 'colorless'}\n"
         f"Format: {deck_format}" + (f" (target legality: {target_format})" if target_format else "") + "\n"
-        f"Target library size: exactly {library_target} cards (plus the commander already in the deck).\n"
+        f"Target library size: exactly {library_target} cards (plus the commander already in the deck).\n\n"
+        + shape_note
         + deck_state_note
         + (f"Intended power bracket: {intended_bracket}\n" if intended_bracket else "")
         + (f"Player's notes on what they want: {user_notes}\n" if user_notes else "")
