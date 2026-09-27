@@ -2711,6 +2711,11 @@ analyzeBtn.addEventListener('click', () => {{
   document.getElementById('analyze-badges').innerHTML = '';
   document.getElementById('rule0-list').innerHTML = '';
   document.getElementById('combo-reference').innerHTML = '';
+  // deck-shape-breakdown is only ever written by renderDeckShape(), called
+  // from the fetch below -- without clearing it here too, reopening the
+  // modal on a changed deck briefly re-shows the PREVIOUS deck's bars
+  // until the new response lands (this is what you saw).
+  document.getElementById('deck-shape-breakdown').innerHTML = '';
   document.getElementById('analyze-loading').style.display = 'block';
   printBattleCardBtn.disabled = true;
   const requestSeq = ++analyzeRequestSeq;
