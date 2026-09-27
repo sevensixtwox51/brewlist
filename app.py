@@ -2674,6 +2674,14 @@ function renderComboReference(data) {{
 }}
 
 let lastAnalyzeData = null;
+// /builder/stats does a live Commander Spellbook combo lookup and can take
+// several seconds. If the user closes the modal, changes the deck (e.g.
+// clears cards/commander), and re-analyzes before the first request lands,
+// the two responses can arrive out of order -- without this guard, the
+// slower/older request's .then() clobbers the display with stale data
+// even though a newer, correct response already rendered (or the deck is
+// now empty). Only the response matching the current sequence number wins.
+let analyzeRequestSeq = 0;
 const analyzeModal = document.getElementById('analyze-modal');
 const analyzeBtn = document.getElementById('analyze-btn');
 const printBattleCardBtn = document.getElementById('print-battle-card-btn');
@@ -2684,7 +2692,11 @@ analyzeModal.addEventListener('click', (e) => {{ if (e.target === analyzeModal) 
 document.addEventListener('keydown', (e) => {{ if (e.key === 'Escape' && analyzeModal.classList.contains('show')) closeAnalyzeModal(); }});
 
 analyzeBtn.addEventListener('click', () => {{
-  if (!brew.cards.length && !brew.commander) {{ showError('Add some cards first.'); return; }}
+  if (!brew.cards.length && !brew.commander) {{
+    analyzeRequestSeq++; // invalidate any still-in-flight request from before the deck was emptied
+    showError('Add some cards first.');
+    return;
+  }}
   lastAnalyzeData = null;
   analyzeModal.classList.add('show');
   document.getElementById('analyze-modal-title').textContent = brew.deck_name || document.getElementById('deck-name').value || 'Analyze Deck';
@@ -2701,12 +2713,14 @@ analyzeBtn.addEventListener('click', () => {{
   document.getElementById('combo-reference').innerHTML = '';
   document.getElementById('analyze-loading').style.display = 'block';
   printBattleCardBtn.disabled = true;
+  const requestSeq = ++analyzeRequestSeq;
   fetch('/builder/stats', {{
     method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
     body: JSON.stringify({{ cards: brew.cards, commander: brew.commander, format: brew.format }}),
   }})
     .then(r => r.json())
     .then(data => {{
+      if (requestSeq !== analyzeRequestSeq) return; // a newer analyze request has since started -- discard this stale response
       document.getElementById('analyze-loading').style.display = 'none';
       if (data.error) {{ showError(data.error); return; }}
       lastAnalyzeData = data;
@@ -2718,7 +2732,11 @@ analyzeBtn.addEventListener('click', () => {{
       renderComboReference(data);
       printBattleCardBtn.disabled = false;
     }})
-    .catch(() => {{ document.getElementById('analyze-loading').style.display = 'none'; showError('Could not reach the server.'); }});
+    .catch(() => {{
+      if (requestSeq !== analyzeRequestSeq) return;
+      document.getElementById('analyze-loading').style.display = 'none';
+      showError('Could not reach the server.');
+    }});
 }});
 
 // Actual role counts (Lands/Ramp/Draw/Interaction/Synergy -- see
