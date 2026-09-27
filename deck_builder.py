@@ -99,15 +99,17 @@ CURATED_THEMES: dict[str, list[str]] = {
     "Proliferate": ["repeatable-proliferate", "synergy-proliferate", "pseudo-proliferate"],
 }
 
-# The well-known community-standard EDH deck shape (Command Zone-style
-# ratios: ~38 lands, ~10 ramp, ~10 card draw, ~10-12 interaction/removal,
-# the remaining ~30 "Synergy" slots being the deck's actual creatures/
-# win-cons/theme pieces) -- raw counts since a Commander deck is always
-# 100 cards (partner/background commanders aren't supported yet, see
-# deck_builder.py's module docstring scope). User-overridable per brew
-# (see suggest_builder_cards's mix_targets param and the builder UI) --
-# this is our default assumption, not a rule anyone has to follow.
-DEFAULT_COMMANDER_MIX = {"Lands": 38, "Ramp": 10, "Draw": 10, "Interaction": 11}
+# The default Lands/Ramp/Draw/Interaction/Synergy shape used to both build
+# (suggest_builder_cards) and judge (the Deck Shape breakdown in Analyze)
+# a Commander deck -- see commander_deck_shape_targets, below. User-
+# overridable per brew (see suggest_builder_cards's mix_targets param and
+# the builder UI). These two consumers used to carry separate, silently-
+# drifted numbers (Suggest's own old default targeted 11 Interaction while
+# Analyze displayed a 15 target) -- confirmed via role_counts on 4 real
+# built decks, every one landing at 11-13 Interaction, "light on
+# interaction" by the app's own displayed standard even though Suggest was
+# hitting the number it was actually told to hit. Unified on one function
+# so a future change to the ratio can't silently split the two again.
 
 # Maps each non-land role bucket to the Oracle Tag label(s) that indicate
 # it. Checked against real cards, not guessed -- and deliberately checked
@@ -148,6 +150,23 @@ _ROLE_TAG_LABELS = {
         "multi removal", "removal-artifact", "removal-bounce", "removal-enchantment",
         "removal-land", "removal-nonland", "removal-permanent", "removal-planeswalker",
         "removal-sacrifice", "removal-tuck",
+        # Added after a real, live-confirmed bug: these are each real,
+        # heavily-populated tags (burn creature alone has 1018 members)
+        # that were previously falling through to "Synergy" entirely,
+        # silently starving Interaction's quota across every commander --
+        # confirmed via role_counts on 4 real saved decks, all landing at
+        # 11-13 against a 15 target despite every other role hitting its
+        # number. "removal-toughness"/"burn *"/"*-fight" are -X/-X and
+        # damage-based removal; the rest are counterspell subtypes (only
+        # 3 of ~18 real ones were previously listed).
+        "removal-toughness", "removal-fight", "one-sided fight", "removal-aura",
+        "removal-battle", "removal-equipment", "removal-vehicle", "removal-spacecraft",
+        "swap removal", "burn creature", "burn any", "burn planeswalker",
+        "counterspell-ability", "counterspell-artifact", "counterspell-automatic",
+        "counterspell-bounce", "counterspell-creature", "counterspell-enchantment",
+        "counterspell-exile", "counterspell-free", "counterspell-instant",
+        "counterspell-noncreature", "counterspell-planeswalker", "counterspell-sacrifice",
+        "counterspell-sorcery", "counterspell-sweeper", "counterspell with set mechanic",
     },
 }
 
@@ -180,8 +199,8 @@ def _card_role(name: str, category: str, role_members: dict[str, frozenset[str]]
     Draw/Interaction, else "Synergy" for everything else -- creatures,
     other spells, win conditions, theme pieces). Not a full archetype
     classifier, just enough to keep Suggest roughly on-shape for
-    DEFAULT_COMMANDER_MIX. `role_members` -- see _role_member_names --
-    checks a card's full real Oracle Tag membership per role, not just
+    commander_deck_shape_targets. `role_members` -- see _role_member_names
+    -- checks a card's full real Oracle Tag membership per role, not just
     its single tag_by_name pick."""
     if category in ("Lands", "Basic Lands"):
         return "Lands"
@@ -242,17 +261,20 @@ def role_counts_for_entries(
 
 def commander_deck_shape_targets(deck_format: str, target_size: int) -> dict[str, int | None]:
     """Rough per-role target counts for a deck of this size/format -- the
-    player's own stated deck-building guidelines (not this app's own
-    earlier default, DEFAULT_COMMANDER_MIX -- deliberately a separate,
-    slightly different set of numbers, since these are the exact ratios
-    the player gave directly; changing DEFAULT_COMMANDER_MIX's own
-    longstanding Suggest/Optimize behavior was never asked for). For a 100-card
-    Commander deck: ~37 lands, ~10 ramp, ~10 card draw, ~15 removal +
-    board wipes combined (the player's own 10 removal + 5 wipes), and the
-    rest as win conditions/synergy -- scaled proportionally for a
-    different target size. Non-Commander just gets a lands target
-    (CONSTRUCTED_LAND_FRACTION) -- constructed archetypes vary too much
-    for a single generic ramp/draw/interaction split to mean anything."""
+    single shared source both suggest_builder_cards (what Suggest actually
+    builds toward) and the Deck Shape breakdown in Analyze (what a built
+    deck is judged against) use, so the two can't drift apart again --
+    they silently did for a while (Suggest targeting an old, separate
+    11-Interaction default while Analyze displayed 15), which is exactly
+    why every auto-built deck looked "light on interaction": Suggest was
+    hitting the number it was told to hit, just not the number shown next
+    to it. For a 100-card Commander deck: ~37 lands, ~10 ramp, ~10 card
+    draw, ~15 removal + board wipes combined (the player's own 10 removal
+    + 5 wipes), and the rest as win conditions/synergy -- scaled
+    proportionally for a different target size. Non-Commander just gets a
+    lands target (CONSTRUCTED_LAND_FRACTION) -- constructed archetypes
+    vary too much for a single generic ramp/draw/interaction split to mean
+    anything."""
     if deck_format == "commander":
         lands = round(target_size * 0.37)
         ramp = round(target_size * 0.10)
@@ -755,8 +777,8 @@ def suggest_builder_cards(
     role_pool_candidates = [c for c in candidates if normalize_name(c["name"]) not in combo_first_names]
 
     # Deck-shape roles: Commander gets the full Lands/Ramp/Draw/
-    # Interaction/Synergy breakdown (see DEFAULT_COMMANDER_MIX and its
-    # user-supplied override, mix_targets); constructed keeps the
+    # Interaction/Synergy breakdown (see commander_deck_shape_targets and
+    # its user-supplied override, mix_targets); constructed keeps the
     # simpler land-only target it always had, since there's no single
     # community-standard ramp/draw/removal ratio across constructed
     # formats/archetypes the way there is for EDH. "Synergy" (the deck's
@@ -764,9 +786,13 @@ def suggest_builder_cards(
     # library_target (the 99-card library, not counting the commander)
     # after the tracked roles -- the single biggest bucket in the standard
     # EDH shape (~30/99), so it's sized like every other role below, never
-    # treated as a mere leftover.
+    # treated as a mere leftover. Sourced from commander_deck_shape_targets
+    # rather than a separate local default so Suggest always builds toward
+    # the exact same numbers Analyze's Deck Shape breakdown judges it
+    # against (its own Synergy figure is dropped here and recomputed below
+    # against library_target, not target_size, to stay exact).
     if deck_format == "commander":
-        role_targets = dict(DEFAULT_COMMANDER_MIX)
+        role_targets = {k: v for k, v in commander_deck_shape_targets(deck_format, target_size).items() if k != "Synergy"}
         if mix_targets:
             for role in role_targets:
                 if role in mix_targets and mix_targets[role] is not None:

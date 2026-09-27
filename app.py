@@ -1137,7 +1137,11 @@ def render_builder_page(deck_id: str | None = None) -> str:
     if deck_id and brew.get("type") != "brew":
         brew = {}
         deck_id = None
-    default_mix = {"Lands": 38, "Ramp": 10, "Draw": 10, "Interaction": 11}
+    # Sourced from commander_deck_shape_targets rather than a separate
+    # hardcoded copy -- this UI panel's own defaults drifted from what
+    # Suggest actually built toward and what Analyze judged against
+    # (11 vs. 15 Interaction) until all three were unified on one function.
+    default_mix = {k: v for k, v in commander_deck_shape_targets("commander", 100).items() if k != "Synergy"}
     saved_mix = brew.get("mix_targets") or {}
     brew_state = {
         "deck_name": brew.get("deck_name") or "",
