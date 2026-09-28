@@ -399,6 +399,7 @@ def _filter_candidates(
     commander_color_identity: list[str] | None,
     intended_bracket: str | None,
     excluded_set_codes: set[str] | None = None,
+    excluded_card_names: set[str] | None = None,
 ) -> list[dict]:
     """Owned cards that are legal, color-correct, and not already in the
     WIP deck -- the same filtering suggest_builder_cards has always done,
@@ -409,7 +410,18 @@ def _filter_candidates(
     `excluded_set_codes`, if given, drops any candidate whose (single,
     representative -- see owned_collection_gameplay_view) owned printing
     is from one of those sets. Empty/None means no restriction, matching
-    the Set Selection filter's "everything on by default" behavior."""
+    the Set Selection filter's "everything on by default" behavior.
+
+    `excluded_card_names` (normalized names), if given, drops any
+    candidate the player has explicitly said never to suggest again for
+    this brew -- the fix for a real, confirmed problem: a card with no
+    EDHREC synergy data for the commander (neutral, not negative, in
+    rank_key below) can still win a role purely on generic theme-overlap
+    with cards already in the deck. Cutting it from the deck alone doesn't
+    stop it from being re-suggested right back into the same now-open
+    slot on the very next call, since nothing remembers that cut -- this
+    is that memory, same "everything on by default" convention as
+    excluded_set_codes."""
     used_names = {normalize_name(e.name) for e in wip_entries}
     legality_key = "commander" if deck_format == "commander" else (target_format or "")
     colors_allowed = set(commander_color_identity) if deck_format == "commander" and commander_color_identity is not None else None
@@ -431,6 +443,8 @@ def _filter_candidates(
         if normalize_name(c["name"]) in used_names:
             continue
         if excluded_set_codes and (c.get("set_code") or "").upper() in excluded_set_codes:
+            continue
+        if excluded_card_names and normalize_name(c["name"]) in excluded_card_names:
             continue
         if gc_at_cap and normalize_name(c["name"]) in game_changers:
             continue
@@ -466,6 +480,7 @@ def list_theme_options(
     target_format: str | None,
     commander_color_identity: list[str] | None,
     excluded_set_codes: set[str] | None = None,
+    excluded_card_names: set[str] | None = None,
 ) -> list[dict]:
     """CURATED_THEMES (named EDH archetypes like Voltron or Reanimator,
     each backed by one or more underlying Oracle Tags -- see
@@ -478,7 +493,7 @@ def list_theme_options(
     and suggest_builder_cards's preferred_theme_tag_ids can just treat it
     as an opaque set to match against), "label", "count"}. Sorted by how
     many owned cards carry it, most first."""
-    candidates = _filter_candidates(wip_entries, owned_view, deck_format, target_format, commander_color_identity, None, excluded_set_codes)
+    candidates = _filter_candidates(wip_entries, owned_view, deck_format, target_format, commander_color_identity, None, excluded_set_codes, excluded_card_names)
     budget_alt = budget_alt_data_in_index()
     tag_by_name = budget_alt.get("tag_by_name") or {}
     tag_labels = budget_alt.get("tag_labels") or {}
@@ -510,6 +525,7 @@ def suggest_replacements(
     commander_color_identity: list[str] | None,
     limit: int = 6,
     excluded_set_codes: set[str] | None = None,
+    excluded_card_names: set[str] | None = None,
 ) -> list[dict]:
     """Owned, legal, color-correct cards that could swap in for
     target_name -- restricted to the same role it fills (see _card_role:
@@ -522,7 +538,7 @@ def suggest_replacements(
     Commander Spellbook combo check suggest_builder_cards makes -- this
     runs from a quick per-card popup, not a full re-suggest, so it stays
     local/instant."""
-    candidates = _filter_candidates(wip_entries, owned_view, deck_format, target_format, commander_color_identity, None, excluded_set_codes)
+    candidates = _filter_candidates(wip_entries, owned_view, deck_format, target_format, commander_color_identity, None, excluded_set_codes, excluded_card_names)
     if not candidates:
         return []
     budget_alt = budget_alt_data_in_index()
@@ -534,11 +550,22 @@ def suggest_replacements(
     # Same real, per-commander EDHREC synergy signal suggest_builder_cards
     # uses -- a replacement that's independently popular with this exact
     # commander is worth ranking above one that merely shares a generic
-    # role tag with the card being swapped out.
+    # role tag with the card being swapped out. edhrec_tracked_names is
+    # every name EDHREC returns at all (not just the positive-synergy
+    # subset in synergy_by_name) -- same fix as suggest_builder_cards's
+    # own rank_key: a card EDHREC has never seen paired with this
+    # commander shouldn't rank level with one 7000+ real decks play
+    # alongside it just because the latter's synergy score happens to be
+    # at or below zero (a strong generic staple often IS slightly
+    # negative -- played everywhere, not distinctively so with THIS
+    # commander -- which isn't the same thing as never played with it).
     synergy_by_name: dict[str, float] = {}
+    edhrec_tracked_names: set[str] = set()
     commander_entry = next((e for e in wip_entries if e.section == "commander"), None)
     if deck_format == "commander" and commander_entry:
-        for nm, info in commander_synergy_cards(commander_entry.name).items():
+        synergy_data = commander_synergy_cards(commander_entry.name)
+        edhrec_tracked_names = set(synergy_data.keys())
+        for nm, info in synergy_data.items():
             if info["synergy"] > 0:
                 synergy_by_name[nm] = info["synergy"]
 
@@ -554,7 +581,7 @@ def suggest_replacements(
     def rank_key(c: dict):
         nm = normalize_name(c["name"])
         shares_tag = target_tag is not None and tag_by_name.get(nm) == target_tag
-        return (-synergy_by_name.get(nm, 0.0), not shares_tag, nm not in game_changers, c["name"])
+        return (-synergy_by_name.get(nm, 0.0), nm not in edhrec_tracked_names, not shares_tag, nm not in game_changers, c["name"])
 
     same_role.sort(key=rank_key)
     tag_label = tag_labels.get(target_tag) if target_tag else None
@@ -591,6 +618,7 @@ def suggest_builder_cards(
     preferred_theme_tag_ids: list[str] | None = None,
     preferred_theme_label: str | None = None,
     excluded_set_codes: set[str] | None = None,
+    excluded_card_names: set[str] | None = None,
 ) -> list[dict]:
     """Fill-the-gaps auto-suggest: proposes owned, legal, color-correct
     cards to fill the remaining slots in a work-in-progress deck. This is
@@ -615,7 +643,13 @@ def suggest_builder_cards(
     at or above what WotC's own published bracket rules allow for that
     bracket (see WOTC_BRACKET_GAME_CHANGER_MAX), Game Changer candidates
     are excluded outright rather than suggested and then flagged later.
-    None (no preference) suggests freely, same as before this existed."""
+    None (no preference) suggests freely, same as before this existed.
+
+    `excluded_card_names` (normalized names), if given, are never
+    suggested -- see _filter_candidates' own docstring for why this
+    exists: a card with no EDHREC synergy data can still win a role on
+    generic theme-overlap alone, so simply cutting it from the deck isn't
+    enough to stop it coming right back the next time this is called."""
     # target_size is the *whole* deck (100 for Commander, matching WotC's
     # own rules -- 99 library + 1 commander); the commander itself never
     # counts toward the library, so the actual library target is one
@@ -635,7 +669,7 @@ def suggest_builder_cards(
     # without this a deck can overshoot its target by a full batch).
     max_suggestions = min(max_suggestions, remaining)
 
-    candidates = _filter_candidates(wip_entries, owned_view, deck_format, target_format, commander_color_identity, intended_bracket, excluded_set_codes)
+    candidates = _filter_candidates(wip_entries, owned_view, deck_format, target_format, commander_color_identity, intended_bracket, excluded_set_codes, excluded_card_names)
     if not candidates:
         return []
     game_changers = game_changers_in_index() if deck_format == "commander" else set()
@@ -673,10 +707,30 @@ def suggest_builder_cards(
     # own docstring for a real confirmed example. Best-effort: an unplayed/
     # brand-new commander or a network hiccup just yields {}, and every
     # candidate falls through to the existing theme/GC signals below.
+    # edhrec_tracked_names is deliberately EVERY name EDHREC returns for
+    # this commander, not just the positive-synergy subset in
+    # synergy_by_name below -- a real, user-caught design gap: a card with
+    # no entry at all (never appears on the commander's own EDHREC page,
+    # in ANY of its cardlists) used to be scored identically to one EDHREC
+    # tracks but scored at/below zero synergy for this specific commander
+    # (both landed at the same synergy_by_name.get(nm, 0.0) == 0.0), so
+    # generic theme-overlap alone could push a genuinely-never-played
+    # card (confirmed live: Aether Snap, absent from Atraxa's ~291-card
+    # EDHREC page entirely, has zero real players pairing it with her)
+    # ahead of real, on-role removal just because it happened to share a
+    # tag with cards already kept. "Just cut the bad pick and remember
+    # not to suggest it again" (excluded_card_names, above) only ever
+    # catches problems after a human already noticed one -- this instead
+    # makes real-world EDHREC presence itself outrank a same-tag guess,
+    # which is what actually being "EDHREC-driven" requires: prefer a
+    # card real Atraxa decks are known to play at all, even at neutral or
+    # slightly negative synergy, over one they're never seen playing.
     synergy_by_name: dict[str, float] = {}
+    edhrec_tracked_names: set[str] = set()
     commander_entry = next((e for e in wip_entries if e.section == "commander"), None)
     if deck_format == "commander" and commander_entry:
         synergy_data = commander_synergy_cards(commander_entry.name)
+        edhrec_tracked_names = set(synergy_data.keys())
         for nm, info in synergy_data.items():
             if info["synergy"] > 0:
                 synergy_by_name[nm] = info["synergy"]
@@ -746,8 +800,20 @@ def suggest_builder_cards(
         # generic theme signal -- a real, commander-specific number beats a
         # generic tag-category match. Negated so a HIGHER synergy score
         # sorts EARLIER (ascending sort, same convention every other field
-        # here already uses via `not in`).
-        return (nm not in reason_by_name, -synergy_by_name.get(nm, 0.0), nm not in theme_reason_by_name, nm not in game_changers, c["name"])
+        # here already uses via `not in`). Real EDHREC presence (tracked at
+        # all for this commander, regardless of synergy sign -- see
+        # edhrec_tracked_names above) outranks a pure theme-tag guess next,
+        # so "actually played with this commander" beats "shares a generic
+        # tag with cards already kept" whenever EDHREC has an opinion at
+        # all; theme-matching only decides among cards EDHREC is silent on.
+        return (
+            nm not in reason_by_name,
+            -synergy_by_name.get(nm, 0.0),
+            nm not in edhrec_tracked_names,
+            nm not in theme_reason_by_name,
+            nm not in game_changers,
+            c["name"],
+        )
 
     # Combo-completing candidates are pulled in up front, ahead of the
     # role-shape apportionment below -- rank_key only sorts them to the
@@ -967,6 +1033,7 @@ def optimize_builder_combos(
     commander_color_identity: list[str] | None,
     intended_bracket: str | None = None,
     excluded_set_codes: set[str] | None = None,
+    excluded_card_names: set[str] | None = None,
 ) -> list[dict]:
     """Second-pass optimizer for a deck that's already built (typically to
     its full target size). suggest_builder_cards()'s own combo-completion
@@ -1033,7 +1100,7 @@ def optimize_builder_combos(
     if not almost:
         return []
 
-    candidates = _filter_candidates(wip_entries, owned_view, deck_format, target_format, commander_color_identity, intended_bracket, excluded_set_codes)
+    candidates = _filter_candidates(wip_entries, owned_view, deck_format, target_format, commander_color_identity, intended_bracket, excluded_set_codes, excluded_card_names)
     candidates_by_name = {normalize_name(c["name"]): c for c in candidates}
 
     budget_alt = budget_alt_data_in_index()

@@ -1154,6 +1154,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
         "preferred_theme_tag_ids": brew.get("preferred_theme_tag_ids") or [],
         "preferred_theme_label": brew.get("preferred_theme_label") or "",
         "excluded_set_codes": brew.get("excluded_set_codes") or [],
+        "excluded_card_names": brew.get("excluded_card_names") or [],
         "ai_summary": brew.get("ai_summary") or "",
         "further_optimizations": brew.get("further_optimizations") or [],
         "maybeboard": brew.get("maybeboard") or [],
@@ -1253,6 +1254,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
           <button type="button" class="btn ghost small" id="set-selection-btn">Set Selection</button>
           <div class="set-selection-popup" id="set-selection-popup"></div>
         </div>
+        <button type="button" class="btn ghost small" id="avoided-btn" style="display:none;" title="Cards you've told Suggest/Optimize/Replace never to offer again for this deck"></button>
       </div>
     </div>
   </div>
@@ -1356,6 +1358,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
 
 <div id="battle-card"></div>
 <div id="replace-popup" class="replace-popup"></div>
+<div id="avoided-popup" class="replace-popup"></div>
 <script>
 let deckId = {json.dumps(deck_id)};
 let brew = {json.dumps(brew_state)};
@@ -1561,6 +1564,72 @@ function removeCard(name) {{
   renderAll();
 }}
 
+// Real, user-reported gap this closes: a card with no EDHREC synergy
+// data for the commander is scored as neutral, not negative, so it can
+// still win a role purely on generic theme-overlap with cards already in
+// the deck (confirmed live: cutting Aether Snap from an Atraxa build and
+// re-running Suggest for that one open slot brought it right back,
+// because it still shared a tag with 2 other cards already kept). Plain
+// removeCard() doesn't remember the cut, so Suggest has no way to know
+// not to offer it again -- this does, via brew.excluded_card_names
+// (threaded through every suggest/optimize/theme/replace call server-
+// side, see _excluded_card_names in app.py).
+function avoidCard(name) {{
+  brew.excluded_card_names = brew.excluded_card_names || [];
+  const nn = normalizeName(name);
+  if (!brew.excluded_card_names.includes(nn)) brew.excluded_card_names.push(nn);
+  renderAvoidedBtn();
+}}
+function removeCardAndAvoid(name) {{
+  avoidCard(name);
+  removeCard(name);
+}}
+function unavoidCard(nn) {{
+  brew.excluded_card_names = (brew.excluded_card_names || []).filter(n => n !== nn);
+  renderAvoidedBtn();
+}}
+
+// Review/undo surface for the avoid list -- a silent blacklist nobody can
+// see or fix would be its own bug (a card avoided by mistake, or one that
+// stops being a real fit once other cards change, would have no way
+// back). Only shown once non-empty, same "don't clutter the UI with a
+// feature nobody's used yet" convention as clear-cards-btn.
+const avoidedBtn = document.getElementById('avoided-btn');
+const avoidedPopup = document.getElementById('avoided-popup');
+function renderAvoidedBtn() {{
+  const names = brew.excluded_card_names || [];
+  avoidedBtn.style.display = names.length ? '' : 'none';
+  avoidedBtn.textContent = `Avoided cards (${{names.length}})`;
+  if (avoidedPopup.classList.contains('show')) renderAvoidedPopup();
+}}
+function renderAvoidedPopup() {{
+  const names = brew.excluded_card_names || [];
+  if (!names.length) {{ closeAvoidedPopup(); return; }}
+  avoidedPopup.innerHTML = '<h5>Never suggested again</h5>' +
+    names.map(nn => `
+      <div class="replace-item" data-nn="${{escapeHtml(nn)}}" style="cursor:default;">
+        <div style="flex:1;">${{escapeHtml(nn)}}</div>
+        <button type="button" class="btn ghost small" data-unavoid="${{escapeHtml(nn)}}">Un-avoid</button>
+      </div>`).join('');
+  avoidedPopup.querySelectorAll('[data-unavoid]').forEach(btn => {{
+    btn.addEventListener('click', () => unavoidCard(btn.dataset.unavoid));
+  }});
+}}
+function closeAvoidedPopup() {{ avoidedPopup.classList.remove('show'); }}
+avoidedBtn.addEventListener('click', () => {{
+  if (avoidedPopup.classList.contains('show')) {{ closeAvoidedPopup(); return; }}
+  const rect = avoidedBtn.getBoundingClientRect();
+  avoidedPopup.style.top = (rect.bottom + 6) + 'px';
+  avoidedPopup.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - 268)) + 'px';
+  avoidedPopup.classList.add('show');
+  renderAvoidedPopup();
+}});
+document.addEventListener('click', (e) => {{
+  if (avoidedPopup.classList.contains('show') && !avoidedPopup.contains(e.target) && e.target !== avoidedBtn) closeAvoidedPopup();
+}});
+document.addEventListener('keydown', (e) => {{ if (e.key === 'Escape') closeAvoidedPopup(); }});
+renderAvoidedBtn();
+
 document.getElementById('clear-cards-btn').addEventListener('click', () => {{
   if (!brew.cards.length) return;
   if (!confirm(`Remove all ${{brew.cards.length}} card(s) from this deck? Your commander is kept -- use its own Clear button to remove that separately.`)) return;
@@ -1620,7 +1689,7 @@ function loadThemeOptions() {{
   const requestId = ++themeRequestId;
   fetch('/builder/themes', {{
     method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
-    body: JSON.stringify({{ format: brew.format, target_format: brew.target_format, commander: brew.commander, cards: brew.cards, excluded_set_codes: brew.excluded_set_codes }}),
+    body: JSON.stringify({{ format: brew.format, target_format: brew.target_format, commander: brew.commander, cards: brew.cards, excluded_set_codes: brew.excluded_set_codes, excluded_card_names: brew.excluded_card_names }}),
   }})
     .then(r => r.json())
     .then(data => {{
@@ -1962,8 +2031,12 @@ function renderDeckList() {{
         className: 'btn ghost tile-icon-btn replace-btn', textContent: '\\u21c4', title: 'Suggest a replacement',
         onclick: (e) => openReplacePopup(e.currentTarget, c),
       }});
+      const avoidBtn = Object.assign(document.createElement('button'), {{
+        className: 'btn ghost tile-icon-btn', textContent: '🚫', title: 'Remove and never suggest this card again for this deck',
+        onclick: () => removeCardAndAvoid(c.name),
+      }});
       const removeBtn = Object.assign(document.createElement('button'), {{ className: 'btn danger small', textContent: 'Remove', onclick: () => removeCard(c.name) }});
-      controls.append(replaceBtn, removeBtn);
+      controls.append(replaceBtn, avoidBtn, removeBtn);
       row.appendChild(controls);
       div.appendChild(row);
     }});
@@ -1989,7 +2062,7 @@ function openReplacePopup(btn, card) {{
     body: JSON.stringify({{
       card_name: card.name, category: card.category, cards: brew.cards,
       commander: brew.commander, format: brew.format, target_format: brew.target_format,
-      excluded_set_codes: brew.excluded_set_codes,
+      excluded_set_codes: brew.excluded_set_codes, excluded_card_names: brew.excluded_card_names,
     }}),
   }})
     .then(r => r.json())
@@ -2270,7 +2343,7 @@ suggestBtn.addEventListener('click', () => {{
       cards: brew.cards, commander: brew.commander, format: brew.format, target_format: brew.target_format,
       mix_targets: brew.mix_targets, intended_bracket: brew.intended_bracket,
       preferred_theme_tag_ids: brew.preferred_theme_tag_ids, preferred_theme_label: brew.preferred_theme_label,
-      excluded_set_codes: brew.excluded_set_codes,
+      excluded_set_codes: brew.excluded_set_codes, excluded_card_names: brew.excluded_card_names,
     }}),
   }})
     .then(r => r.json())
@@ -2325,18 +2398,22 @@ suggestBtn.addEventListener('click', () => {{
           row.className = 'suggestion-row';
           row.dataset.full = scryfallImg(s.scryfall_id, 'normal') || '';
           row.innerHTML = `<span class="row-name">${{thumbHtml(s.scryfall_id, 'card-thumb small')}}<span>${{s.name}} ${{colorIconsHtml(s.color_identity)}}<div class="reason">${{s.reason}}</div></span></span>`;
+          const dropRow = () => {{
+            row.remove();
+            remaining = remaining.filter(x => x !== s);
+            refreshAddAllBtn();
+            catRemaining -= 1;
+            if (catRemaining <= 0) header.remove(); else header.textContent = `${{cat}} (${{catRemaining}})`;
+          }};
           const addBtn = Object.assign(document.createElement('button'), {{
             className: 'btn ghost small', textContent: '+ Add',
-            onclick: () => {{
-              addCard(s);
-              row.remove();
-              remaining = remaining.filter(x => x !== s);
-              refreshAddAllBtn();
-              catRemaining -= 1;
-              if (catRemaining <= 0) header.remove(); else header.textContent = `${{cat}} (${{catRemaining}})`;
-            }},
+            onclick: () => {{ addCard(s); dropRow(); }},
           }});
-          row.appendChild(addBtn);
+          const avoidBtn = Object.assign(document.createElement('button'), {{
+            className: 'btn ghost tile-icon-btn', textContent: '🚫', title: 'Never suggest this card again for this deck',
+            onclick: () => {{ avoidCard(s.name); dropRow(); }},
+          }});
+          row.append(addBtn, avoidBtn);
           panel.appendChild(row);
         }});
       }});
@@ -2360,6 +2437,7 @@ optimizeBtn.addEventListener('click', () => {{
     body: JSON.stringify({{
       cards: brew.cards, commander: brew.commander, format: brew.format, target_format: brew.target_format,
       intended_bracket: brew.intended_bracket, excluded_set_codes: brew.excluded_set_codes,
+      excluded_card_names: brew.excluded_card_names,
     }}),
   }})
     .then(r => r.json())
@@ -3040,6 +3118,7 @@ def builder_save():
         preferred_theme_tag_ids=body.get("preferred_theme_tag_ids") or [],
         preferred_theme_label=body.get("preferred_theme_label") or "",
         excluded_set_codes=body.get("excluded_set_codes") or [],
+        excluded_card_names=body.get("excluded_card_names") or [],
         ai_summary=body.get("ai_summary") or "",
         further_optimizations=body.get("further_optimizations") or [],
         maybeboard=body.get("maybeboard") or [],
@@ -3055,6 +3134,15 @@ def _excluded_set_codes(body: dict) -> set[str] | None:
     restriction" convention."""
     codes = {str(c).upper() for c in (body.get("excluded_set_codes") or []) if c}
     return codes or None
+
+
+def _excluded_card_names(body: dict) -> set[str] | None:
+    """Parses the "never suggest this again" list (see the deck-row/
+    suggestion-row avoid buttons) out of a /builder/suggest, /builder/
+    optimize, /builder/themes, or /builder/replace request body -- same
+    "falsy = no restriction" convention as _excluded_set_codes."""
+    names = {normalize_name(str(n)) for n in (body.get("excluded_card_names") or []) if n}
+    return names or None
 
 
 @app.route("/builder/suggest", methods=["POST"])
@@ -3091,6 +3179,7 @@ def builder_suggest():
         preferred_theme_tag_ids=body.get("preferred_theme_tag_ids") or None,
         preferred_theme_label=body.get("preferred_theme_label") or None,
         excluded_set_codes=_excluded_set_codes(body),
+        excluded_card_names=_excluded_card_names(body),
     )
     return jsonify(suggestions=suggestions)
 
@@ -3119,6 +3208,7 @@ def builder_optimize():
         commander_color_identity=commander.get("color_identity") if deck_format == "commander" else None,
         intended_bracket=body.get("intended_bracket") or None,
         excluded_set_codes=_excluded_set_codes(body),
+        excluded_card_names=_excluded_card_names(body),
     )
     return jsonify(proposals=proposals)
 
@@ -3145,6 +3235,7 @@ def builder_themes():
         wip_entries, owned_view, deck_format, body.get("target_format"),
         commander_color_identity=commander.get("color_identity") if deck_format == "commander" else None,
         excluded_set_codes=_excluded_set_codes(body),
+        excluded_card_names=_excluded_card_names(body),
     )
     return jsonify(themes=themes)
 
@@ -3173,6 +3264,7 @@ def builder_replace():
         card_name, body.get("category") or "", wip_entries, owned_view, deck_format, body.get("target_format"),
         commander_color_identity=commander.get("color_identity") if deck_format == "commander" else None,
         excluded_set_codes=_excluded_set_codes(body),
+        excluded_card_names=_excluded_card_names(body),
     )
     return jsonify(replacements=replacements)
 
