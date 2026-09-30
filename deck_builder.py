@@ -15,6 +15,8 @@ has to app.py/brewlist_cli.py.
 
 from __future__ import annotations
 
+import re
+
 from brewlist_core import (
     CardEntry,
     OwnedCard,
@@ -169,6 +171,38 @@ _ROLE_TAG_LABELS = {
         "counterspell-sorcery", "counterspell-sweeper", "counterspell with set mechanic",
     },
 }
+
+# Maps each real basic land type name to the WUBRG letter it produces --
+# used only by _dead_fetch_land_colors below.
+_BASIC_LAND_TYPE_COLORS = {"Plains": "W", "Island": "U", "Swamp": "B", "Mountain": "R", "Forest": "G"}
+_FETCH_LAND_RE = re.compile(r"[Ss]earch your library for an?\s+([^.]*?)\s+card")
+
+
+def _dead_fetch_land_colors(oracle_text: str, colors_allowed: set[str]) -> bool:
+    """True if oracle_text is a classic fetchland ("Search your library
+    for a Mountain or Plains card, ...") whose named basic land types are
+    ALL outside colors_allowed -- a real, user-caught bug: a card's own
+    color_identity is empty for a fetchland like this (it has no colored
+    mana symbols itself), so it passes the ordinary color-identity filter
+    in ANY deck regardless of what it can actually find, even one with no
+    matching basics at all. Confirmed live: for Zhulodok, Void Gorger
+    (colorless, color_identity []), Suggest offered Arid Mesa (Mountain
+    or Plains) alongside 6 other single-pair-colored fetches, none able
+    to ever find a target in a deck that would run Wastes, not a colored
+    basic -- 7 of 37 suggested lands were simply dead cards.
+
+    An UNCOLORED fetch ("search your library for a basic land card", no
+    specific type named -- Evolving Wilds/Terramorphic Expanse/Fabled
+    Passage) doesn't match _FETCH_LAND_RE's named-type check and is
+    always left alone here, since it can find any basic regardless of
+    color (Wastes included)."""
+    m = _FETCH_LAND_RE.search(oracle_text or "")
+    if not m:
+        return False
+    named_colors = {color for name, color in _BASIC_LAND_TYPE_COLORS.items() if name in m.group(1)}
+    if not named_colors:
+        return False  # names something else (e.g. a specific nonbasic), not a plain basic-type fetch
+    return not (named_colors & colors_allowed)
 
 
 def _role_member_names(groups: dict, tag_labels: dict) -> dict[str, frozenset[str]]:
@@ -449,6 +483,16 @@ def _filter_candidates(
         if gc_at_cap and normalize_name(c["name"]) in game_changers:
             continue
         if colors_allowed is not None and not set(c["color_identity"]).issubset(colors_allowed):
+            continue
+        # A classic fetchland's own color_identity is empty (no colored
+        # mana symbols in its text), so it passes the check above in ANY
+        # deck regardless of what it can actually find -- this catches
+        # the real, user-confirmed gap that check misses: a fetch whose
+        # named basic types (e.g. Arid Mesa's Mountain/Plains) don't
+        # overlap this deck's colors at all can never resolve to a real
+        # card, unlike an unrestricted "search for a basic land card"
+        # fetch (Evolving Wilds and friends), which is left alone here.
+        if colors_allowed is not None and _dead_fetch_land_colors(c.get("oracle_text") or "", colors_allowed):
             continue
         if legality_key:
             legality = (c.get("legalities") or {}).get(legality_key)
