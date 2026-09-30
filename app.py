@@ -933,7 +933,16 @@ body::after {
 .replace-popup .hint { margin:4px; }
 #deck-list { max-height:38vh; overflow-y:auto; padding-right:4px; }
 #suggestions-panel { margin-top:10px; max-height:38vh; overflow-y:auto; padding-right:4px; }
-#suggestions-panel .suggestion-row { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid var(--card-border); font-size:0.82rem; }
+/* justify-content:flex-start, not space-between -- a real, user-reported
+   "this looks broken" case: .row-name is only as wide as its own content
+   (no flex-grow), so space-between put ALL of the row's leftover width
+   as one dead gap directly between the reason text and the action
+   icons, stranding them at the far edge whenever the reason text is
+   short (e.g. "fills out Lands") in a wide panel. flex-start lets the
+   icons sit snug right after the text instead, pushing any leftover
+   empty space to the row's trailing edge where it isn't visually
+   jarring, matching how a normal name-then-actions list row reads. */
+#suggestions-panel .suggestion-row { display:flex; justify-content:flex-start; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid var(--card-border); font-size:0.82rem; }
 /* A long "reason" line (e.g. "high synergy with your commander (per
    EDHREC, 26%)") wraps to 2 lines by design, but that grows .row-name's
    flex item -- without this, the "+ Add" button (a plain .btn, unlike
@@ -1304,7 +1313,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
       <button type="button" class="btn ghost small" id="optimize-btn" style="margin-bottom:10px;" title="Looks for real, owned combos you're exactly one card away from completing, and proposes swaps to add them -- useful after Suggest cards has already filled the deck, since a full batch can't always see a combo piece it's about to add in that same batch">&#9889; Optimize Deck</button>
       <div id="commander-slot-wrap"></div>
       <div id="suggestions-panel"></div>
-      <button type="button" class="btn danger small" id="clear-cards-btn" style="display:none;margin-bottom:6px;">Clear All Cards</button>
+      <button type="button" class="btn danger small" id="clear-cards-btn" style="display:none;margin-top:14px;margin-bottom:6px;">Clear All Cards</button>
       <div id="deck-list"></div>
     </div>
   </div>
