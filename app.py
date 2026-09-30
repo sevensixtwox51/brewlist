@@ -934,6 +934,13 @@ body::after {
 #deck-list { max-height:38vh; overflow-y:auto; padding-right:4px; }
 #suggestions-panel { margin-top:10px; max-height:38vh; overflow-y:auto; padding-right:4px; }
 #suggestions-panel .suggestion-row { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid var(--card-border); font-size:0.82rem; }
+/* A long "reason" line (e.g. "high synergy with your commander (per
+   EDHREC, 26%)") wraps to 2 lines by design, but that grows .row-name's
+   flex item -- without this, the "+ Add" button (a plain .btn, unlike
+   the fixed-size .tile-icon-btn avoid button next to it) had no
+   flex-shrink:0/white-space:nowrap of its own, so the flex layout could
+   squeeze it enough to wrap its own text into "+"/"Add" on two lines. */
+#suggestions-panel .suggestion-row > button { flex-shrink:0; white-space:nowrap; }
 #suggestions-panel .row-name { display:flex; align-items:center; gap:8px; min-width:0; }
 #suggestions-panel .reason { color:var(--text-dim); font-size:0.72rem; }
 .segmented { display:flex; border:1px solid var(--card-border); border-radius:8px; overflow:hidden; }
