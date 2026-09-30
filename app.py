@@ -1520,7 +1520,15 @@ function findCard(name) {{
 }}
 
 function isCommanderEligible(card) {{
-  return card.type_line.includes('Legendary') && card.type_line.includes('Creature');
+  // The full rule (CR 903.3): a legendary creature, OR any card that says
+  // it "can be your commander" -- real, user-reported gap this closes:
+  // Jace, Multiverse Architect (Legendary Planeswalker, not a creature)
+  // has that exact override text and genuinely can be a commander, but
+  // wasn't selectable here since only the type-line half of the rule was
+  // checked. oracle_text is already carried on every card object at no
+  // extra cost (see owned_collection_gameplay_view), so this is free.
+  if (card.type_line.includes('Legendary') && card.type_line.includes('Creature')) return true;
+  return (card.oracle_text || '').includes('can be your commander');
 }}
 
 function setCommander(card) {{
@@ -3061,7 +3069,16 @@ def builder_commander_popularity():
     except ValueError as e:
         return jsonify(error=str(e)), 400
     cards = owned_collection_gameplay_view(owned, gameplay_data_in_index())
-    names = [c["name"] for c in cards if "Legendary" in c["type_line"] and "Creature" in c["type_line"]]
+    # Same full commander rule as the client's isCommanderEligible (CR
+    # 903.3): a legendary creature, OR any card whose own text says it
+    # "can be your commander" -- without the second half, a real,
+    # commander-eligible card (e.g. Jace, Multiverse Architect) that isn't
+    # a creature would never get an EDHREC popularity rank fetched for it.
+    names = [
+        c["name"] for c in cards
+        if ("Legendary" in c["type_line"] and "Creature" in c["type_line"])
+        or "can be your commander" in (c.get("oracle_text") or "")
+    ]
     popularity = bulk_commander_popularity(names)
     status = edhrec_top_list_status()
     return jsonify(
