@@ -933,23 +933,27 @@ body::after {
 .replace-popup .hint { margin:4px; }
 #deck-list { max-height:38vh; overflow-y:auto; padding-right:4px; }
 #suggestions-panel { margin-top:10px; max-height:38vh; overflow-y:auto; padding-right:4px; }
-/* justify-content:flex-start, not space-between -- a real, user-reported
-   "this looks broken" case: .row-name is only as wide as its own content
-   (no flex-grow), so space-between put ALL of the row's leftover width
-   as one dead gap directly between the reason text and the action
-   icons, stranding them at the far edge whenever the reason text is
-   short (e.g. "fills out Lands") in a wide panel. flex-start lets the
-   icons sit snug right after the text instead, pushing any leftover
-   empty space to the row's trailing edge where it isn't visually
-   jarring, matching how a normal name-then-actions list row reads. */
-#suggestions-panel .suggestion-row { display:flex; justify-content:flex-start; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid var(--card-border); font-size:0.82rem; }
+/* space-between, matching .deck-row's own replace/remove buttons -- a
+   real, direct user correction of an earlier attempt here: flex-start
+   left the icons trailing right after the reason text, so their
+   position drifted left/right per row depending on how long that row's
+   card name/reason happened to be, instead of forming a single
+   consistent right-hand column the way .deck-row's controls do. */
+#suggestions-panel .suggestion-row { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid var(--card-border); font-size:0.82rem; }
 /* A long "reason" line (e.g. "high synergy with your commander (per
    EDHREC, 26%)") wraps to 2 lines by design, but that grows .row-name's
-   flex item -- without this, the "+ Add" button (a plain .btn, unlike
-   the fixed-size .tile-icon-btn avoid button next to it) had no
-   flex-shrink:0/white-space:nowrap of its own, so the flex layout could
-   squeeze it enough to wrap its own text into "+"/"Add" on two lines. */
+   flex item -- without this, a plain .btn button as a direct flex child
+   (Optimize's "Apply", Maybeboard's own lone "+") had no flex-shrink:0/
+   white-space:nowrap of its own, so the flex layout could squeeze it
+   enough to wrap its own text onto two lines. */
 #suggestions-panel .suggestion-row > button { flex-shrink:0; white-space:nowrap; }
+/* Groups the Suggest panel's own +/no-symbol pair into one flex item
+   (mirroring .deck-row .qty-controls) so space-between above treats them
+   as a single right-hand block -- with 3 separate top-level flex
+   children instead (.row-name, +, no-symbol) space-between only pins
+   the LAST one flush right, leaving the "+" button's position drifting
+   per row depending on how much space .row-name happened to take. */
+#suggestions-panel .suggestion-actions { display:flex; align-items:center; gap:4px; flex-shrink:0; }
 #suggestions-panel .row-name { display:flex; align-items:center; gap:8px; min-width:0; }
 #suggestions-panel .reason { color:var(--text-dim); font-size:0.72rem; }
 .segmented { display:flex; border:1px solid var(--card-border); border-radius:8px; overflow:hidden; }
@@ -2437,7 +2441,9 @@ suggestBtn.addEventListener('click', () => {{
             className: 'btn ghost tile-icon-btn', textContent: '🚫', title: 'Never suggest this card again for this deck',
             onclick: () => {{ avoidCard(s.name); dropRow(); }},
           }});
-          row.append(addBtn, avoidBtn);
+          const actions = Object.assign(document.createElement('div'), {{ className: 'suggestion-actions' }});
+          actions.append(addBtn, avoidBtn);
+          row.appendChild(actions);
           panel.appendChild(row);
         }});
       }});
