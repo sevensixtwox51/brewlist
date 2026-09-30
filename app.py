@@ -2421,7 +2421,7 @@ suggestBtn.addEventListener('click', () => {{
             if (catRemaining <= 0) header.remove(); else header.textContent = `${{cat}} (${{catRemaining}})`;
           }};
           const addBtn = Object.assign(document.createElement('button'), {{
-            className: 'btn ghost small', textContent: '+ Add',
+            className: 'btn ghost tile-icon-btn', textContent: '+', title: 'Add to deck',
             onclick: () => {{ addCard(s); dropRow(); }},
           }});
           const avoidBtn = Object.assign(document.createElement('button'), {{
@@ -2552,7 +2552,7 @@ function renderMaybeboard() {{
     const replacesNote = c.replaces ? ` &mdash; could replace ${{escapeHtml(c.replaces)}}` : '';
     row.innerHTML = `<span class="row-name">${{thumbHtml(c.scryfall_id, 'card-thumb small')}}<span>${{escapeHtml(c.name)}} ${{colorIconsHtml(c.color_identity)}}<div class="reason">${{escapeHtml(c.reason)}}${{replacesNote}}</div></span></span>`;
     const addBtn = Object.assign(document.createElement('button'), {{
-      className: 'btn ghost small', textContent: '+ Add',
+      className: 'btn ghost tile-icon-btn', textContent: '+', title: 'Add to deck',
       onclick: () => {{
         addCard(c);
         brew.maybeboard = brew.maybeboard.filter(x => x !== c);
