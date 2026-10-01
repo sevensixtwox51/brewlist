@@ -1300,7 +1300,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
         <select id="filter-category"><option value="">All types</option><option value="Commander">Commander</option>{category_options}</select>
         <select id="filter-color"><option value="">Any color</option><option value="C">Colorless</option><optgroup label="One-Color">{color_options}</optgroup>{color_family_optgroups}</select>
         <label class="exact-color-toggle" title="Only show cards whose color identity is exactly the selected color(s) -- e.g. true Grixis cards, not also mono-colored or two-color ones that merely fit within Grixis">
-          <input type="checkbox" id="filter-color-exact"> Exact colors
+          <input type="checkbox" id="filter-color-exact" checked> Exact colors
         </label>
         <div class="set-selection-field">
           <button type="button" class="btn ghost small" id="grid-set-filter-btn">Set</button>
