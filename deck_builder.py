@@ -1104,21 +1104,27 @@ def suggest_builder_cards(
             # any role with spare *pool* capacity beyond its own target,
             # biggest pool first, repeating until nothing more fits.
             #
-            # "Lands" is excluded from ever receiving MORE than its own
-            # role_targets["Lands"] here -- a real, user-reported bug: a
-            # single Suggest click for Thranduil, the Elvenking (a 3-color
-            # commander whose owned card pool happened to have zero
-            # "Draw"-tagged candidates) landed 41 lands instead of the
-            # ~38 target, because "Lands" naturally has by far the
-            # largest, least-restricted candidate pool (any land is
-            # legal in any deck) and this loop hands leftover slots to
-            # whichever role has the biggest *pool*, round-robin, with no
-            # regard for whether going over that role's own target is
-            # actually harmless. It isn't, for lands specifically --
-            # flooding is a real functional downside a Suggest click
-            # should never introduce on its own, unlike "a few extra
-            # Ramp/Interaction/Synergy picks," which is just more good
-            # cards. Those roles keep the original uncapped behavior.
+            # Every role is capped at its OWN role_targets value here --
+            # originally this only capped "Lands" (a single Suggest click
+            # for Thranduil, the Elvenking landed 41 lands instead of the
+            # ~38 target, back when a color pair with zero "Draw"
+            # candidates dumped its whole shortfall into whichever role
+            # had the single biggest raw pool), on the reasoning that "a
+            # few extra Ramp/Interaction/Synergy picks is just more good
+            # cards." That reasoning breaks down at scale: confirmed live
+            # for Zhulodok, Void Gorger (colorless) -- once today's dead-
+            # mana-source fixes correctly shrank the real Lands pool to
+            # 24 (this collection's actual count of GOOD colorless lands,
+            # not a bug) and Draw's pool was already thin, this exact loop
+            # dumped all 19 leftover slots into Ramp/Synergy uncapped,
+            # landing Ramp at 20 -- double its 10-card target -- while
+            # Lands and Draw stayed starved. A lopsided role is a lopsided
+            # role regardless of which one floods; capping every role the
+            # same way Lands already was just means a batch can come back
+            # short of the full count when the collection genuinely lacks
+            # enough good cards for the ideal shape, which is the honest
+            # outcome -- better than silently cramming extra Ramp in to
+            # hit a number.
             changed = True
             while leftover > 0 and changed:
                 changed = False
@@ -1127,7 +1133,7 @@ def suggest_builder_cards(
                         break
                     if not role_candidates[role]:
                         continue
-                    role_cap = role_targets.get(role) if role == "Lands" else len(role_candidates[role])
+                    role_cap = role_targets.get(role, len(role_candidates[role]))
                     if role_cap is not None and role_slots.get(role, 0) < min(role_cap, len(role_candidates[role])):
                         role_slots[role] = role_slots.get(role, 0) + 1
                         leftover -= 1
