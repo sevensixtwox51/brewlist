@@ -269,6 +269,40 @@ def _useless_type_granting_land(oracle_text: str, colors_allowed: set[str]) -> b
     return not _PLAIN_COLORLESS_MANA_RE.search(oracle_text or "")
 
 
+# Deliberately matches only a bare "any color"/"any one color"/"the chosen
+# color" ability -- NOT "...in your commander's color identity" (that's
+# _dead_commander_identity_mana's own, differently-gated case) and NOT
+# "...of any TYPE a land you control could produce" (Reflecting Pool: real
+# MTG rules distinguish "type" -- which includes colorless -- from "color",
+# which never does, so that one genuinely can mirror a {C} source and stays
+# fine). The negative lookahead keeps the two functions' concerns separate.
+_ARBITRARY_COLOR_MANA_RE = re.compile(
+    r"[Aa]dd [a-z]+ mana of (?:any one color|any color|the chosen color)\b(?! in your commander)"
+)
+
+
+def _useless_arbitrary_color_mana(oracle_text: str, colors_allowed: set[str]) -> bool:
+    """True if oracle_text's mana ability only ever produces a real WUBRG
+    color -- player-chosen (Gilded Lotus, Command Bridge, Crossroads
+    Village, Room of Refuge) or dependent on what a land you/an opponent
+    controls could produce (Fellwar Stone, Exotic Orchard) -- with no
+    colorless fallback of its own, and colors_allowed is empty.
+
+    This is explicitly NOT the same as the two checks above: a card like
+    this is excellent, completely normal fixing for any real colored
+    commander (that IS exactly the flexible mana such a deck wants), so
+    this only ever excludes it for a colorless commander specifically --
+    where "any color" can never include the one thing the deck actually
+    needs ({C}), and every other mana source already suggested covers
+    both generic costs AND {C} costs, making this strictly the worse
+    pick regardless of which specific color it happens to produce."""
+    if colors_allowed:
+        return False
+    if not _ARBITRARY_COLOR_MANA_RE.search(oracle_text or ""):
+        return False
+    return not _PLAIN_COLORLESS_MANA_RE.search(oracle_text or "")
+
+
 def _role_member_names(groups: dict, tag_labels: dict) -> dict[str, frozenset[str]]:
     """{role: {normalized_card_name, ...}} -- the real, full membership of
     every _ROLE_TAG_LABELS tag for each role, from budget_alt_data_in_
@@ -568,6 +602,16 @@ def _filter_candidates(
         if colors_allowed is not None and _dead_commander_identity_mana(c.get("oracle_text") or "", colors_allowed):
             continue
         if colors_allowed is not None and _useless_type_granting_land(c.get("oracle_text") or "", colors_allowed):
+            continue
+        # A third, softer shape, only for a truly colorless commander:
+        # Command Bridge/Crossroads Village/Room of Refuge/Gilded Lotus/
+        # Fellwar Stone all produce a REAL, usable color -- fine fixing
+        # for any colored deck -- but with no {C} fallback, so for a
+        # colorless commander they can pay a generic cost and nothing
+        # else, while every other suggested mana source already does
+        # that AND covers {C}. User-requested exclusion, not a "legal
+        # but zero function" bug like the two checks above.
+        if colors_allowed is not None and _useless_arbitrary_color_mana(c.get("oracle_text") or "", colors_allowed):
             continue
         if legality_key:
             legality = (c.get("legalities") or {}).get(legality_key)
