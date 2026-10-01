@@ -205,6 +205,70 @@ def _dead_fetch_land_colors(oracle_text: str, colors_allowed: set[str]) -> bool:
     return not (named_colors & colors_allowed)
 
 
+_COMMANDER_IDENTITY_MANA_RE = re.compile(r"[Aa]dd (?:one mana of )?any color in your commander'?s color identity")
+_PLAIN_COLORLESS_MANA_RE = re.compile(r"\{T\}[^.\n]*:\s*Add \{C\}")
+
+
+def _dead_commander_identity_mana(oracle_text: str, colors_allowed: set[str]) -> bool:
+    """True if oracle_text's ONLY mana ability is the templated "Add one
+    mana of any color in your commander's color identity" (Arcane Signet,
+    Commander's Sphere, Command Tower, Hidden Hideout, Path of Ancestry,
+    and a handful of others all share this exact wording) and
+    colors_allowed -- the commander's actual color identity -- is empty,
+    meaning "any color in your commander's color identity" is asking for
+    one of zero colors: the ability produces nothing at all. Real,
+    user-caught bug, same shape as _dead_fetch_land_colors above:
+    confirmed live for Zhulodok, Void Gorger (colorless) -- Command
+    Tower, one of the most automatic includes in Commander, was being
+    suggested as a land despite being completely nonfunctional for this
+    specific commander.
+
+    Never excludes a card that ALSO has an unconditional colorless
+    ability elsewhere in its text (Opal Palace's own separate "{T}: Add
+    {C}." keeps it useful even though its bonus color-identity-gated
+    ability is equally dead here) -- only the cards whose color-identity
+    ability is their sole means of producing mana at all."""
+    if colors_allowed:
+        return False  # a real commander color exists, so "any color in identity" produces something
+    if not _COMMANDER_IDENTITY_MANA_RE.search(oracle_text or ""):
+        return False
+    return not _PLAIN_COLORLESS_MANA_RE.search(oracle_text or "")
+
+
+_LAND_TYPE_GRANT_RE = re.compile(r"is an?\s+(Plains|Island|Swamp|Mountain|Forest)\b")
+
+
+def _useless_type_granting_land(oracle_text: str, colors_allowed: set[str]) -> bool:
+    """True if oracle_text's only effect is granting a single basic land
+    type (Urborg, Tomb of Yawgmoth: "Each land is a Swamp in addition to
+    its other land types.") whose color isn't in colors_allowed, and the
+    land has no other guaranteed mana ability of its own.
+
+    A real, user-caught distinction from the two checks above: this
+    doesn't add any mana a land wouldn't already have -- it only changes
+    what color is available (Urborg itself has no mana ability printed on
+    it at all; its only output is the {T}: Add {B} it gains BY becoming a
+    Swamp). For a deck that can never spend that color -- confirmed for
+    Zhulodok, Void Gorger (colorless): black mana can pay a generic cost
+    but never Zhulodok's own {C} pip, so trading a land's natural output
+    for Urborg's black is pure downside, never a reason to include it --
+    this is exactly as useless in practice as a land with no ability at
+    all, even though it technically still taps for something.
+
+    Note Urborg's own color_identity is empty (the grant is plain English,
+    "is a Swamp", not a printed {B} symbol), so it passes the ordinary
+    color-identity filter in ANY deck regardless of whether that deck can
+    use black -- the same gap _dead_fetch_land_colors closes for
+    fetchlands, here for a type-granting land instead."""
+    m = _LAND_TYPE_GRANT_RE.search(oracle_text or "")
+    if not m:
+        return False
+    color = _BASIC_LAND_TYPE_COLORS.get(m.group(1))
+    if not color or color in colors_allowed:
+        return False
+    return not _PLAIN_COLORLESS_MANA_RE.search(oracle_text or "")
+
+
 def _role_member_names(groups: dict, tag_labels: dict) -> dict[str, frozenset[str]]:
     """{role: {normalized_card_name, ...}} -- the real, full membership of
     every _ROLE_TAG_LABELS tag for each role, from budget_alt_data_in_
@@ -493,6 +557,17 @@ def _filter_candidates(
         # card, unlike an unrestricted "search for a basic land card"
         # fetch (Evolving Wilds and friends), which is left alone here.
         if colors_allowed is not None and _dead_fetch_land_colors(c.get("oracle_text") or "", colors_allowed):
+            continue
+        # Same empty-color_identity-but-functionally-useless gap, two more
+        # shapes: a mana ability that only works for colors "in your
+        # commander's color identity" (Command Tower, Arcane Signet, ...)
+        # produces nothing when that identity is empty; a land that only
+        # grants a single off-identity basic land type (Urborg) changes
+        # what color is available rather than adding any -- see each
+        # function's own docstring for the full reasoning.
+        if colors_allowed is not None and _dead_commander_identity_mana(c.get("oracle_text") or "", colors_allowed):
+            continue
+        if colors_allowed is not None and _useless_type_granting_land(c.get("oracle_text") or "", colors_allowed):
             continue
         if legality_key:
             legality = (c.get("legalities") or {}).get(legality_key)
