@@ -26,6 +26,7 @@ from brewlist_core import (
     find_deck_combos,
     game_changers_in_index,
     normalize_name,
+    prices_data_in_index,
 )
 from edhrec_data import commander_synergy_cards
 
@@ -176,6 +177,12 @@ _ROLE_TAG_LABELS = {
 # used only by _dead_fetch_land_colors below.
 _BASIC_LAND_TYPE_COLORS = {"Plains": "W", "Island": "U", "Swamp": "B", "Mountain": "R", "Forest": "G"}
 _FETCH_LAND_RE = re.compile(r"[Ss]earch your library for an?\s+([^.]*?)\s+card")
+
+# Supertypes that belong to a separate special deck (Planechase/Archenemy/
+# Vanguard), never a normal 100-card Commander library -- see
+# _filter_candidates' own usage for the real bug this closes. Word-
+# boundaried so "Plane" doesn't also match "Planeswalker".
+_NON_LIBRARY_TYPE_RE = re.compile(r"\b(?:Plane|Phenomenon|Scheme|Vanguard)\b")
 
 
 def _dead_fetch_land_colors(oracle_text: str, colors_allowed: set[str]) -> bool:
@@ -460,6 +467,38 @@ def owned_collection_gameplay_view(owned: dict[str, OwnedCard], gameplay: dict[s
     return view
 
 
+def full_card_pool_gameplay_view(gameplay: dict[str, dict], exclude_names: set[str]) -> list[dict]:
+    """Every real paper card gameplay_data_in_index() knows about (the
+    full MTGJSON pool, not just owned ones), shaped identically to
+    owned_collection_gameplay_view's own per-card dicts so it can be run
+    through the exact same _filter_candidates legality/color-identity/
+    dead-mana-source checks suggest_builder_cards already applies to
+    owned cards -- see its own purchase-suggestion fallback. quantity is
+    fixed at 1 (a single copy is always enough to suggest buying one);
+    there's no real owned printing to report set_code/collector_number
+    from. `exclude_names` (normalized) drops anything already owned --
+    there's nothing to suggest buying for those."""
+    view = []
+    for name, gp in gameplay.items():
+        if name in exclude_names:
+            continue
+        view.append({
+            "name": gp.get("name") or name,
+            "quantity": 1,
+            "type_line": gp.get("type_line") or "",
+            "mana_cost": gp.get("mana_cost") or "",
+            "cmc": gp.get("cmc") or 0,
+            "color_identity": gp.get("color_identity") or [],
+            "category": categorize(gp.get("type_line") or ""),
+            "scryfall_id": gp.get("scryfall_id"),
+            "set_code": "",
+            "collector_number": "",
+            "legalities": gp.get("legalities") or {},
+            "oracle_text": gp.get("oracle_text") or "",
+        })
+    return view
+
+
 def owned_set_options(owned: dict[str, OwnedCard], sets_data: dict[str, dict]) -> list[dict]:
     """Every set code that's some card's *representative* printing (the
     first one, same `printings[0]` pick owned_collection_gameplay_view
@@ -573,6 +612,20 @@ def _filter_candidates(
     candidates = []
     for c in owned_view:
         if normalize_name(c["name"]) in used_names:
+            continue
+        # Real, user-caught bug: a Plane card ("Artist Alley", type_line
+        # "Plane — MagicCon") got suggested as a library card entirely.
+        # These supertypes belong to a separate special deck (Planechase/
+        # Archenemy/Vanguard), never the main 100-card Commander library,
+        # but MTGJSON's bulk data carries an EMPTY legalities dict for
+        # them -- not an explicit "not_legal" -- so the legality check
+        # below (whose "missing = allowed" convention exists specifically
+        # for ordinary untracked cards in Commander) let it straight
+        # through. This is a correctness check, not a color/format one --
+        # applies unconditionally, independent of colors_allowed/
+        # legality_key, and would equally apply to an owned copy of one
+        # of these, not just a purchase suggestion.
+        if _NON_LIBRARY_TYPE_RE.search(c.get("type_line") or ""):
             continue
         if excluded_set_codes and (c.get("set_code") or "").upper() in excluded_set_codes:
             continue
@@ -782,6 +835,7 @@ def suggest_builder_cards(
     preferred_theme_label: str | None = None,
     excluded_set_codes: set[str] | None = None,
     excluded_card_names: set[str] | None = None,
+    gameplay: dict[str, dict] | None = None,
 ) -> list[dict]:
     """Fill-the-gaps auto-suggest: proposes owned, legal, color-correct
     cards to fill the remaining slots in a work-in-progress deck. This is
@@ -791,6 +845,18 @@ def suggest_builder_cards(
     AI-generated guesses" approach the existing budget-alternative
     suggestions use (in fact the exact same Scryfall Oracle Tags data,
     see budget_alt_data_in_index).
+
+    `gameplay` (gameplay_data_in_index()'s full MTGJSON pool), if given,
+    backs a purchase-suggestion fallback: once owned candidates are
+    exhausted, any role still short of its own target (e.g. a colorless
+    commander whose owned collection only has 24 of the ~37 lands a
+    real build wants) gets filled from the full card pool instead of
+    just coming back short, each result marked owned: False with a real
+    price (prices_data_in_index -- the same free, already-loaded local
+    data /compare's shopping list already uses, no live API call). None
+    (the default) skips this entirely and preserves the exact prior
+    behavior -- every existing caller that doesn't pass it still only
+    ever suggests owned cards.
 
     `preferred_theme_tag_ids`/`preferred_theme_label` (the "tag_ids"/
     "label" of one option from list_theme_options -- a curated theme's
@@ -1173,6 +1239,59 @@ def suggest_builder_cards(
             if normalize_name(picked["name"]) in game_changers:
                 running_gc_count += 1
 
+    # Purchase-suggestion fallback: a role whose OWNED pool simply isn't
+    # big enough to reach its own target (role_slots[role] was already
+    # capped at len(role_candidates[role]) above) would otherwise just
+    # come back short -- real, confirmed case: Zhulodok, Void Gorger
+    # (colorless) has only 24 owned lands worth suggesting against a ~37
+    # target. Rather than silently returning fewer cards than asked for,
+    # fill the remainder from the full card pool when the caller passed
+    # one, clearly marked as a purchase (owned: False) rather than mixed
+    # in indistinguishably.
+    unowned_picks: list[tuple[dict, str]] = []
+    shortfall = {role: max(0, role_targets.get(role, 0) - added_counts.get(role, 0)) for role in role_targets}
+    if gameplay and len(ordered) < max_suggestions and any(shortfall.values()):
+        owned_or_used_names = {normalize_name(c["name"]) for c in owned_view} | used_names
+        full_pool = full_card_pool_gameplay_view(gameplay, owned_or_used_names)
+        unowned_candidates = _filter_candidates(
+            wip_entries, full_pool, deck_format, target_format, commander_color_identity,
+            intended_bracket, excluded_set_codes, excluded_card_names,
+        )
+        unowned_by_role: dict[str, list[dict]] = {}
+        for c in unowned_candidates:
+            unowned_by_role.setdefault(role_of(c["name"], c["category"]), []).append(c)
+        for role, pool in unowned_by_role.items():
+            pool.sort(key=rank_key)
+        for role, need in shortfall.items():
+            pool = unowned_by_role.get(role) or []
+            i = 0
+            taken = 0
+            while taken < need and i < len(pool) and len(ordered) + len(unowned_picks) < max_suggestions:
+                candidate = pool[i]
+                i += 1
+                is_gc = normalize_name(candidate["name"]) in game_changers
+                if gc_cap is not None and is_gc and running_gc_count >= gc_cap:
+                    continue
+                unowned_picks.append((candidate, role))
+                taken += 1
+                if is_gc:
+                    running_gc_count += 1
+
+    prices = prices_data_in_index() if unowned_picks else {}
+
+    def _cheapest_price(nm: str) -> tuple[float, str] | tuple[None, None]:
+        """(price, purchase_url) for the cheapest listed nonfoil (falling
+        back to foil), cheapest-store-first per prices_data_in_index's own
+        convention -- a real, user-caught gap: a bare price with no link
+        to actually buy the card isn't a purchase suggestion, just a
+        number."""
+        entry = prices.get(nm) or {}
+        for finish in ("nonfoil", "foil"):
+            rows = entry.get(finish)
+            if rows:
+                return rows[0][1], rows[0][2]
+        return None, None
+
     suggestions = []
     for c in ordered:
         nm = normalize_name(c["name"])
@@ -1190,6 +1309,27 @@ def suggest_builder_cards(
             "set_code": c["set_code"],
             "collector_number": c["collector_number"],
             "reason": reason_by_name.get(nm) or synergy_reason or theme_reason_by_name.get(nm) or fallback_reason,
+            "owned": True,
+        })
+    for c, role in unowned_picks:
+        nm = normalize_name(c["name"])
+        synergy_reason = _synergy_reason(synergy_by_name.get(nm))
+        fallback_reason = f"not owned -- would fill out {role}"
+        price, price_url = _cheapest_price(nm)
+        suggestions.append({
+            "name": c["name"],
+            "scryfall_id": c["scryfall_id"],
+            "category": c["category"],
+            "type_line": c["type_line"],
+            "color_identity": c["color_identity"],
+            "cmc": c["cmc"],
+            "mana_cost": c["mana_cost"],
+            "set_code": c["set_code"],
+            "collector_number": c["collector_number"],
+            "reason": reason_by_name.get(nm) or synergy_reason or fallback_reason,
+            "owned": False,
+            "price": price,
+            "price_url": price_url,
         })
     return suggestions
 

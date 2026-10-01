@@ -956,6 +956,20 @@ body::after {
 #suggestions-panel .suggestion-actions { display:flex; align-items:center; gap:4px; flex-shrink:0; }
 #suggestions-panel .row-name { display:flex; align-items:center; gap:8px; min-width:0; }
 #suggestions-panel .reason { color:var(--text-dim); font-size:0.72rem; }
+/* Purchase-suggestion fallback (see suggest_builder_cards's gameplay
+   param) -- a role whose owned pool can't reach its own target gets
+   filled from the full card pool instead of coming back short. Needs to
+   read as clearly distinct from an owned suggestion, not blended in. */
+#suggestions-panel .suggestion-row.unowned { background:color-mix(in srgb, var(--gold) 6%, transparent); border-radius:6px; padding-left:6px; margin-left:-6px; }
+.unowned-badge {
+  display:inline-block; margin-left:6px; padding:1px 7px; border-radius:999px;
+  background:color-mix(in srgb, var(--gold) 18%, transparent);
+  border:1px solid color-mix(in srgb, var(--gold) 45%, var(--card-border));
+  color:var(--gold); font-size:0.68rem; font-weight:600; vertical-align:1px;
+  text-decoration:none; cursor:default;
+}
+a.unowned-badge { cursor:pointer; }
+a.unowned-badge:hover { background:color-mix(in srgb, var(--gold) 28%, transparent); }
 .segmented { display:flex; border:1px solid var(--card-border); border-radius:8px; overflow:hidden; }
 .segmented .seg-btn {
   border:none; background:var(--bg); color:var(--text-dim); padding:8px 14px;
@@ -2423,9 +2437,15 @@ suggestBtn.addEventListener('click', () => {{
         panel.appendChild(header);
         byCategory[cat].forEach(s => {{
           const row = document.createElement('div');
-          row.className = 'suggestion-row';
+          row.className = 'suggestion-row' + (s.owned === false ? ' unowned' : '');
           row.dataset.full = scryfallImg(s.scryfall_id, 'normal') || '';
-          row.innerHTML = `<span class="row-name">${{thumbHtml(s.scryfall_id, 'card-thumb small')}}<span>${{s.name}} ${{colorIconsHtml(s.color_identity)}}<div class="reason">${{s.reason}}</div></span></span>`;
+          const priceText = s.price != null ? ` &middot; $${{s.price.toFixed(2)}}` : '';
+          const priceBadge = s.owned === false
+            ? (s.price_url
+                ? `<a class="unowned-badge" href="${{s.price_url}}" target="_blank" rel="noopener" title="Buy this card">Not owned${{priceText}}</a>`
+                : `<span class="unowned-badge">Not owned${{priceText}}</span>`)
+            : '';
+          row.innerHTML = `<span class="row-name">${{thumbHtml(s.scryfall_id, 'card-thumb small')}}<span>${{s.name}} ${{colorIconsHtml(s.color_identity)}}${{priceBadge}}<div class="reason">${{s.reason}}</div></span></span>`;
           const dropRow = () => {{
             row.remove();
             remaining = remaining.filter(x => x !== s);
@@ -2434,7 +2454,8 @@ suggestBtn.addEventListener('click', () => {{
             if (catRemaining <= 0) header.remove(); else header.textContent = `${{cat}} (${{catRemaining}})`;
           }};
           const addBtn = Object.assign(document.createElement('button'), {{
-            className: 'btn ghost tile-icon-btn', textContent: '+', title: 'Add to deck',
+            className: 'btn ghost tile-icon-btn', textContent: '+',
+            title: s.owned === false ? "Add to deck (not owned -- you'll need to pick this up)" : 'Add to deck',
             onclick: () => {{ addCard(s); dropRow(); }},
           }});
           const avoidBtn = Object.assign(document.createElement('button'), {{
@@ -3194,7 +3215,8 @@ def builder_suggest():
         owned = load_collection(COLLECTION_PATH)
     except ValueError as e:
         return jsonify(error=str(e)), 400
-    owned_view = owned_collection_gameplay_view(owned, gameplay_data_in_index())
+    gameplay = gameplay_data_in_index()
+    owned_view = owned_collection_gameplay_view(owned, gameplay)
     wip_entries = brew_to_card_entries({"commander": body.get("commander"), "cards": body.get("cards") or []})
     commander = body.get("commander") or {}
     raw_mix = body.get("mix_targets") or {}
@@ -3218,6 +3240,7 @@ def builder_suggest():
         preferred_theme_tag_ids=body.get("preferred_theme_tag_ids") or None,
         preferred_theme_label=body.get("preferred_theme_label") or None,
         excluded_set_codes=_excluded_set_codes(body),
+        gameplay=gameplay,
         excluded_card_names=_excluded_card_names(body),
     )
     return jsonify(suggestions=suggestions)
