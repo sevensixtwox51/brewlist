@@ -873,13 +873,28 @@ body::after {
 }
 .builder-tile { background:var(--bg-elevated); border:1px solid var(--card-border); border-radius:10px; padding:10px; font-size:0.82rem; display:flex; gap:10px; position:relative; }
 .builder-tile .tile-body { flex:1; min-width:0; }
-.builder-tile .name { font-weight:600; margin-bottom:2px; padding-right:60px; }
+.builder-tile .name { font-weight:600; margin-bottom:2px; }
 .builder-tile .meta { color:var(--text-dim); font-size:0.75rem; }
 .builder-tile .warn { color: var(--missing); font-size:0.72rem; margin-top:4px; }
 .builder-tile .edhrec-badge { display:inline-flex; align-items:center; gap:4px; font-size:0.72rem; margin-top:4px; color:var(--text-dim); }
 .builder-tile .edhrec-badge.ranked { color:var(--gold); font-weight:600; }
 .builder-tile.hidden { display:none; }
-.tile-corner-actions { position:absolute; top:6px; right:6px; display:flex; align-items:flex-end; gap:4px; }
+.tile-corner-actions { display:flex; align-items:flex-end; gap:4px; flex-shrink:0; align-self:flex-start; }
+/* Card view: thumb | text, with the mana-cost pips on their own line under the
+   text (so a long type line never has to share a row with them) and the
+   star/add buttons in a right-hand column. display:contents lets the pips
+   and the button stack join the tile's grid directly. Compact view keeps
+   the single-row flex layout. */
+body:not(.compact) .builder-tile {
+  display:grid; grid-template-columns:48px minmax(0,1fr) auto;
+  grid-template-areas:"thumb body stack" "thumb pips stack";
+  column-gap:10px; row-gap:4px; align-items:start;
+}
+body:not(.compact) .builder-tile .card-thumb { grid-area:thumb; }
+body:not(.compact) .builder-tile .tile-body { grid-area:body; }
+body:not(.compact) .tile-corner-actions { display:contents; }
+body:not(.compact) .builder-tile .mana-cost-pips { grid-area:pips; flex-wrap:wrap; }
+body:not(.compact) .builder-tile .tile-icon-stack { grid-area:stack; }
 .tile-icon-stack { display:flex; flex-direction:column; gap:3px; }
 .tile-icon-btn {
   width:22px; height:22px; padding:0; display:flex; align-items:center; justify-content:center;
@@ -1057,9 +1072,9 @@ a.unowned-badge:hover { background:color-mix(in srgb, var(--gold) 28%, transpare
 body.compact .builder-tile { padding:4px 10px; min-height:36px; align-items:center; }
 body.compact .builder-tile .card-thumb { display:none; }
 body.compact .builder-tile .meta { display:none; }
-body.compact .builder-tile .name { margin-bottom:0; padding-right:0; }
+body.compact .builder-tile .name { margin-bottom:0; }
 body.compact .builder-tile .name-text { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-body.compact .tile-corner-actions { position:static; flex-shrink:0; }
+body.compact .tile-corner-actions { align-self:center; }
 body.compact .collection-grid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
 body.compact .deck-row .card-thumb { display:none; }
 .theme-picker { position:relative; }
