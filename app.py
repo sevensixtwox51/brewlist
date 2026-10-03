@@ -857,7 +857,7 @@ body::after {
 .action-group { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .builder-layout { display:grid; grid-template-columns: 1.8fr 1fr; gap:20px; align-items:start; margin-top:20px; }
 .builder-filters { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:28px; }
-.builder-filters input[type=text] { flex:1; min-width:160px; margin:0; }
+.builder-filters input[type=text] { flex:1 1 220px; min-width:220px; margin:0; }
 .builder-filters select {
   padding:8px 10px; border-radius:8px; border:1px solid var(--card-border);
   background:var(--bg); color:var(--text); font-size:0.85rem;
