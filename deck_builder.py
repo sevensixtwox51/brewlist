@@ -836,6 +836,9 @@ def suggest_builder_cards(
     excluded_set_codes: set[str] | None = None,
     excluded_card_names: set[str] | None = None,
     gameplay: dict[str, dict] | None = None,
+    pools_out: dict | None = None,
+    alternates_per_role: int = 30,
+    unowned_alternates_per_role: int = 12,
 ) -> list[dict]:
     """Fill-the-gaps auto-suggest: proposes owned, legal, color-correct
     cards to fill the remaining slots in a work-in-progress deck. This is
@@ -857,6 +860,21 @@ def suggest_builder_cards(
     (the default) skips this entirely and preserves the exact prior
     behavior -- every existing caller that doesn't pass it still only
     ever suggests owned cards.
+
+    `pools_out`, if a dict is passed, is filled IN PLACE with what the
+    guided "pick your own cards" flow needs (the return value is
+    unchanged either way, so every existing caller is unaffected):
+    {"steps": [{"role", "have", "needed", "target", "picks",
+    "alternates", "unowned_alternates"}, ...], "gc_cap",
+    "library_target", "library_count"}. `picks` is exactly what this
+    function chose for that role (so a UI can pre-select them);
+    `alternates` are the next-best owned candidates the ranking passed
+    over (up to `alternates_per_role`); `unowned_alternates` are the
+    best cards NOT owned for that role (up to
+    `unowned_alternates_per_role`), restricted to cards EDHREC actually
+    tracks for this commander -- ranking the whole 35k-card pool with no
+    real-world signal would just surface alphabetical junk. Needs
+    `gameplay`, like the purchase fallback.
 
     `preferred_theme_tag_ids`/`preferred_theme_label` (the "tag_ids"/
     "label" of one option from list_theme_options -- a curated theme's
@@ -888,7 +906,13 @@ def suggest_builder_cards(
     # same one card.
     library_target = target_size - 1 if deck_format == "commander" else target_size
     used_names = {normalize_name(e.name) for e in wip_entries}
-    remaining = max(0, library_target - sum(e.quantity for e in wip_entries if e.section != "commander"))
+    library_count = sum(e.quantity for e in wip_entries if e.section != "commander")
+    remaining = max(0, library_target - library_count)
+    if pools_out is not None:
+        # Always a valid (possibly empty) shape, even on the early returns
+        # below, so a caller never has to special-case "nothing to suggest".
+        pools_out.clear()
+        pools_out.update({"steps": [], "gc_cap": None, "library_target": library_target, "library_count": library_count})
     if remaining <= 0:
         return []
     # Cap the batch itself to what's actually left, not just gate on
@@ -1239,6 +1263,19 @@ def suggest_builder_cards(
             if normalize_name(picked["name"]) in game_changers:
                 running_gc_count += 1
 
+    # What the owned round-robin (plus the combo-first carve-out) already
+    # placed per role. The purchase fallback below needs the real remaining
+    # gap -- role_needed (target minus cards ALREADY in the deck) minus what
+    # was just placed -- not role_targets minus placed. The latter was a
+    # real bug for any partially-built deck: cards the user had already
+    # added never counted, so a role that was actually full could still
+    # look short and attract purchase picks while a genuinely short role
+    # didn't.
+    placed_per_role: dict[str, int] = dict(added_counts)
+    for c in combo_first:
+        r = role_of(c["name"], c["category"])
+        placed_per_role[r] = placed_per_role.get(r, 0) + 1
+
     # Purchase-suggestion fallback: a role whose OWNED pool simply isn't
     # big enough to reach its own target (role_slots[role] was already
     # capped at len(role_candidates[role]) above) would otherwise just
@@ -1249,19 +1286,21 @@ def suggest_builder_cards(
     # one, clearly marked as a purchase (owned: False) rather than mixed
     # in indistinguishably.
     unowned_picks: list[tuple[dict, str]] = []
-    shortfall = {role: max(0, role_targets.get(role, 0) - added_counts.get(role, 0)) for role in role_targets}
-    if gameplay and len(ordered) < max_suggestions and any(shortfall.values()):
+    shortfall = {role: max(0, role_needed.get(role, 0) - placed_per_role.get(role, 0)) for role in role_targets}
+    has_gap = len(ordered) < max_suggestions and any(shortfall.values())
+    unowned_by_role: dict[str, list[dict]] = {}
+    if gameplay and (has_gap or pools_out is not None):
         owned_or_used_names = {normalize_name(c["name"]) for c in owned_view} | used_names
         full_pool = full_card_pool_gameplay_view(gameplay, owned_or_used_names)
         unowned_candidates = _filter_candidates(
             wip_entries, full_pool, deck_format, target_format, commander_color_identity,
             intended_bracket, excluded_set_codes, excluded_card_names,
         )
-        unowned_by_role: dict[str, list[dict]] = {}
         for c in unowned_candidates:
             unowned_by_role.setdefault(role_of(c["name"], c["category"]), []).append(c)
         for role, pool in unowned_by_role.items():
             pool.sort(key=rank_key)
+    if gameplay and has_gap:
         for role, need in shortfall.items():
             pool = unowned_by_role.get(role) or []
             i = 0
@@ -1277,7 +1316,7 @@ def suggest_builder_cards(
                 if is_gc:
                     running_gc_count += 1
 
-    prices = prices_data_in_index() if unowned_picks else {}
+    prices = prices_data_in_index() if (unowned_picks or (pools_out is not None and unowned_by_role)) else {}
 
     def _cheapest_price(nm: str) -> tuple[float, str] | tuple[None, None]:
         """(price, purchase_url) for the cheapest listed nonfoil (falling
@@ -1292,13 +1331,10 @@ def suggest_builder_cards(
                 return rows[0][1], rows[0][2]
         return None, None
 
-    suggestions = []
-    for c in ordered:
+    def make_suggestion(c: dict, role: str, owned: bool) -> dict:
         nm = normalize_name(c["name"])
-        role = role_of(c["name"], c["category"])
-        fallback_reason = f"fills out {role}" if deck_format == "commander" else f"fills out {c['category']}"
         synergy_reason = _synergy_reason(synergy_by_name.get(nm))
-        suggestions.append({
+        out = {
             "name": c["name"],
             "scryfall_id": c["scryfall_id"],
             "category": c["category"],
@@ -1308,29 +1344,70 @@ def suggest_builder_cards(
             "mana_cost": c["mana_cost"],
             "set_code": c["set_code"],
             "collector_number": c["collector_number"],
-            "reason": reason_by_name.get(nm) or synergy_reason or theme_reason_by_name.get(nm) or fallback_reason,
-            "owned": True,
-        })
-    for c, role in unowned_picks:
-        nm = normalize_name(c["name"])
-        synergy_reason = _synergy_reason(synergy_by_name.get(nm))
-        fallback_reason = f"not owned -- would fill out {role}"
-        price, price_url = _cheapest_price(nm)
-        suggestions.append({
-            "name": c["name"],
-            "scryfall_id": c["scryfall_id"],
-            "category": c["category"],
-            "type_line": c["type_line"],
-            "color_identity": c["color_identity"],
-            "cmc": c["cmc"],
-            "mana_cost": c["mana_cost"],
-            "set_code": c["set_code"],
-            "collector_number": c["collector_number"],
-            "reason": reason_by_name.get(nm) or synergy_reason or fallback_reason,
-            "owned": False,
-            "price": price,
-            "price_url": price_url,
-        })
+            "owned": owned,
+            "role": role,
+            "game_changer": nm in game_changers,
+        }
+        if owned:
+            fallback_reason = f"fills out {role}" if deck_format == "commander" else f"fills out {c['category']}"
+            out["reason"] = reason_by_name.get(nm) or synergy_reason or theme_reason_by_name.get(nm) or fallback_reason
+        else:
+            price, price_url = _cheapest_price(nm)
+            out["reason"] = reason_by_name.get(nm) or synergy_reason or f"not owned -- would fill out {role}"
+            out["price"] = price
+            out["price_url"] = price_url
+            # Whether there's any real-world evidence behind this purchase
+            # (EDHREC tracks it for this commander, or it completes a combo)
+            # vs. it only being next in line when a role came up short. A
+            # guided UI shouldn't pre-select the latter -- real, user-caught
+            # smell: "Artist Alley", a Plane, got suggested purely as filler.
+            out["supported"] = nm in edhrec_tracked_names or nm in reason_by_name
+        return out
+
+    suggestions = [make_suggestion(c, role_of(c["name"], c["category"]), True) for c in ordered]
+    suggestions += [make_suggestion(c, role, False) for c, role in unowned_picks]
+
+    if pools_out is not None:
+        picked_names = {normalize_name(s["name"]) for s in suggestions}
+        # current_role_counts includes the commander entry itself (it's in
+        # wip_entries), but role targets are LIBRARY-only -- a commander
+        # shouldn't count toward "cards you already have" for its role, or
+        # a step opens reading "27 selected / 26 needed" before the user
+        # has touched anything.
+        commander_role = role_of(commander_entry.name, categorize(commander_entry.type_line)) if commander_entry else None
+        steps = []
+        for role in role_targets:
+            have = current_role_counts.get(role, 0) - (1 if role == commander_role else 0)
+            role_picks = [s for s in suggestions if s["role"] == role]
+            owned_alts = [
+                make_suggestion(c, role, True)
+                for c in (role_candidates.get(role) or [])
+                if normalize_name(c["name"]) not in picked_names
+            ][:alternates_per_role]
+            # Only cards EDHREC tracks for this commander: with no real-
+            # world signal at all, rank_key's last tiebreak is alphabetical,
+            # which across the whole ~35k-card pool would surface junk.
+            unowned_alts = []
+            if edhrec_tracked_names:
+                unowned_alts = [
+                    make_suggestion(c, role, False)
+                    for c in (unowned_by_role.get(role) or [])
+                    if normalize_name(c["name"]) in edhrec_tracked_names and normalize_name(c["name"]) not in picked_names
+                ][:unowned_alternates_per_role]
+            steps.append({
+                "role": role,
+                "have": have,
+                "needed": max(0, role_targets.get(role, 0) - have),
+                "target": role_targets.get(role, 0),
+                "picks": role_picks,
+                "alternates": owned_alts,
+                "unowned_alternates": unowned_alts,
+            })
+        pools_out["steps"] = steps
+        pools_out["gc_cap"] = gc_cap
+        # Game Changers already in the deck count against the cap too, so
+        # a UI warning on the picks can't be accurate without this.
+        pools_out["gc_existing"] = sum(e.quantity for e in wip_entries if normalize_name(e.name) in game_changers)
     return suggestions
 
 

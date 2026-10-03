@@ -970,6 +970,53 @@ body::after {
 }
 a.unowned-badge { cursor:pointer; }
 a.unowned-badge:hover { background:color-mix(in srgb, var(--gold) 28%, transparent); }
+
+/* ---- Guided Suggest wizard (see openWizard in the builder script) ---- */
+.modal-box.wizard-box { max-width:min(1040px, 96vw); height:min(88vh, 860px); max-height:none; }
+.wizard-box .modal-body { padding:10px 18px 18px; }
+.wizard-box .modal-footer { justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; }
+.wizard-box .modal-footer > .btn { margin:0; }
+.wz-steps { display:flex; gap:6px; flex-wrap:wrap; padding:10px 18px 0; flex-shrink:0; }
+.wz-chip { cursor:pointer; border:1px solid var(--card-border); background:transparent; color:var(--text-dim); border-radius:999px; padding:4px 12px; font-size:0.78rem; font-family:inherit; }
+.wz-chip:hover { color:var(--accent); border-color:var(--accent); }
+.wz-chip.active { background:color-mix(in srgb, var(--accent) 15%, transparent); color:var(--accent); border-color:var(--accent); font-weight:600; }
+.wz-chip-count { opacity:0.75; font-variant-numeric:tabular-nums; }
+.wz-intro { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:6px; }
+.wz-blurb { flex:1 1 280px; margin:0 !important; }
+.wz-count { font-size:0.8rem; }
+.wz-count.under { color:var(--text-dim); }
+.wz-count.match { color:var(--owned); }
+.wz-count.over { color:var(--gold); }
+.wz-tools { display:flex; gap:6px; }
+.wz-tip { margin:2px 0 8px; font-size:0.75rem; }
+.wz-warn { margin:6px 0; padding:6px 10px; border-radius:8px; font-size:0.8rem; color:var(--gold); border:1px solid color-mix(in srgb, var(--gold) 45%, var(--card-border)); background:color-mix(in srgb, var(--gold) 8%, transparent); }
+.wz-group-title { margin:16px 0 6px; font-size:0.85rem; }
+.wz-sub { margin:12px 0 6px; font-size:0.72rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.04em; }
+.wz-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(128px, 1fr)); gap:10px; }
+.wz-tile { position:relative; border:2px solid var(--card-border); border-radius:10px; padding:6px; cursor:pointer; background:var(--bg); opacity:0.62; transition:opacity .12s, border-color .12s; }
+.wz-tile:hover { opacity:1; }
+.wz-tile.selected { opacity:1; border-color:var(--owned); background:color-mix(in srgb, var(--owned) 7%, var(--bg)); }
+.wz-tile.unowned.selected { border-color:var(--gold); background:color-mix(in srgb, var(--gold) 9%, var(--bg)); }
+.wz-tile .wz-img { width:100%; height:auto; aspect-ratio:488 / 680; border-radius:6px; display:block; }
+.wz-check { position:absolute; top:10px; left:10px; width:22px; height:22px; border-radius:50%; background:var(--owned); color:#06210f; font-weight:700; font-size:0.8rem; display:none; align-items:center; justify-content:center; z-index:2; }
+.wz-tile.selected .wz-check { display:flex; }
+.wz-tile.unowned.selected .wz-check { background:var(--gold); color:#241f00; }
+.wz-avoid { position:absolute; top:8px; right:8px; width:22px; height:22px; border-radius:50%; border:1px solid var(--card-border); background:var(--bg-elevated); cursor:pointer; font-size:0.7rem; line-height:1; padding:0; display:none; z-index:2; }
+.wz-tile:hover .wz-avoid { display:block; }
+.wz-name { margin-top:6px; font-size:0.8rem; font-weight:600; line-height:1.2; }
+.wz-gc { margin-left:5px; padding:0 4px; border-radius:4px; font-size:0.6rem; background:color-mix(in srgb, var(--accent) 22%, transparent); color:var(--accent); vertical-align:1px; }
+.wz-reason { margin:2px 0 0; font-size:0.7rem; color:var(--text-dim); line-height:1.25; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+.wz-badge-row { margin-top:4px; }
+.wz-badge-row .unowned-badge { margin-left:0; }
+.wz-loading { padding:30px 6px; margin:0; }
+.wz-status { margin:0 !important; }
+.wz-over { color:var(--gold); }
+/* Plain links inside the suggestions panel (the guided flow's "cards to
+   pick up" list, Optimize's "(details)") had no color of their own, so they
+   fell back to default browser blue -- close to unreadable on the dark
+   theme. Same accent color .combo-item a already uses; the gold "Not owned"
+   badge links keep their own styling. */
+#suggestions-panel a:not(.unowned-badge) { color:var(--accent); }
 .segmented { display:flex; border:1px solid var(--card-border); border-radius:8px; overflow:hidden; }
 .segmented .seg-btn {
   border:none; background:var(--bg); color:var(--text-dim); padding:8px 14px;
@@ -1269,7 +1316,8 @@ def render_builder_page(deck_id: str | None = None) -> str:
     </div>
     <div class="builder-top-row builder-actions">
       <div class="action-group">
-        <button type="button" class="btn ghost" id="suggest-btn">Suggest cards</button>
+        <button type="button" class="btn ghost" id="guided-suggest-btn" title="Review the autopicker's choices one deck role at a time, and swap any you disagree with">Suggest cards</button>
+        <button type="button" class="btn ghost small" id="suggest-btn" title="One click: drop the autopicker's suggestions into a list below, no review step">Quick suggest</button>
         <div class="theme-picker">
           <input type="text" id="theme-input" placeholder="Preferred theme (optional)" autocomplete="off">
           <div class="theme-dropdown" id="theme-dropdown"></div>
@@ -1386,6 +1434,23 @@ def render_builder_page(deck_id: str | None = None) -> str:
     </div>
     <div class="modal-footer">
       <button type="button" class="btn ghost small" id="print-battle-card-btn">&#128424; Print Battle Card</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="wizard-modal">
+  <div class="modal-box wizard-box">
+    <div class="modal-header">
+      <h3 id="wizard-title">Suggest cards</h3>
+      <button type="button" class="modal-close" id="wizard-close" aria-label="Close">&times;</button>
+    </div>
+    <div class="wz-steps" id="wizard-steps"></div>
+    <div class="modal-body" id="wizard-body"></div>
+    <div class="modal-footer">
+      <button type="button" class="btn ghost small" id="wizard-back">&larr; Back</button>
+      <span class="hint wz-status" id="wizard-status"></span>
+      <button type="button" class="btn ghost small" id="wizard-accept-all" title="Keep the autopicker's choices for every remaining step and add everything now">Accept all picks &amp; finish</button>
+      <button type="button" class="btn small" id="wizard-next">Next &rarr;</button>
     </div>
   </div>
 </div>
@@ -2371,6 +2436,288 @@ saveBtn.addEventListener('click', () => {{
     .finally(() => {{ saveBtn.disabled = false; }});
 }});
 
+// ===== Guided Suggest ("pick your own cards") =====
+// The autopicker's choices come back pre-selected, grouped by deck role,
+// along with the next-best alternates for each role -- the user reviews one
+// role per step, swaps anything they disagree with, then everything chosen
+// is added to the deck in one go (so Optimize/Analyze/Replace work as
+// usual afterwards). Server side: /builder/suggest-pools.
+//
+// Spells first and Lands LAST on purpose: which lands/fixing a deck wants
+// depends on the spells already chosen (color pips, colorless utility
+// lands), so picking lands first would force that decision blind.
+const WIZARD_ORDER = ['Synergy', 'Ramp', 'Draw', 'Interaction', 'Lands'];
+const WIZARD_INFO = {{
+  Synergy: {{ title: 'Creatures & Synergy', short: 'Synergy', blurb: 'The heart of the deck: creatures, win-conditions and the cards that make your commander work.' }},
+  Ramp: {{ title: 'Ramp', short: 'Ramp', blurb: 'Mana rocks, mana creatures and land-fetching effects that get you to your big plays faster.' }},
+  Draw: {{ title: 'Card Draw', short: 'Draw', blurb: 'Cards that keep your hand full.' }},
+  Interaction: {{ title: 'Interaction', short: 'Interaction', blurb: 'Removal, counterspells and board wipes -- how you answer what your opponents do.' }},
+  Lands: {{ title: 'Lands', short: 'Lands', blurb: 'Your mana base. Chosen last so it can match the spells you picked.' }},
+}};
+const wizardModal = document.getElementById('wizard-modal');
+const wizardBody = document.getElementById('wizard-body');
+const wizard = {{ steps: [], idx: 0, selected: new Set(), meta: {{}}, requestId: 0 }};
+setupHoverPreview(wizardBody);
+
+function wizardInfo(role) {{
+  const info = WIZARD_INFO[role] || {{ title: role, short: role, blurb: '' }};
+  // Constructed decks only have Lands/Synergy buckets, and "Synergy" reads
+  // oddly without a commander to be synergistic with.
+  if (role === 'Synergy' && brew.format !== 'commander') return Object.assign({{}}, info, {{ title: 'Spells & Threats', short: 'Spells', blurb: 'The heart of the deck: creatures, win-conditions and the spells that make it work.' }});
+  return info;
+}}
+function wizardCards(step) {{ return step.picks.concat(step.alternates, step.unowned, step.weak); }}
+function wizardKey(card) {{ return normalizeName(card.name); }}
+function wizardStepSelectedCount(step) {{ return wizardCards(step).filter(c => wizard.selected.has(wizardKey(c))).length; }}
+function wizardTotalSelected() {{ return wizard.steps.reduce((n, s) => n + wizardStepSelectedCount(s), 0); }}
+
+function openWizard() {{
+  if (brew.format === 'commander' && !brew.commander) {{
+    showError('Choose a commander first (click the star on an eligible card), then suggest cards.');
+    return;
+  }}
+  const requestId = ++wizard.requestId;
+  wizardModal.classList.add('show');
+  document.getElementById('wizard-title').textContent = 'Suggest cards';
+  document.getElementById('wizard-steps').innerHTML = '';
+  wizardBody.innerHTML = '<div class="hint wz-loading">Building your suggestions&hellip; (checking your collection and EDHREC, may take a few seconds)</div>';
+  setWizardFooter({{ back: false, next: false, accept: false, status: '' }});
+  fetch('/builder/suggest-pools', {{
+    method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
+    body: JSON.stringify({{
+      cards: brew.cards, commander: brew.commander, format: brew.format, target_format: brew.target_format,
+      mix_targets: brew.mix_targets, intended_bracket: brew.intended_bracket,
+      preferred_theme_tag_ids: brew.preferred_theme_tag_ids, preferred_theme_label: brew.preferred_theme_label,
+      excluded_set_codes: brew.excluded_set_codes, excluded_card_names: brew.excluded_card_names,
+    }}),
+  }})
+    .then(r => r.json())
+    .then(data => {{
+      if (requestId !== wizard.requestId || !wizardModal.classList.contains('show')) return; // closed/reopened while loading
+      if (data.error) {{ closeWizard(); showError(data.error); return; }}
+      startWizard(data);
+    }})
+    .catch(() => {{
+      if (requestId !== wizard.requestId) return;
+      closeWizard();
+      showError('Could not reach the server.');
+    }});
+}}
+
+function startWizard(data) {{
+  wizard.meta = {{ gcCap: data.gc_cap, gcExisting: data.gc_existing || 0, libraryTarget: data.library_target, libraryCount: data.library_count }};
+  wizard.selected = new Set();
+  const byRole = {{}};
+  (data.steps || []).forEach(s => {{ byRole[s.role] = s; }});
+  wizard.steps = WIZARD_ORDER.filter(role => byRole[role]).map(role => {{
+    const s = byRole[role];
+    // A purchase pick with no real-world evidence behind it (not tracked by
+    // EDHREC for this commander, completes no combo) is only there because
+    // the role came up short. Pre-selecting those would nudge the user
+    // toward buying cards nobody has any evidence for, so they're listed
+    // but start unselected, under their own heading.
+    const isWeak = c => c.owned === false && !c.supported;
+    const step = {{
+      role: role, needed: s.needed, target: s.target,
+      picks: s.picks.filter(c => !isWeak(c)).map(c => Object.assign({{}}, c, {{ suggested: true }})),
+      alternates: s.alternates.map(c => Object.assign({{}}, c, {{ suggested: false }})),
+      unowned: s.unowned_alternates.map(c => Object.assign({{}}, c, {{ suggested: false }})),
+      weak: s.picks.filter(isWeak).map(c => Object.assign({{}}, c, {{ suggested: false }})),
+    }};
+    step.picks.forEach(c => wizard.selected.add(wizardKey(c)));
+    return step;
+  }}).filter(step => step.picks.length > 0 || (step.needed > 0 && step.alternates.length + step.unowned.length > 0));
+  wizard.idx = 0;
+  if (!wizard.steps.length) {{
+    document.getElementById('wizard-steps').innerHTML = '';
+    wizardBody.innerHTML = '<div class="hint wz-loading">Nothing to suggest -- your deck may already be full, or nothing left fits the color/legality filters.</div>';
+    setWizardFooter({{ back: false, next: false, accept: false, status: '' }});
+    return;
+  }}
+  renderWizard();
+}}
+
+function setWizardFooter(opts) {{
+  document.getElementById('wizard-back').style.display = opts.back ? '' : 'none';
+  document.getElementById('wizard-next').style.display = opts.next ? '' : 'none';
+  document.getElementById('wizard-accept-all').style.display = opts.accept ? '' : 'none';
+  document.getElementById('wizard-status').innerHTML = opts.status || '';
+  if (opts.nextLabel) document.getElementById('wizard-next').textContent = opts.nextLabel;
+}}
+
+function wizardTileHtml(card) {{
+  const sel = wizard.selected.has(wizardKey(card));
+  const priceText = card.price != null ? ' &middot; $' + card.price.toFixed(2) : '';
+  const badge = card.owned === false
+    ? (card.price_url
+        ? '<a class="unowned-badge" href="' + escapeHtml(card.price_url) + '" target="_blank" rel="noopener" title="Buy this card">Not owned' + priceText + '</a>'
+        : '<span class="unowned-badge">Not owned' + priceText + '</span>')
+    : '';
+  const gc = card.game_changer ? '<span class="wz-gc" title="On WotC&#39;s Game Changers list">GC</span>' : '';
+  return '<div class="wz-tile' + (sel ? ' selected' : '') + (card.owned === false ? ' unowned' : '') + '" data-key="' + escapeHtml(wizardKey(card)) + '" data-full="' + (scryfallImg(card.scryfall_id, 'normal') || '') + '">'
+    + '<div class="wz-check" aria-hidden="true">&#10003;</div>'
+    + '<button type="button" class="wz-avoid" title="Never suggest this card again for this deck" data-avoid="' + escapeHtml(wizardKey(card)) + '">&#128683;</button>'
+    + thumbHtml(card.scryfall_id, 'card-thumb wz-img')
+    + '<div class="wz-name">' + escapeHtml(card.name) + gc + '</div>'
+    + '<div class="wz-reason" title="' + escapeHtml(card.reason) + '">' + escapeHtml(card.reason) + '</div>'
+    + (badge ? '<div class="wz-badge-row">' + badge + '</div>' : '')
+    + '</div>';
+}}
+
+function wizardGridHtml(cards) {{
+  return '<div class="wz-grid">' + cards.map(wizardTileHtml).join('') + '</div>';
+}}
+
+function wizardGroupHtml(title, picks, alts) {{
+  if (!picks.length && !alts.length) return '';
+  let html = title ? '<h4 class="wz-group-title">' + escapeHtml(title) + '</h4>' : '';
+  if (picks.length) html += wizardGridHtml(picks);
+  if (alts.length) html += '<div class="wz-sub">Other options</div>' + wizardGridHtml(alts);
+  return html;
+}}
+
+function renderWizard() {{
+  const step = wizard.steps[wizard.idx];
+  const info = wizardInfo(step.role);
+  const last = wizard.idx === wizard.steps.length - 1;
+  document.getElementById('wizard-title').textContent = 'Suggest cards — step ' + (wizard.idx + 1) + ' of ' + wizard.steps.length + ': ' + info.title;
+
+  // Step chips: also the way to jump around / skip a step.
+  document.getElementById('wizard-steps').innerHTML = wizard.steps.map((s, i) => {{
+    const n = wizardStepSelectedCount(s);
+    return '<button type="button" class="wz-chip' + (i === wizard.idx ? ' active' : '') + '" data-step="' + i + '">'
+      + escapeHtml(wizardInfo(s.role).short) + ' <span class="wz-chip-count">' + n + '/' + s.needed + '</span></button>';
+  }}).join('');
+
+  const n = wizardStepSelectedCount(step);
+  const countClass = n < step.needed ? 'under' : (n === step.needed ? 'match' : 'over');
+  const countNote = n < step.needed ? (step.needed - n) + ' short of the usual target'
+    : (n === step.needed ? 'right on target' : (n - step.needed) + ' over the usual target');
+
+  // Game Changers already in the deck count against the bracket cap too.
+  let gcNote = '';
+  if (wizard.meta.gcCap != null) {{
+    const gcSelected = wizard.steps.reduce((total, s) => total + wizardCards(s).filter(c => c.game_changer && wizard.selected.has(wizardKey(c))).length, 0);
+    const gcTotal = gcSelected + wizard.meta.gcExisting;
+    if (gcTotal > wizard.meta.gcCap) {{
+      gcNote = '<div class="wz-warn">Game Changers: ' + gcTotal + ' selected, but your intended bracket allows up to ' + wizard.meta.gcCap + '.</div>';
+    }}
+  }}
+
+  let html = '<div class="wz-intro"><span class="hint wz-blurb">' + escapeHtml(info.blurb) + '</span>'
+    + '<span class="wz-count ' + countClass + '"><b>' + n + '</b> selected (aiming for ' + step.needed + ') &middot; ' + countNote + '</span>'
+    + '<span class="wz-tools"><button type="button" class="btn ghost small" data-wz="none">Select none</button>'
+    + '<button type="button" class="btn ghost small" data-wz="reset">Reset to suggested</button></span></div>'
+    + gcNote
+    + '<div class="hint wz-tip">Click a card to add or remove it. Cards marked <b>Not owned</b> would need to be bought.</div>';
+
+  if (step.role === 'Synergy') {{
+    const isCreature = c => c.category === 'Creatures';
+    html += wizardGroupHtml('Creatures', step.picks.filter(isCreature), step.alternates.filter(isCreature));
+    html += wizardGroupHtml('Everything else', step.picks.filter(c => !isCreature(c)), step.alternates.filter(c => !isCreature(c)));
+  }} else {{
+    html += wizardGroupHtml(null, step.picks, step.alternates);
+  }}
+  if (step.unowned.length) {{
+    html += '<h4 class="wz-group-title">Not owned &mdash; strong options you could buy</h4>'
+      + '<div class="hint wz-tip">These are cards real decks with your commander play that aren&#39;t in your collection yet.</div>'
+      + wizardGridHtml(step.unowned);
+  }}
+  if (step.weak.length) {{
+    html += '<h4 class="wz-group-title">Other purchase ideas</h4>'
+      + '<div class="hint wz-tip">EDHREC has no data on these for your commander, so they start unselected &mdash; they are only here because this role came up short.</div>'
+      + wizardGridHtml(step.weak);
+  }}
+  const scrollTop = wizardBody.scrollTop;
+  wizardBody.innerHTML = html;
+  wizardBody.scrollTop = scrollTop;
+
+  const total = wizard.meta.libraryCount + wizardTotalSelected();
+  const over = total > wizard.meta.libraryTarget;
+  setWizardFooter({{
+    back: wizard.idx > 0, next: true, accept: !last, nextLabel: last ? 'Add ' + wizardTotalSelected() + ' cards to deck' : 'Next →',
+    status: 'Deck will have <b' + (over ? ' class="wz-over"' : '') + '>' + total + '</b> / ' + wizard.meta.libraryTarget + ' cards' + (over ? ' (over)' : ''),
+  }});
+}}
+
+function wizardRefresh() {{ renderWizard(); }}
+
+wizardBody.addEventListener('click', (e) => {{
+  if (e.target.closest('a')) return; // purchase links just open
+  const avoidBtn = e.target.closest('[data-avoid]');
+  if (avoidBtn) {{
+    const key = avoidBtn.dataset.avoid;
+    const step = wizard.steps[wizard.idx];
+    const card = wizardCards(step).find(c => wizardKey(c) === key);
+    if (card) {{
+      avoidCard(card.name);
+      wizard.selected.delete(key);
+      ['picks', 'alternates', 'unowned', 'weak'].forEach(k => {{ step[k] = step[k].filter(c => wizardKey(c) !== key); }});
+      wizardRefresh();
+    }}
+    return;
+  }}
+  const tool = e.target.closest('[data-wz]');
+  if (tool) {{
+    const step = wizard.steps[wizard.idx];
+    if (tool.dataset.wz === 'none') wizardCards(step).forEach(c => wizard.selected.delete(wizardKey(c)));
+    if (tool.dataset.wz === 'reset') {{
+      wizardCards(step).forEach(c => wizard.selected.delete(wizardKey(c)));
+      step.picks.forEach(c => wizard.selected.add(wizardKey(c)));
+    }}
+    wizardRefresh();
+    return;
+  }}
+  const tile = e.target.closest('.wz-tile');
+  if (tile) {{
+    const key = tile.dataset.key;
+    if (wizard.selected.has(key)) wizard.selected.delete(key); else wizard.selected.add(key);
+    wizardRefresh();
+  }}
+}});
+
+document.getElementById('wizard-steps').addEventListener('click', (e) => {{
+  const chip = e.target.closest('[data-step]');
+  if (chip) {{ wizard.idx = Number(chip.dataset.step); renderWizard(); wizardBody.scrollTop = 0; }}
+}});
+document.getElementById('wizard-back').addEventListener('click', () => {{
+  if (wizard.idx > 0) {{ wizard.idx -= 1; renderWizard(); wizardBody.scrollTop = 0; }}
+}});
+document.getElementById('wizard-next').addEventListener('click', () => {{
+  if (wizard.idx < wizard.steps.length - 1) {{ wizard.idx += 1; renderWizard(); wizardBody.scrollTop = 0; }}
+  else finishWizard();
+}});
+document.getElementById('wizard-accept-all').addEventListener('click', finishWizard);
+
+function closeWizard() {{ wizard.requestId += 1; wizardModal.classList.remove('show'); }}
+document.getElementById('wizard-close').addEventListener('click', closeWizard);
+// Deliberately NOT closing on a click outside the box (unlike the Analyze
+// modal): this one holds in-progress choices, and a stray click on the
+// backdrop shouldn't throw them away.
+document.addEventListener('keydown', (e) => {{ if (e.key === 'Escape' && wizardModal.classList.contains('show')) closeWizard(); }});
+
+function finishWizard() {{
+  const toAdd = [];
+  wizard.steps.forEach(step => wizardCards(step).forEach(c => {{
+    if (wizard.selected.has(wizardKey(c)) && !findCard(c.name)) toAdd.push(c);
+  }}));
+  toAdd.forEach(addCard);
+  closeWizard();
+  const panel = document.getElementById('suggestions-panel');
+  const unowned = toAdd.filter(c => c.owned === false);
+  let html = '<div class="hint" style="margin:0 0 6px;">Added ' + toAdd.length + ' card' + (toAdd.length === 1 ? '' : 's') + ' from your guided picks. Use Optimize, Analyze or the swap button on any card to keep refining.</div>';
+  if (unowned.length) {{
+    const total = unowned.reduce((sum, c) => sum + (c.price || 0), 0);
+    html += '<div class="hint" style="margin:0 0 4px;font-weight:600;">Cards to pick up (' + unowned.length + ', about $' + total.toFixed(2) + '):</div>'
+      + unowned.map(c => '<div class="hint" style="margin:0;">' + (c.price_url
+          ? '<a href="' + escapeHtml(c.price_url) + '" target="_blank" rel="noopener">' + escapeHtml(c.name) + '</a>'
+          : escapeHtml(c.name)) + (c.price != null ? ' &middot; $' + c.price.toFixed(2) : '') + '</div>').join('');
+  }}
+  panel.innerHTML = html;
+}}
+
+document.getElementById('guided-suggest-btn').addEventListener('click', openWizard);
+
 const suggestBtn = document.getElementById('suggest-btn');
 suggestBtn.addEventListener('click', () => {{
   suggestBtn.disabled = true;
@@ -3205,16 +3552,19 @@ def _excluded_card_names(body: dict) -> set[str] | None:
     return names or None
 
 
-@app.route("/builder/suggest", methods=["POST"])
-def builder_suggest():
-    body = request.get_json(silent=True) or {}
+def _run_suggest(body: dict, pools_out: dict | None = None):
+    """Shared by /builder/suggest and /builder/suggest-pools: same request
+    shape, same pipeline, so the guided flow can never drift from what the
+    one-click Suggest would have picked. Returns (suggestions, None) on
+    success or (None, (error_message, status)) when the request can't be
+    served."""
     deck_format = body.get("format") if body.get("format") in ("commander", "constructed") else "commander"
     if not os.path.isfile(COLLECTION_PATH):
-        return jsonify(error="No ManaBox collection on file yet -- upload one from the home page first."), 400
+        return None, ("No ManaBox collection on file yet -- upload one from the home page first.", 400)
     try:
         owned = load_collection(COLLECTION_PATH)
     except ValueError as e:
-        return jsonify(error=str(e)), 400
+        return None, (str(e), 400)
     gameplay = gameplay_data_in_index()
     owned_view = owned_collection_gameplay_view(owned, gameplay)
     wip_entries = brew_to_card_entries({"commander": body.get("commander"), "cards": body.get("cards") or []})
@@ -3242,8 +3592,33 @@ def builder_suggest():
         excluded_set_codes=_excluded_set_codes(body),
         gameplay=gameplay,
         excluded_card_names=_excluded_card_names(body),
+        pools_out=pools_out,
     )
+    return suggestions, None
+
+
+@app.route("/builder/suggest", methods=["POST"])
+def builder_suggest():
+    body = request.get_json(silent=True) or {}
+    suggestions, err = _run_suggest(body)
+    if err:
+        return jsonify(error=err[0]), err[1]
     return jsonify(suggestions=suggestions)
+
+
+@app.route("/builder/suggest-pools", methods=["POST"])
+def builder_suggest_pools():
+    """Backs the guided "pick your own cards" flow: the exact same picks
+    /builder/suggest would make (pre-selected client-side), plus for each
+    deck role (Synergy/Ramp/Draw/Interaction/Lands) the next-best owned
+    alternates and the best cards NOT owned -- see suggest_builder_cards'
+    `pools_out`. Same request body as /builder/suggest."""
+    body = request.get_json(silent=True) or {}
+    pools: dict = {}
+    _, err = _run_suggest(body, pools_out=pools)
+    if err:
+        return jsonify(error=err[0]), err[1]
+    return jsonify(pools)
 
 
 @app.route("/builder/optimize", methods=["POST"])
