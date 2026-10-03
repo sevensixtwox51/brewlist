@@ -856,7 +856,7 @@ body::after {
 }
 .action-group { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .builder-layout { display:grid; grid-template-columns: 1.8fr 1fr; gap:20px; align-items:start; margin-top:20px; }
-.builder-filters { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:28px; }
+.builder-filters { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:28px; }
 .builder-filters input[type=text] { flex:1 1 220px; min-width:220px; margin:0; }
 .builder-filters select {
   padding:8px 10px; border-radius:8px; border:1px solid var(--card-border);
@@ -1358,8 +1358,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
           <button type="button" class="seg-btn active" data-value="cards">Cards</button>
           <button type="button" class="seg-btn" data-value="compact">Compact</button>
         </div>
-      </div>
-      <div class="builder-filters" id="commander-popularity-controls" style="display:none;">
+        <div id="commander-popularity-controls" style="display:none;">
         <select id="edhrec-window" title="Which EDHREC time window a commander's popularity rank is based on">
           <option value="2years">Popularity: past 2 years</option>
           <option value="month">Popularity: past month</option>
@@ -1370,6 +1369,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
         </label>
         <button type="button" class="btn ghost small" id="edhrec-refresh-btn" title="EDHREC data only updates when you click this -- it never refetches on its own">&#8635; Refresh rankings</button>
         <span class="hint" id="edhrec-status" style="margin:0;"></span>
+        </div>
       </div>
       <div class="collection-grid" id="collection-grid"><div class="hint" style="margin-top:50px;">Loading your collection&hellip;</div></div>
     </div>
@@ -2385,7 +2385,7 @@ function pollCommanderPopularity(attemptsLeft) {{
 }}
 function updateCommanderPopularityControlsVisibility() {{
   const isCommanderFilter = document.getElementById('filter-category').value === 'Commander';
-  document.getElementById('commander-popularity-controls').style.display = isCommanderFilter ? 'flex' : 'none';
+  document.getElementById('commander-popularity-controls').style.display = isCommanderFilter ? 'contents' : 'none';
   if (isCommanderFilter) {{
     // Defaults on every time the Commander filter is chosen -- ranked
     // (most popular first) is almost always more useful than whatever
