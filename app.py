@@ -2509,15 +2509,12 @@ optimizeBtn.addEventListener('click', () => {{
       function applySwap(p) {{
         removeCard(p.remove.name);
         addCard(p.add);
-        // Deliberately NOT recorded into brew.further_optimizations any
-        // more. That trail existed so an Optimize swap made after an AI
-        // build wouldn't leave the AI's narrative out of sync with the
-        // deck -- but the AI builder is gone, and the list is still shown
-        // under a "Further Optimizations" heading in Analyze Deck, which
-        // reads as a PENDING suggestion. Real, user-reported confusion:
-        // after applying Peer into the Abyss, Analyze kept listing it as
-        // if it still needed doing. (Rendering of the field is kept for
-        // any older saved deck that already has entries.)
+        // Recorded onto the brew (not just applied) so Analyze Deck and
+        // the full report can show a "Further Optimizations" trail below
+        // the AI summary -- otherwise a deterministic Optimize swap made
+        // after an AI build leaves the AI's own narrative silently
+        // out of sync with what's actually in the deck now.
+        brew.further_optimizations.push(`+ ${{p.add.name}} (${{p.reason}}) — cut ${{p.remove.name}}`);
       }}
       const applyAllBtn = Object.assign(document.createElement('button'), {{
         className: 'btn ghost small', style: 'margin-bottom:8px;margin-right:8px;',
