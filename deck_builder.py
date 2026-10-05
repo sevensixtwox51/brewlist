@@ -310,6 +310,17 @@ def _useless_arbitrary_color_mana(oracle_text: str, colors_allowed: set[str]) ->
     return not _PLAIN_COLORLESS_MANA_RE.search(oracle_text or "")
 
 
+# Interaction tags that, on a *permanent*, describe incidental damage rather
+# than removal: Terror of the Peaks, Orcish Bowmasters, Siege-Gang Commander
+# and Sword of Fire and Ice are all tagged "burn any" but are threats/
+# engines, not the answers the Interaction slots are budgeted for (user-
+# reported: Terror of the Peaks counted as Interaction). Instants/sorceries
+# with these tags (Lightning Bolt) are real interaction and keep the role.
+_INCIDENTAL_BURN_LABELS = {"burn any", "burn with set's mechanic"}
+_INCIDENTAL_BURN_KEY = "_incidental_burn"
+_PERMANENT_CATEGORIES = ("Creatures", "Artifacts", "Enchantments")
+
+
 def _role_member_names(groups: dict, tag_labels: dict) -> dict[str, frozenset[str]]:
     """{role: {normalized_card_name, ...}} -- the real, full membership of
     every _ROLE_TAG_LABELS tag for each role, from budget_alt_data_in_
@@ -330,6 +341,20 @@ def _role_member_names(groups: dict, tag_labels: dict) -> dict[str, frozenset[st
                 if entry:
                     names.add(entry[0])
         result[role] = frozenset(names)
+    # Cards whose ONLY Interaction tags are the incidental-burn ones above
+    # (anything also tagged with a real removal/sweeper/counter label stays
+    # Interaction even as a permanent -- e.g. Goblin Cratermaker).
+    soft: set[str] = set()
+    hard: set[str] = set()
+    for label in _ROLE_TAG_LABELS["Interaction"]:
+        tag_id = label_to_id.get(label)
+        if not tag_id:
+            continue
+        target = soft if label in _INCIDENTAL_BURN_LABELS else hard
+        for entry in groups.get(tag_id) or []:
+            if entry:
+                target.add(entry[0])
+    result[_INCIDENTAL_BURN_KEY] = frozenset(soft - hard)
     return result
 
 
@@ -344,8 +369,13 @@ def _card_role(name: str, category: str, role_members: dict[str, frozenset[str]]
     if category in ("Lands", "Basic Lands"):
         return "Lands"
     nm = normalize_name(name)
+    incidental_burn = role_members.get(_INCIDENTAL_BURN_KEY) or frozenset()
     for role, names in role_members.items():
+        if role == _INCIDENTAL_BURN_KEY:
+            continue
         if nm in names:
+            if role == "Interaction" and category in _PERMANENT_CATEGORIES and nm in incidental_burn:
+                continue
             return role
     return "Synergy"
 
