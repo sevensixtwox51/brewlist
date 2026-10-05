@@ -428,6 +428,16 @@ def _is_basic_land(type_line: str) -> bool:
     return "Basic" in type_line and "Land" in type_line
 
 
+def _overall_rank(c: dict) -> int:
+    """EDHREC's overall popularity rank (1 = most played), or a huge number
+    when unknown so unranked cards sort after ranked ones. The last
+    tiebreak before the name in the rank_keys below: with nothing
+    commander-specific to go on, "cards people actually play" beats A-Z
+    (which used to hand every deck whichever owned cards start with 'A',
+    e.g. A.I.M. Synthoids and Abundant Maw)."""
+    return c.get("edhrec_rank") or 10**9
+
+
 def owned_collection_gameplay_view(owned: dict[str, OwnedCard], gameplay: dict[str, dict]) -> list[dict]:
     """Merges load_collection()'s owned-card/pricing data with
     gameplay_data_in_index()'s type/color/legality data into flat,
@@ -462,6 +472,7 @@ def owned_collection_gameplay_view(owned: dict[str, OwnedCard], gameplay: dict[s
             "collector_number": printing.collector_number if printing else "",
             "legalities": gp.get("legalities") or {},
             "oracle_text": gp.get("oracle_text") or "",
+            "edhrec_rank": gp.get("edhrec_rank"),
         })
     view.sort(key=lambda c: c["name"])
     return view
@@ -495,6 +506,7 @@ def full_card_pool_gameplay_view(gameplay: dict[str, dict], exclude_names: set[s
             "collector_number": "",
             "legalities": gp.get("legalities") or {},
             "oracle_text": gp.get("oracle_text") or "",
+            "edhrec_rank": gp.get("edhrec_rank"),
         })
     return view
 
@@ -797,7 +809,7 @@ def suggest_replacements(
     def rank_key(c: dict):
         nm = normalize_name(c["name"])
         shares_tag = target_tag is not None and tag_by_name.get(nm) == target_tag
-        return (-synergy_by_name.get(nm, 0.0), nm not in edhrec_tracked_names, not shares_tag, nm not in game_changers, c["name"])
+        return (-synergy_by_name.get(nm, 0.0), nm not in edhrec_tracked_names, not shares_tag, nm not in game_changers, _overall_rank(c), c["name"])
 
     same_role.sort(key=rank_key)
     tag_label = tag_labels.get(target_tag) if target_tag else None
@@ -1065,6 +1077,7 @@ def suggest_builder_cards(
             nm not in edhrec_tracked_names,
             nm not in theme_reason_by_name,
             nm not in game_changers,
+            _overall_rank(c),
             c["name"],
         )
 

@@ -750,8 +750,9 @@ PRICE_INDEX_MAX_AGE_DAYS = 7
 # full legalities dict) for the deck builder (deck_builder.py). v15: added
 # the "sets" field (set name + release date per set code) for the deck
 # builder's Set Selection filter. v16: added "card_count" (baseSetSize) to
-# each "sets" entry, for "N / M owned" in the Set filter popups.
-PRICE_INDEX_FORMAT_VERSION = 19
+# each "sets" entry, for "N / M owned" in the Set filter popups. v20: added
+# "edhrec_rank" to each "gameplay" entry (Suggest's no-signal tiebreak).
+PRICE_INDEX_FORMAT_VERSION = 20
 
 
 # --------------------------------------------------------------------------
@@ -1247,6 +1248,13 @@ def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[
                         "color_identity": card.get("colorIdentity") or [],
                         "oracle_text": card.get("text") or "",
                         "legalities": card.get("legalities") or {},
+                        # EDHREC's overall popularity rank for the card
+                        # (1 = most played; MTGJSON's own `edhrecRank`,
+                        # identical across printings). Not commander-
+                        # specific -- deck_builder.py uses it only as the
+                        # tiebreak among cards with no per-commander
+                        # EDHREC data, instead of falling back to A-Z.
+                        "edhrec_rank": card.get("edhrecRank"),
                         # One representative printing's Scryfall ID, same
                         # "first one seen wins, doesn't matter which"
                         # reasoning as scryfall_id_by_name above -- lets
