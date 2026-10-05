@@ -428,6 +428,16 @@ def _is_basic_land(type_line: str) -> bool:
     return "Basic" in type_line and "Land" in type_line
 
 
+def _costly_filler(c: dict, role: str) -> bool:
+    """True for a 7+ mana card in a role that's supposed to be cheap
+    support (Ramp/Draw/Interaction). Only used among cards with no
+    commander-specific signal: a tiebreak on overall popularity alone
+    happily fills a Draw slot with a 7-mana "draw half your library"
+    sorcery (real case: Peer into the Abyss in a Kaalia deck). Synergy and
+    Lands are exempt -- big finishers are legitimately Synergy cards."""
+    return role in ("Ramp", "Draw", "Interaction") and (c.get("cmc") or 0) >= 7
+
+
 def _overall_rank(c: dict) -> int:
     """EDHREC's overall popularity rank (1 = most played), or a huge number
     when unknown so unranked cards sort after ranked ones. The last
@@ -809,7 +819,7 @@ def suggest_replacements(
     def rank_key(c: dict):
         nm = normalize_name(c["name"])
         shares_tag = target_tag is not None and tag_by_name.get(nm) == target_tag
-        return (-synergy_by_name.get(nm, 0.0), nm not in edhrec_tracked_names, not shares_tag, nm not in game_changers, _overall_rank(c), c["name"])
+        return (-synergy_by_name.get(nm, 0.0), nm not in edhrec_tracked_names, not shares_tag, nm not in game_changers, _costly_filler(c, target_role), _overall_rank(c), c["name"])
 
     same_role.sort(key=rank_key)
     tag_label = tag_labels.get(target_tag) if target_tag else None
@@ -1077,6 +1087,7 @@ def suggest_builder_cards(
             nm not in edhrec_tracked_names,
             nm not in theme_reason_by_name,
             nm not in game_changers,
+            _costly_filler(c, role_of(c["name"], c["category"])),
             _overall_rank(c),
             c["name"],
         )
