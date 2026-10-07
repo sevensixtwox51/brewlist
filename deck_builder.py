@@ -459,13 +459,16 @@ def _is_basic_land(type_line: str) -> bool:
 
 
 def _costly_filler(c: dict, role: str) -> bool:
-    """True for a 7+ mana card in a role that's supposed to be cheap
+    """True for a 6+ mana card in a role that's supposed to be cheap
     support (Ramp/Draw/Interaction). Only used among cards with no
     commander-specific signal: a tiebreak on overall popularity alone
     happily fills a Draw slot with a 7-mana "draw half your library"
-    sorcery (real case: Peer into the Abyss in a Kaalia deck). Synergy and
-    Lands are exempt -- big finishers are legitimately Synergy cards."""
-    return role in ("Ramp", "Draw", "Interaction") and (c.get("cmc") or 0) >= 7
+    sorcery (real case: Peer into the Abyss in a Kaalia deck), or an
+    Interaction slot with 6-mana planeswalkers (Elspeth, Sun's Champion and
+    Ugin, the Ineffable in a Cloud, Ex-SOLDIER deck, with cheaper owned
+    removal left on the bench). Synergy and Lands are exempt -- big
+    finishers are legitimately Synergy cards."""
+    return role in ("Ramp", "Draw", "Interaction") and (c.get("cmc") or 0) >= 6
 
 
 def _overall_rank(c: dict) -> int:
