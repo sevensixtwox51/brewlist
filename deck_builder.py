@@ -78,7 +78,15 @@ CURATED_THEMES: dict[str, list[str]] = {
     "Sacrifice / Aristocrats": [
         "free sacrifice outlet", "mutual sacrifice", "opponent sacrifice matters", "opponent sacrifices",
     ],
-    "Reanimator": ["reanimate", "reanimate matters", "mass reanimation", "hunger reanimation"],
+    # The reanimate-* family is where the real reanimation spells live
+    # (reanimate-creature alone has ~500 cards; plain "reanimate" is tiny).
+    # reanimate-self (a creature that recurs itself) and reanimate-cast
+    # (cast from the graveyard) are different jobs, left out on purpose.
+    "Reanimator": [
+        "reanimate", "reanimate matters", "mass reanimation", "hunger reanimation",
+        "reanimate-creature", "reanimate-artifact-creature", "reanimate-from-opponent",
+        "reanimate-permanent", "reanimate-nonland", "reanimate-from-any",
+    ],
     "Tokens": [
         "affinity for tokens", "repeatable creature tokens", "repeatable artifact tokens",
         "repeatable enchantment tokens", "repeatable noncreature tokens",
@@ -380,6 +388,11 @@ def _card_role(name: str, category: str, role_members: dict[str, frozenset[str]]
     return "Synergy"
 
 
+# Below this, an EDHREC synergy score is noise (see _synergy_reason): the card
+# is simply played everywhere, not distinctively with this commander.
+_MEANINGFUL_SYNERGY = 0.08
+
+
 def _synergy_reason(score: float | None) -> str | None:
     """Wording for an EDHREC synergy score, tiered so the label never
     overstates a weak number -- real, user-reported bug: Sol Ring (a
@@ -394,7 +407,7 @@ def _synergy_reason(score: float | None) -> str | None:
     own theme). None below the noise floor -- callers fall through to
     their own next-best reason (a role/tag match, or a generic fallback)
     rather than mentioning EDHREC at all for a score this weak."""
-    if score is None or score < 0.08:
+    if score is None or score < _MEANINGFUL_SYNERGY:
         return None
     if score >= 0.20:
         return f"high synergy with your commander (per EDHREC, {score:.0%})"
@@ -468,6 +481,38 @@ _VOLTRON_COMMANDER_TAGS = {
     "quick equip", "auto equip", "synergy-aura", "transferrable aura",
     "cost-reducer-equip-ability", "cost-reducer-equipment",
 }
+
+
+# EDHREC's theme labels (tag_counts "value", lowercased) -> the CURATED_THEMES
+# entry whose Oracle Tags describe the same plan. Only themes whose names
+# line up unambiguously; anything else EDHREC says is simply ignored.
+_EDHREC_THEME_TO_CURATED = {
+    "reanimator": "Reanimator", "tokens": "Tokens", "mill": "Mill", "artifacts": "Artifacts",
+    "lifegain": "Lifegain", "landfall": "Landfall", "proliferate": "Proliferate",
+    "sacrifice": "Sacrifice / Aristocrats", "aristocrats": "Sacrifice / Aristocrats",
+    "blink": "Blink / Flicker", "flicker": "Blink / Flicker", "wheels": "Wheels",
+    "storm": "Storm", "discard": "Discard", "extra turns": "Extra Turns", "stax": "Stax",
+    "group hug": "Group Hug", "group slug": "Group Slug", "enchantress": "Enchantress",
+    "voltron": "Voltron",
+}
+
+
+def _edhrec_theme_names(profile: dict, top: int = 3, min_share: float = 0.5) -> list[str]:
+    """CURATED_THEMES names for the commander's top-`top` EDHREC themes that
+    at least `min_share` as many decks play as its most-played theme
+    (Teval: Reanimator 2893, Lands Matter 1696, Mill 1668 -> Reanimator,
+    Mill; Y'shtola's Lifegain at 1262 vs Control's 3272 is too minor and
+    would only pull in fluff)."""
+    names: list[str] = []
+    themes = profile.get("themes") or []
+    biggest = (themes[0].get("count") or 0) if themes else 0
+    for t in themes[:top]:
+        if biggest and (t.get("count") or 0) < biggest * min_share:
+            continue
+        curated = _EDHREC_THEME_TO_CURATED.get((t.get("value") or "").strip().lower())
+        if curated and curated not in names:
+            names.append(curated)
+    return names
 
 
 def _edhrec_says_voltron(profile: dict) -> bool | None:
@@ -1193,6 +1238,34 @@ def suggest_builder_cards(
     avg_pw = edhrec_profile.get("avg_planeswalkers")
     pw_unwanted = avg_pw is not None and avg_pw < 1
 
+    # EDHREC says what this commander is played as (Teval: Reanimator, Mill).
+    # Its per-commander card lists only run ~50 deep per category, so owned
+    # cards that clearly serve that plan but sit below the cut (Necromancy,
+    # Zombify, Unearth in a Teval deck: 34 owned reanimation cards, 6 picked)
+    # got nothing. Give every owned card carrying one of the theme's Oracle
+    # Tags the same "fits the theme" standing the deck's own emerging themes
+    # already get in rank_key -- after anything EDHREC itself tracks.
+    edhrec_theme_boost: set[str] = set()
+    if deck_format == "commander" and tag_labels:
+        groups = budget_alt.get("groups") or {}
+        label_to_id = {label: tag_id for tag_id, label in tag_labels.items()}
+        for theme in _edhrec_theme_names(edhrec_profile):
+            theme_names: set[str] = set()
+            for label in CURATED_THEMES.get(theme, []):
+                for entry in groups.get(label_to_id.get(label)) or []:
+                    if entry:
+                        theme_names.add(entry[0])
+            for c in candidates:
+                nm = normalize_name(c["name"])
+                if nm in theme_names and nm not in theme_reason_by_name:
+                    # Synergy only: a theme tag on a removal spell or mana
+                    # creature (e.g. a mill creature in Ramp) says nothing
+                    # about whether it's the right Ramp/Interaction pick --
+                    # those roles keep choosing on their own signals.
+                    if _card_role(c["name"], c["category"], role_members) == "Synergy":
+                        theme_reason_by_name[nm] = f"fits this commander's {theme} theme (per EDHREC)"
+                        edhrec_theme_boost.add(nm)
+
     def rank_key(c: dict):
         nm = normalize_name(c["name"])
         # EDHREC synergy sits right after combo-completion and ahead of the
@@ -1212,6 +1285,13 @@ def suggest_builder_cards(
             # card EDHREC tracks for this commander (it's popular as a
             # generic red/white staple, not because it suits the plan).
             voltron_commander and _hits_own_board(c, nm, symmetric_wipes, one_sided_wipes),
+            # Meaningful EDHREC synergy first; then cards that fit the
+            # commander's EDHREC theme (Synergy role only), ahead of cards
+            # EDHREC merely lists at noise-level synergy (Lightning Greaves
+            # at +0.01 shouldn't beat Necromancy in a reanimator deck).
+            synergy_by_name.get(nm, 0.0) < _MEANINGFUL_SYNERGY,
+            -synergy_by_name.get(nm, 0.0) if synergy_by_name.get(nm, 0.0) >= _MEANINGFUL_SYNERGY else 0.0,
+            nm not in edhrec_theme_boost,
             -synergy_by_name.get(nm, 0.0),
             nm not in edhrec_tracked_names,
             nm not in theme_reason_by_name,
