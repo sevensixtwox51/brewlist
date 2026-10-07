@@ -458,6 +458,63 @@ def _is_basic_land(type_line: str) -> bool:
     return "Basic" in type_line and "Land" in type_line
 
 
+# Oracle Tags that mark a commander as equipment/aura-based Voltron: the win
+# condition is one big, protected creature, so symmetric board wipes (which
+# kill that creature too) are the wrong kind of Interaction -- Voltron wants
+# selective or one-sided wipes that clear the opponents' blockers instead.
+# Cloud, Ex-SOLDIER is tagged synergy-equipment + quick equip.
+_VOLTRON_COMMANDER_TAGS = {
+    "synergy-equipment", "synergy-equipment-legendary", "affinity for equipment",
+    "quick equip", "auto equip", "synergy-aura", "transferrable aura",
+    "cost-reducer-equip-ability", "cost-reducer-equipment",
+}
+
+
+def _voltron_wipe_policy(
+    commander_name: str | None, groups: dict, tag_labels: dict, preferred_theme_label: str | None = None,
+) -> tuple[bool, frozenset[str], frozenset[str]]:
+    """(is_voltron, symmetric_wipe_names, one_sided_wipe_names). Voltron =
+    the commander carries one of _VOLTRON_COMMANDER_TAGS, or the player
+    explicitly picked the Voltron theme. symmetric = tagged "sweeper" but
+    not "sweeper-one-sided" (Wrath of God, Blasphemous Act); one_sided =
+    "sweeper-one-sided" (Elspeth, Sun's Champion; Cyclonic Rift)."""
+    label_to_id = {label: tag_id for tag_id, label in tag_labels.items()}
+
+    def members(label: str) -> set[str]:
+        return {e[0] for e in (groups.get(label_to_id.get(label)) or []) if e}
+
+    one_sided = members("sweeper-one-sided")
+    symmetric = members("sweeper") - one_sided
+    voltron = preferred_theme_label == "Voltron"
+    if not voltron and commander_name:
+        nm = normalize_name(commander_name)
+        voltron = any(nm in members(label) for label in _VOLTRON_COMMANDER_TAGS)
+    return voltron, frozenset(symmetric), frozenset(one_sided)
+
+
+_ALL_CREATURES_RE = re.compile(r"\b(?:each|all) (?:non-?\w+ )?creatures?\b", re.I)
+_OPPONENT_ONLY_RE = re.compile(
+    r"you don't control|your opponents? controls?|opponents? controls?|"
+    r"target (?:player|opponent) controls?|defending player controls?|attacking creatures?",
+    re.I,
+)
+
+
+def _hits_own_board(c: dict, nm: str, symmetric: frozenset[str], one_sided: frozenset[str]) -> bool:
+    """True if this wipe would also hit the player's own creatures. The
+    "sweeper" tag set is the baseline, but "sweeper-one-sided" is loose
+    (Desolation of Smaug -- 3 damage to each non-Dragon creature -- and
+    Elspeth, Sun's Champion -- destroy all creatures with power 4 or
+    greater -- both carry it), so a one-sided-tagged card whose text says
+    "each/all creatures" with no opponent-only qualifier still counts."""
+    if nm in symmetric:
+        return True
+    if nm in one_sided:
+        text = c.get("oracle_text") or ""
+        return bool(_ALL_CREATURES_RE.search(text)) and not _OPPONENT_ONLY_RE.search(text)
+    return False
+
+
 def _costly_filler(c: dict, role: str) -> bool:
     """True for a 6+ mana card in a role that's supposed to be cheap
     support (Ramp/Draw/Interaction). Only used among cards with no
@@ -849,10 +906,15 @@ def suggest_replacements(
     target_tag = tag_by_name.get(normalize_name(target_name))
     same_role = [c for c in candidates if role_of(c["name"], c["category"]) == target_role]
 
+    voltron_commander, symmetric_wipes, one_sided_wipes = _voltron_wipe_policy(
+        commander_entry.name if commander_entry else None,
+        budget_alt.get("groups") or {}, tag_labels,
+    ) if deck_format == "commander" else (False, frozenset(), frozenset())
+
     def rank_key(c: dict):
         nm = normalize_name(c["name"])
         shares_tag = target_tag is not None and tag_by_name.get(nm) == target_tag
-        return (-synergy_by_name.get(nm, 0.0), nm not in edhrec_tracked_names, not shares_tag, nm not in game_changers, _costly_filler(c, target_role), _overall_rank(c), c["name"])
+        return (voltron_commander and _hits_own_board(c, nm, symmetric_wipes, one_sided_wipes), -synergy_by_name.get(nm, 0.0), nm not in edhrec_tracked_names, not shares_tag, nm not in game_changers, _costly_filler(c, target_role), _overall_rank(c), c["name"])
 
     same_role.sort(key=rank_key)
     tag_label = tag_labels.get(target_tag) if target_tag else None
@@ -1102,6 +1164,11 @@ def suggest_builder_cards(
                         reason = f'shares the "{label}" theme with {count} card(s) already in your deck'
                     theme_reason_by_name[normalize_name(c["name"])] = reason
 
+    voltron_commander, symmetric_wipes, one_sided_wipes = _voltron_wipe_policy(
+        commander_entry.name if commander_entry else None,
+        budget_alt.get("groups") or {}, tag_labels, preferred_theme_label,
+    ) if deck_format == "commander" else (False, frozenset(), frozenset())
+
     def rank_key(c: dict):
         nm = normalize_name(c["name"])
         # EDHREC synergy sits right after combo-completion and ahead of the
@@ -1116,11 +1183,22 @@ def suggest_builder_cards(
         # all; theme-matching only decides among cards EDHREC is silent on.
         return (
             nm not in reason_by_name,
+            # Voltron: a symmetric wipe kills the commander the deck is
+            # built around, so it sorts behind everything else -- even a
+            # card EDHREC tracks for this commander (it's popular as a
+            # generic red/white staple, not because it suits the plan).
+            voltron_commander and _hits_own_board(c, nm, symmetric_wipes, one_sided_wipes),
             -synergy_by_name.get(nm, 0.0),
             nm not in edhrec_tracked_names,
             nm not in theme_reason_by_name,
             nm not in game_changers,
             _costly_filler(c, role_of(c["name"], c["category"])),
+            # Voltron: among equally cheap no-signal cards, a one-sided
+            # wipe (clears blockers, spares the commander) goes first. Kept
+            # behind the cost check on purpose: the one-sided tag is loose
+            # (Elspeth, Sun's Champion carries it, but her -3 destroys the
+            # Voltron commander too) and shouldn't override "no 6-drops".
+            not (voltron_commander and nm in one_sided_wipes and not _hits_own_board(c, nm, symmetric_wipes, one_sided_wipes)),
             _overall_rank(c),
             c["name"],
         )
