@@ -360,7 +360,10 @@ def commander_synergy_cards(commander_name: str) -> dict[str, dict]:
     synergy_cache = cache.setdefault("synergy", {})
     cached = synergy_cache.get(nm)
     now = time.time()
-    if cached and now - cached.get("fetched_at", 0) < _SYNERGY_CACHE_MAX_AGE:
+    # An entry written before themes were stored ("themes" missing) is
+    # treated as stale so commander_profile() can get them -- one extra page
+    # fetch per commander, once.
+    if cached and "themes" in cached and now - cached.get("fetched_at", 0) < _SYNERGY_CACHE_MAX_AGE:
         return cached.get("cards") or {}
 
     # Reuse a real slug from the cached rankings when this commander is in
@@ -374,6 +377,8 @@ def commander_synergy_cards(commander_name: str) -> dict[str, dict]:
     candidates.append(_slugify(commander_name))
 
     cards: dict[str, dict] = {}
+    themes: list[dict] = []
+    avg_planeswalkers = None
     found = False
     for slug in candidates:
         data = _fetch_next_data(f"https://edhrec.com/commanders/{slug}")
@@ -384,6 +389,17 @@ def commander_synergy_cards(commander_name: str) -> dict[str, dict]:
         except (KeyError, TypeError):
             continue
         found = True
+        page_data = data["props"]["pageProps"].get("data") or {}
+        # EDHREC's own labels for what players build this commander as
+        # (e.g. Cloud, Ex-SOLDIER: Equipment 3108, Voltron 1800 decks),
+        # most-played first, and the average number of planeswalkers in
+        # those decks (Cloud 0, Atraxa 5).
+        themes = [
+            {"slug": t.get("slug"), "value": t.get("value"), "count": t.get("count")}
+            for t in (page_data.get("tag_counts") or []) if t.get("slug")
+        ]
+        pw = page_data.get("planeswalker")
+        avg_planeswalkers = pw if isinstance(pw, (int, float)) else None
         for cl in cardlists:
             for c in cl.get("cardviews") or []:
                 card_name = c.get("name") or ""
@@ -397,6 +413,19 @@ def commander_synergy_cards(commander_name: str) -> dict[str, dict]:
         break  # first slug that actually resolves to a real page wins
 
     if found:
-        synergy_cache[nm] = {"fetched_at": now, "cards": cards}
+        synergy_cache[nm] = {"fetched_at": now, "cards": cards, "themes": themes, "avg_planeswalkers": avg_planeswalkers}
         _save_cache(cache)
-    return cards
+        return cards
+    # Fetch failed (offline, rate-limited): keep serving an older cached
+    # copy rather than dropping to nothing.
+    return (cached or {}).get("cards") or cards
+
+
+def commander_profile(commander_name: str) -> dict:
+    """What EDHREC says this commander is played as: {"themes": [{"slug",
+    "value", "count"}, ...] most-played first, "avg_planeswalkers": float or
+    None}. Shares commander_synergy_cards's cache (and fetch). Empty values
+    when EDHREC has nothing for the commander."""
+    commander_synergy_cards(commander_name)
+    entry = _load_cache().get("synergy", {}).get(commander_name.strip().lower()) or {}
+    return {"themes": entry.get("themes") or [], "avg_planeswalkers": entry.get("avg_planeswalkers")}

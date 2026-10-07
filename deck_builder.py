@@ -28,7 +28,7 @@ from brewlist_core import (
     normalize_name,
     prices_data_in_index,
 )
-from edhrec_data import commander_synergy_cards
+from edhrec_data import commander_profile, commander_synergy_cards
 
 # WOTC_BRACKET_GAME_CHANGER_MAX is keyed 1/2/3 (brackets 1-2 share a cap
 # of 0 per WotC's own rules; 4-5 have no cap at all -- see its definition
@@ -470,12 +470,25 @@ _VOLTRON_COMMANDER_TAGS = {
 }
 
 
+def _edhrec_says_voltron(profile: dict) -> bool | None:
+    """Whether EDHREC's own theme labels for this commander put Voltron among
+    its top 3 (Cloud, Ex-SOLDIER: Equipment, Voltron, Artifacts; Akiri:
+    Equipment, Aggro, Voltron). None when EDHREC has no themes for it."""
+    themes = profile.get("themes") or []
+    if not themes:
+        return None
+    return any(t.get("slug") == "voltron" for t in themes[:3])
+
+
 def _voltron_wipe_policy(
     commander_name: str | None, groups: dict, tag_labels: dict, preferred_theme_label: str | None = None,
+    edhrec_profile: dict | None = None,
 ) -> tuple[bool, frozenset[str], frozenset[str]]:
     """(is_voltron, symmetric_wipe_names, one_sided_wipe_names). Voltron =
-    the commander carries one of _VOLTRON_COMMANDER_TAGS, or the player
-    explicitly picked the Voltron theme. symmetric = tagged "sweeper" but
+    the player explicitly picked the Voltron theme, else what EDHREC's
+    themes say about the commander (_edhrec_says_voltron), else -- only when
+    EDHREC has nothing -- whether the commander carries one of
+    _VOLTRON_COMMANDER_TAGS. symmetric = tagged "sweeper" but
     not "sweeper-one-sided" (Wrath of God, Blasphemous Act); one_sided =
     "sweeper-one-sided" (Elspeth, Sun's Champion; Cyclonic Rift)."""
     label_to_id = {label: tag_id for tag_id, label in tag_labels.items()}
@@ -486,9 +499,13 @@ def _voltron_wipe_policy(
     one_sided = members("sweeper-one-sided")
     symmetric = members("sweeper") - one_sided
     voltron = preferred_theme_label == "Voltron"
-    if not voltron and commander_name:
-        nm = normalize_name(commander_name)
-        voltron = any(nm in members(label) for label in _VOLTRON_COMMANDER_TAGS)
+    if not voltron:
+        edhrec_view = _edhrec_says_voltron(edhrec_profile or {})
+        if edhrec_view is not None:
+            voltron = edhrec_view
+        elif commander_name:
+            nm = normalize_name(commander_name)
+            voltron = any(nm in members(label) for label in _VOLTRON_COMMANDER_TAGS)
     return voltron, frozenset(symmetric), frozenset(one_sided)
 
 
@@ -906,9 +923,10 @@ def suggest_replacements(
     target_tag = tag_by_name.get(normalize_name(target_name))
     same_role = [c for c in candidates if role_of(c["name"], c["category"]) == target_role]
 
+    edhrec_profile = commander_profile(commander_entry.name) if (deck_format == "commander" and commander_entry) else {}
     voltron_commander, symmetric_wipes, one_sided_wipes = _voltron_wipe_policy(
         commander_entry.name if commander_entry else None,
-        budget_alt.get("groups") or {}, tag_labels,
+        budget_alt.get("groups") or {}, tag_labels, None, edhrec_profile,
     ) if deck_format == "commander" else (False, frozenset(), frozenset())
 
     def rank_key(c: dict):
@@ -1164,10 +1182,16 @@ def suggest_builder_cards(
                         reason = f'shares the "{label}" theme with {count} card(s) already in your deck'
                     theme_reason_by_name[normalize_name(c["name"])] = reason
 
+    edhrec_profile = commander_profile(commander_entry.name) if (deck_format == "commander" and commander_entry) else {}
     voltron_commander, symmetric_wipes, one_sided_wipes = _voltron_wipe_policy(
         commander_entry.name if commander_entry else None,
-        budget_alt.get("groups") or {}, tag_labels, preferred_theme_label,
+        budget_alt.get("groups") or {}, tag_labels, preferred_theme_label, edhrec_profile,
     ) if deck_format == "commander" else (False, frozenset(), frozenset())
+    # EDHREC's average planeswalker count in this commander's decks (Cloud 0,
+    # Atraxa 5). Under 1 means players essentially never run them, so a
+    # planeswalker with no commander-specific signal shouldn't fill a slot.
+    avg_pw = edhrec_profile.get("avg_planeswalkers")
+    pw_unwanted = avg_pw is not None and avg_pw < 1
 
     def rank_key(c: dict):
         nm = normalize_name(c["name"])
@@ -1192,6 +1216,7 @@ def suggest_builder_cards(
             nm not in edhrec_tracked_names,
             nm not in theme_reason_by_name,
             nm not in game_changers,
+            pw_unwanted and c["category"] == "Planeswalkers",
             _costly_filler(c, role_of(c["name"], c["category"])),
             # Voltron: among equally cheap no-signal cards, a one-sided
             # wipe (clears blockers, spares the commander) goes first. Kept
