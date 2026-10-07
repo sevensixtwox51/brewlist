@@ -515,27 +515,49 @@ def _edhrec_theme_names(profile: dict, top: int = 3, min_share: float = 0.5) -> 
     return names
 
 
-def _edhrec_says_voltron(profile: dict) -> bool | None:
-    """Whether EDHREC's own theme labels for this commander put Voltron among
-    its top 3 (Cloud, Ex-SOLDIER: Equipment, Voltron, Artifacts; Akiri:
-    Equipment, Aggro, Voltron). None when EDHREC has no themes for it."""
+# How a commander's EDHREC themes say it feels about symmetric board wipes
+# (Wrath of God and friends, which hit your own board too). A theme only
+# counts if it's among the commander's top 3. "friendly" wins over "averse":
+# Talrand (Spellslinger, Tokens, Control) wants wipes; Cloud (Equipment,
+# Voltron), Kaalia and Krenko (Aggro) don't.
+_WIPE_AVERSE_THEMES = {"voltron", "aggro", "tokens", "equipment", "extra combats"}
+_WIPE_FRIENDLY_THEMES = {
+    "control", "spellslinger", "reanimator", "mill", "planeswalkers", "superfriends",
+    "wheels", "group slug",
+}
+# Most symmetric wipes a deck should hold, by stance. ~3 is the usual count in
+# a creature deck that still wants an emergency button; control/graveyard/
+# superfriends decks run more. Averse decks run none (and rank them last).
+_WIPE_CAPS = {"averse": 0, "neutral": 3, "friendly": 5}
+
+
+def _edhrec_wipe_stance(profile: dict) -> str | None:
+    """"averse" / "friendly" / "neutral" from EDHREC's top-3 themes for the
+    commander, or None when EDHREC has no themes for it."""
     themes = profile.get("themes") or []
     if not themes:
         return None
-    return any(t.get("slug") == "voltron" for t in themes[:3])
+    top = {(t.get("value") or "").strip().lower() for t in themes[:3]}
+    if top & _WIPE_FRIENDLY_THEMES:
+        return "friendly"
+    if top & _WIPE_AVERSE_THEMES:
+        return "averse"
+    return "neutral"
 
 
-def _voltron_wipe_policy(
+def _wipe_policy(
     commander_name: str | None, groups: dict, tag_labels: dict, preferred_theme_label: str | None = None,
     edhrec_profile: dict | None = None,
-) -> tuple[bool, frozenset[str], frozenset[str]]:
-    """(is_voltron, symmetric_wipe_names, one_sided_wipe_names). Voltron =
-    the player explicitly picked the Voltron theme, else what EDHREC's
-    themes say about the commander (_edhrec_says_voltron), else -- only when
-    EDHREC has nothing -- whether the commander carries one of
-    _VOLTRON_COMMANDER_TAGS. symmetric = tagged "sweeper" but
-    not "sweeper-one-sided" (Wrath of God, Blasphemous Act); one_sided =
-    "sweeper-one-sided" (Elspeth, Sun's Champion; Cyclonic Rift)."""
+) -> tuple[str, frozenset[str], frozenset[str]]:
+    """(stance, symmetric_wipe_names, one_sided_wipe_names). stance is
+    "averse" when the player explicitly picked the Voltron theme, else what
+    EDHREC's themes say (_edhrec_wipe_stance), else -- only when EDHREC has
+    nothing -- "averse" if the commander carries one of
+    _VOLTRON_COMMANDER_TAGS and "neutral" otherwise. symmetric = tagged
+    "sweeper" but not "sweeper-one-sided" (Wrath of God, Blasphemous Act);
+    one_sided = "sweeper-one-sided" (Elspeth, Sun's Champion; Cyclonic
+    Rift). Callers still run _hits_own_board over both, since the one-sided
+    tag is loose."""
     label_to_id = {label: tag_id for tag_id, label in tag_labels.items()}
 
     def members(label: str) -> set[str]:
@@ -543,15 +565,15 @@ def _voltron_wipe_policy(
 
     one_sided = members("sweeper-one-sided")
     symmetric = members("sweeper") - one_sided
-    voltron = preferred_theme_label == "Voltron"
-    if not voltron:
-        edhrec_view = _edhrec_says_voltron(edhrec_profile or {})
-        if edhrec_view is not None:
-            voltron = edhrec_view
-        elif commander_name:
-            nm = normalize_name(commander_name)
-            voltron = any(nm in members(label) for label in _VOLTRON_COMMANDER_TAGS)
-    return voltron, frozenset(symmetric), frozenset(one_sided)
+    if preferred_theme_label == "Voltron":
+        stance = "averse"
+    else:
+        stance = _edhrec_wipe_stance(edhrec_profile or {})
+        if stance is None:
+            nm = normalize_name(commander_name) if commander_name else None
+            voltron = bool(nm) and any(nm in members(label) for label in _VOLTRON_COMMANDER_TAGS)
+            stance = "averse" if voltron else "neutral"
+    return stance, frozenset(symmetric), frozenset(one_sided)
 
 
 _ALL_CREATURES_RE = re.compile(r"\b(?:each|all) (?:non-?\w+ )?creatures?\b", re.I)
@@ -969,10 +991,11 @@ def suggest_replacements(
     same_role = [c for c in candidates if role_of(c["name"], c["category"]) == target_role]
 
     edhrec_profile = commander_profile(commander_entry.name) if (deck_format == "commander" and commander_entry) else {}
-    voltron_commander, symmetric_wipes, one_sided_wipes = _voltron_wipe_policy(
+    wipe_stance, symmetric_wipes, one_sided_wipes = _wipe_policy(
         commander_entry.name if commander_entry else None,
         budget_alt.get("groups") or {}, tag_labels, None, edhrec_profile,
-    ) if deck_format == "commander" else (False, frozenset(), frozenset())
+    ) if deck_format == "commander" else ("neutral", frozenset(), frozenset())
+    voltron_commander = wipe_stance == "averse"
 
     def rank_key(c: dict):
         nm = normalize_name(c["name"])
@@ -1228,10 +1251,23 @@ def suggest_builder_cards(
                     theme_reason_by_name[normalize_name(c["name"])] = reason
 
     edhrec_profile = commander_profile(commander_entry.name) if (deck_format == "commander" and commander_entry) else {}
-    voltron_commander, symmetric_wipes, one_sided_wipes = _voltron_wipe_policy(
+    wipe_stance, symmetric_wipes, one_sided_wipes = _wipe_policy(
         commander_entry.name if commander_entry else None,
         budget_alt.get("groups") or {}, tag_labels, preferred_theme_label, edhrec_profile,
-    ) if deck_format == "commander" else (False, frozenset(), frozenset())
+    ) if deck_format == "commander" else ("neutral", frozenset(), frozenset())
+    voltron_commander = wipe_stance == "averse"
+    wipe_cap = _WIPE_CAPS[wipe_stance] if deck_format == "commander" else None
+    owned_by_name = {normalize_name(c["name"]): c for c in owned_view}
+
+    def is_own_board_wipe(c: dict) -> bool:
+        return _hits_own_board(c, normalize_name(c["name"]), symmetric_wipes, one_sided_wipes)
+
+    # Wipes already in the deck count against the cap (a partial deck).
+    running_wipe_count = sum(
+        e.quantity for e in wip_entries
+        if e.section != "commander"
+        and is_own_board_wipe(owned_by_name.get(normalize_name(e.name)) or {"name": e.name})
+    )
     # EDHREC's average planeswalker count in this commander's decks (Cloud 0,
     # Atraxa 5). Under 1 means players essentially never run them, so a
     # planeswalker with no commander-specific signal shouldn't fill a slot.
@@ -1332,6 +1368,8 @@ def suggest_builder_cards(
         combo_first.append(c)
         if is_gc:
             running_gc_count += 1
+        if is_own_board_wipe(c):
+            running_wipe_count += 1  # a real combo piece wins, but it still counts
     combo_first_names = {normalize_name(c["name"]) for c in combo_first}
     role_pool_candidates = [c for c in candidates if normalize_name(c["name"]) not in combo_first_names]
 
@@ -1493,6 +1531,8 @@ def suggest_builder_cards(
                 is_gc = normalize_name(candidate["name"]) in game_changers
                 if gc_cap is not None and is_gc and running_gc_count >= gc_cap:
                     continue  # over the intended bracket's cap -- try this role's next candidate instead
+                if wipe_cap is not None and running_wipe_count >= wipe_cap and is_own_board_wipe(candidate):
+                    continue  # enough symmetric wipes for this kind of deck already
                 picked = candidate
                 break
             if picked is None:
@@ -1502,6 +1542,8 @@ def suggest_builder_cards(
             added_counts[role] += 1
             if normalize_name(picked["name"]) in game_changers:
                 running_gc_count += 1
+            if is_own_board_wipe(picked):
+                running_wipe_count += 1
 
     # What the owned round-robin (plus the combo-first carve-out) already
     # placed per role. The purchase fallback below needs the real remaining
@@ -1551,10 +1593,14 @@ def suggest_builder_cards(
                 is_gc = normalize_name(candidate["name"]) in game_changers
                 if gc_cap is not None and is_gc and running_gc_count >= gc_cap:
                     continue
+                if wipe_cap is not None and running_wipe_count >= wipe_cap and is_own_board_wipe(candidate):
+                    continue
                 unowned_picks.append((candidate, role))
                 taken += 1
                 if is_gc:
                     running_gc_count += 1
+                if is_own_board_wipe(candidate):
+                    running_wipe_count += 1
 
     prices = prices_data_in_index() if (unowned_picks or (pools_out is not None and unowned_by_role)) else {}
 
