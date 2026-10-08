@@ -1617,9 +1617,28 @@ def suggest_builder_cards(
                 return rows[0][1], rows[0][2]
         return None, None
 
+    def suggestion_basis(nm: str) -> str:
+        """Why this card was picked: "combo" (completes a real combo),
+        "synergy" (meaningful EDHREC synergy with this commander), "theme"
+        (fits the commander's/deck's theme), "edhrec" (EDHREC lists it with
+        this commander but with no distinctive synergy), "filler" (none of
+        the above -- chosen purely to fill a slot, ranked by overall
+        popularity), or "other" when EDHREC has no data for the commander at
+        all, in which case nothing can fairly be called filler."""
+        if nm in reason_by_name:
+            return "combo"
+        if synergy_by_name.get(nm, 0.0) >= _MEANINGFUL_SYNERGY:
+            return "synergy"
+        if nm in theme_reason_by_name:
+            return "theme"
+        if nm in edhrec_tracked_names:
+            return "edhrec"
+        return "filler" if (deck_format == "commander" and edhrec_tracked_names) else "other"
+
     def make_suggestion(c: dict, role: str, owned: bool) -> dict:
         nm = normalize_name(c["name"])
         synergy_reason = _synergy_reason(synergy_by_name.get(nm))
+        basis = suggestion_basis(nm)
         out = {
             "name": c["name"],
             "scryfall_id": c["scryfall_id"],
@@ -1633,9 +1652,15 @@ def suggest_builder_cards(
             "owned": owned,
             "role": role,
             "game_changer": nm in game_changers,
+            "basis": basis,
         }
         if owned:
             fallback_reason = f"fills out {role}" if deck_format == "commander" else f"fills out {c['category']}"
+            rank = c.get("edhrec_rank")
+            if basis == "filler":
+                fallback_reason = f"no EDHREC data for this card with your commander; picked to fill {role}" + (f" (overall popularity #{rank})" if rank else "")
+            elif basis == "edhrec":
+                fallback_reason = f"played in EDHREC decks for this commander (no distinctive synergy); fills out {role}"
             out["reason"] = reason_by_name.get(nm) or synergy_reason or theme_reason_by_name.get(nm) or fallback_reason
         else:
             price, price_url = _cheapest_price(nm)

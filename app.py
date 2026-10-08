@@ -983,6 +983,19 @@ body:not(.compact) .builder-tile .tile-icon-stack { grid-area:stack; }
   color:var(--gold); font-size:0.68rem; font-weight:600; vertical-align:1px;
   text-decoration:none; cursor:default;
 }
+/* "Slot filler": a pick with no combo, EDHREC synergy/listing or theme
+   behind it -- chosen only to fill a role's slot. Deliberately muted and
+   dashed so it reads as "weaker evidence", distinct from the gold
+   "Not owned" badge. */
+.filler-badge {
+  display:inline-block; margin-left:6px; padding:1px 7px; border-radius:999px;
+  border:1px dashed var(--text-dim); color:var(--text-dim);
+  font-size:0.68rem; font-weight:600; vertical-align:1px; cursor:help; white-space:nowrap;
+}
+.filler-note { margin:0 0 8px; padding:6px 10px; border-radius:8px; font-size:0.78rem; color:var(--text-dim); border:1px dashed var(--text-dim); }
+.wz-badge-row .filler-badge { margin-left:0; }
+.wz-badge-row .unowned-badge + .filler-badge { margin-left:4px; }
+.wz-count .filler-count { color:var(--text-dim); border-bottom:1px dashed var(--text-dim); cursor:help; }
 a.unowned-badge { cursor:pointer; }
 a.unowned-badge:hover { background:color-mix(in srgb, var(--gold) 28%, transparent); }
 
@@ -2560,6 +2573,12 @@ function setWizardFooter(opts) {{
   if (opts.nextLabel) document.getElementById('wizard-next').textContent = opts.nextLabel;
 }}
 
+const FILLER_TIP = 'No EDHREC data for this card with your commander, and no combo or theme link -- it was picked only to fill a slot, ranked by overall popularity.';
+function isFiller(card) {{ return card.basis === 'filler'; }}
+function fillerBadgeHtml(card) {{
+  return isFiller(card) ? '<span class="filler-badge" title="' + FILLER_TIP + '">Slot filler</span>' : '';
+}}
+
 function wizardTileHtml(card) {{
   const sel = wizard.selected.has(wizardKey(card));
   const priceText = card.price != null ? ' &middot; $' + card.price.toFixed(2) : '';
@@ -2569,13 +2588,14 @@ function wizardTileHtml(card) {{
         : '<span class="unowned-badge">Not owned' + priceText + '</span>')
     : '';
   const gc = card.game_changer ? '<span class="wz-gc" title="On WotC&#39;s Game Changers list">GC</span>' : '';
-  return '<div class="wz-tile' + (sel ? ' selected' : '') + (card.owned === false ? ' unowned' : '') + '" data-key="' + escapeHtml(wizardKey(card)) + '" data-full="' + (scryfallImg(card.scryfall_id, 'normal') || '') + '">'
+  const badges = badge + fillerBadgeHtml(card);
+  return '<div class="wz-tile' + (sel ? ' selected' : '') + (card.owned === false ? ' unowned' : '') + (isFiller(card) ? ' filler' : '') + '" data-key="' + escapeHtml(wizardKey(card)) + '" data-full="' + (scryfallImg(card.scryfall_id, 'normal') || '') + '">'
     + '<div class="wz-check" aria-hidden="true">&#10003;</div>'
     + '<button type="button" class="wz-avoid" title="Never suggest this card again for this deck" data-avoid="' + escapeHtml(wizardKey(card)) + '">&#128683;</button>'
     + thumbHtml(card.scryfall_id, 'card-thumb wz-img')
     + '<div class="wz-name">' + escapeHtml(card.name) + gc + '</div>'
     + '<div class="wz-reason" title="' + escapeHtml(card.reason) + '">' + escapeHtml(card.reason) + '</div>'
-    + (badge ? '<div class="wz-badge-row">' + badge + '</div>' : '')
+    + (badges ? '<div class="wz-badge-row">' + badges + '</div>' : '')
     + '</div>';
 }}
 
@@ -2619,12 +2639,16 @@ function renderWizard() {{
     }}
   }}
 
+  const fillerSelected = wizardCards(step).filter(c => isFiller(c) && wizard.selected.has(wizardKey(c))).length;
+  const fillerNote = fillerSelected
+    ? ' &middot; <span class="filler-count" title="' + FILLER_TIP + '">' + fillerSelected + ' slot filler' + (fillerSelected === 1 ? '' : 's') + '</span>'
+    : '';
   let html = '<div class="wz-intro"><span class="hint wz-blurb">' + escapeHtml(info.blurb) + '</span>'
-    + '<span class="wz-count ' + countClass + '"><b>' + n + '</b> selected (aiming for ' + step.needed + ') &middot; ' + countNote + '</span>'
+    + '<span class="wz-count ' + countClass + '"><b>' + n + '</b> selected (aiming for ' + step.needed + ') &middot; ' + countNote + fillerNote + '</span>'
     + '<span class="wz-tools"><button type="button" class="btn ghost small" data-wz="none">Select none</button>'
     + '<button type="button" class="btn ghost small" data-wz="reset">Reset to suggested</button></span></div>'
     + gcNote
-    + '<div class="hint wz-tip">Click a card to add or remove it. Cards marked <b>Not owned</b> would need to be bought.</div>';
+    + '<div class="hint wz-tip">Click a card to add or remove it. Cards marked <b>Not owned</b> would need to be bought; <b>Slot filler</b> means EDHREC has nothing on that card for your commander and it was only picked to fill the slot.</div>';
 
   if (step.role === 'Synergy') {{
     const isCreature = c => c.category === 'Creatures';
@@ -2728,6 +2752,11 @@ function finishWizard() {{
           ? '<a href="' + escapeHtml(c.price_url) + '" target="_blank" rel="noopener">' + escapeHtml(c.name) + '</a>'
           : escapeHtml(c.name)) + (c.price != null ? ' &middot; $' + c.price.toFixed(2) : '') + '</div>').join('');
   }}
+  const fillers = toAdd.filter(isFiller);
+  if (fillers.length) {{
+    html += '<div class="filler-note" style="margin-top:8px;"><b>' + fillers.length + ' slot filler' + (fillers.length === 1 ? '' : 's') + ' added</b> (no EDHREC data for your commander; worth a look): '
+      + fillers.map(c => escapeHtml(c.name)).join(', ') + '.</div>';
+  }}
   panel.innerHTML = html;
 }}
 
@@ -2758,6 +2787,10 @@ suggestBtn.addEventListener('click', () => {{
       if (!data.suggestions.length) {{
         panel.innerHTML += '<div class="hint" style="margin:0;">No suggestions -- your deck may already be full, or nothing left fits the color/legality filters.</div>';
         return;
+      }}
+      const fillerCount = data.suggestions.filter(isFiller).length;
+      if (fillerCount) {{
+        panel.insertAdjacentHTML('beforeend', '<div class="filler-note"><b>' + fillerCount + ' of ' + data.suggestions.length + '</b> picks are <b>slot fillers</b>: EDHREC has no data on them for your commander, so they were only chosen to fill a slot.</div>');
       }}
       // Tracks which suggestions haven't been individually added yet, so
       // "+ Add All" reflects reality instead of a stale snapshot -- without
@@ -2807,7 +2840,7 @@ suggestBtn.addEventListener('click', () => {{
                 ? `<a class="unowned-badge" href="${{s.price_url}}" target="_blank" rel="noopener" title="Buy this card">Not owned${{priceText}}</a>`
                 : `<span class="unowned-badge">Not owned${{priceText}}</span>`)
             : '';
-          row.innerHTML = `<span class="row-name">${{thumbHtml(s.scryfall_id, 'card-thumb small')}}<span>${{s.name}} ${{colorIconsHtml(s.color_identity)}}${{priceBadge}}<div class="reason">${{s.reason}}</div></span></span>`;
+          row.innerHTML = `<span class="row-name">${{thumbHtml(s.scryfall_id, 'card-thumb small')}}<span>${{s.name}} ${{colorIconsHtml(s.color_identity)}}${{priceBadge}}${{fillerBadgeHtml(s)}}<div class="reason">${{s.reason}}</div></span></span>`;
           const dropRow = () => {{
             row.remove();
             remaining = remaining.filter(x => x !== s);
