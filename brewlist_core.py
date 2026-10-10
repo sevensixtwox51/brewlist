@@ -4180,8 +4180,8 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
         if ai_summary else ""
     )
     further_optimizations_html = (
-        '<div class="ai-summary-note"><b>&#9889; Further Optimizations</b><ul class="rule0-list" style="margin-top:6px;">'
-        + "".join(f"<li>{html.escape(t)}</li>" for t in further_optimizations)
+        '<div class="ai-summary-note"><b>&#10003; Optimizations applied</b><ul class="rule0-list" style="margin-top:6px;">'
+        + "".join(f"<li>&#10003; {html.escape(t)}</li>" for t in further_optimizations)
         + "</ul></div>"
         if further_optimizations else ""
     )

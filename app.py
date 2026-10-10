@@ -1439,7 +1439,10 @@ def render_builder_page(deck_id: str | None = None) -> str:
         <p class="hint" id="ai-summary-text" style="margin:0 0 12px;"></p>
       </div>
       <div id="further-optimizations-block" style="display:none;">
-        <h4 class="analysis-heading">&#9889; Further Optimizations</h4>
+        <h4 class="analysis-heading">&#10003; Optimizations applied
+          <button type="button" class="btn ghost small" id="further-optimizations-clear" style="margin-left:8px;" title="Clear this list (the cards stay in the deck)">Clear</button>
+        </h4>
+        <p class="hint" style="margin:0 0 4px;">Swaps you applied from Optimize Deck &mdash; already done, nothing left to do.</p>
         <ul class="rule0-list" id="further-optimizations-list"></ul>
       </div>
       <div id="maybeboard-block" style="display:none;">
@@ -3028,10 +3031,11 @@ optimizeBtn.addEventListener('click', () => {{
         removeCard(p.remove.name);
         addCard(p.add);
         // Recorded onto the brew (not just applied) so Analyze Deck and
-        // the full report can show a "Further Optimizations" trail below
-        // the AI summary -- otherwise a deterministic Optimize swap made
-        // after an AI build leaves the AI's own narrative silently
-        // out of sync with what's actually in the deck now.
+        // the full report can show an "Optimizations applied" log of the
+        // swaps made. Labelled as already-done on purpose: it used to be
+        // headed "Further Optimizations", which reads as still pending
+        // (real, repeated user report: Terror of the Peaks listed after it
+        // had been added).
         brew.further_optimizations.push(`+ ${{p.add.name}} (${{p.reason}}) — cut ${{p.remove.name}}`);
       }}
       const applyAllBtn = Object.assign(document.createElement('button'), {{
@@ -3353,9 +3357,13 @@ analyzeBtn.addEventListener('click', () => {{
   document.getElementById('analyze-modal-title').textContent = brew.deck_name || document.getElementById('deck-name').value || 'Analyze Deck';
   document.getElementById('ai-summary-block').style.display = brew.ai_summary ? 'block' : 'none';
   document.getElementById('ai-summary-text').textContent = brew.ai_summary || '';
+  document.getElementById('further-optimizations-clear').onclick = () => {{
+    brew.further_optimizations = [];
+    document.getElementById('further-optimizations-block').style.display = 'none';
+  }};
   const furtherOpts = brew.further_optimizations || [];
   document.getElementById('further-optimizations-block').style.display = furtherOpts.length ? 'block' : 'none';
-  document.getElementById('further-optimizations-list').innerHTML = furtherOpts.map(t => `<li>${{escapeHtml(t)}}</li>`).join('');
+  document.getElementById('further-optimizations-list').innerHTML = furtherOpts.map(t => `<li>&#10003; ${{escapeHtml(t)}}</li>`).join('');
   renderMaybeboard();
   renderDeckAnalysis();
   drawSampleHand();
