@@ -84,11 +84,37 @@ CARD_KINGDOM_BASE = "https://www.cardkingdom.com/"
 SCRYFALL_IMAGE_BASE = "https://cards.scryfall.io"
 
 
+_image_version_cache: dict = {"mtime": None, "data": {}}
+
+
+def cached_image_version(scryfall_id: str | None) -> str:
+    """The Scryfall image version scryfall_image_versions() last found for this
+    printing ("" when unknown or the printing isn't from a recent set). Read
+    from the on-disk cache only -- never a network call -- so report pages can
+    use it freely; the deck builder is what keeps the cache fresh."""
+    if not scryfall_id:
+        return ""
+    path = IMAGE_VERSIONS_PATH
+    try:
+        mtime = os.path.getmtime(path)
+        if _image_version_cache["mtime"] != mtime:
+            with open(path, encoding="utf-8") as f:
+                _image_version_cache["data"] = json.load(f)
+            _image_version_cache["mtime"] = mtime
+    except (OSError, ValueError):
+        return ""
+    return (_image_version_cache["data"].get(scryfall_id) or {}).get("v", "")
+
+
 def scryfall_image_url(scryfall_id: str | None, size: str = "normal") -> str | None:
-    """Direct Scryfall CDN hotlink -- no API call needed. size: small/normal/large."""
+    """Direct Scryfall CDN hotlink -- no API call needed. size: small/normal/large.
+    Appends the image version for recently released printings (see
+    scryfall_image_versions): the plain URL can keep serving a stale or
+    wrong-language file for a while after a set releases."""
     if not scryfall_id:
         return None
-    return f"{SCRYFALL_IMAGE_BASE}/{size}/front/{scryfall_id[0]}/{scryfall_id[1]}/{scryfall_id}.jpg"
+    version = cached_image_version(scryfall_id)
+    return f"{SCRYFALL_IMAGE_BASE}/{size}/front/{scryfall_id[0]}/{scryfall_id[1]}/{scryfall_id}.jpg" + (f"?{version}" if version else "")
 
 
 SCRYFALL_SYMBOL_BASE = "https://svgs.scryfall.io/card-symbols"
@@ -1498,6 +1524,75 @@ def game_changers_in_index(path: str = PRICE_INDEX_PATH) -> set[str]:
             return set(json.load(f).get("game_changers") or [])
     except (OSError, ValueError):
         return set()
+
+
+# --------------------------------------------------------------------------
+# Scryfall image versions. A card image lives at a plain, unversioned CDN URL,
+# but for a while after a set releases Scryfall keeps replacing the files, and
+# the plain URL can keep serving a stale copy -- real, user-reported case:
+# Tenured Tethermage (Reality Fracture, owned in English) showed the French
+# image, while the same URL with the version Scryfall's API reports
+# ("...jpg?1789385792") is the correct English one. 73 of the 391 owned
+# printings from the three newest sets differed. The version is one number per
+# printing (identical for every image size), so for printings from recently
+# released sets we ask the API for it, cache it for a day, and the page
+# appends it to image URLs. Everything older keeps the plain URL.
+# --------------------------------------------------------------------------
+IMAGE_VERSIONS_PATH = os.path.join(_CORE_DIR, "data", "image_versions.json")
+IMAGE_VERSION_RECENT_DAYS = 60
+IMAGE_VERSION_REFRESH_SECONDS = 24 * 3600
+
+
+def scryfall_image_versions(printings: list[tuple[str, str]], path: str = IMAGE_VERSIONS_PATH) -> dict[str, str]:
+    """{scryfall_id: version} for the given (scryfall_id, set_code) printings
+    that belong to sets released within IMAGE_VERSION_RECENT_DAYS. Network
+    failures fall back to whatever is cached; never raises."""
+    import datetime as _dt
+    import time as _time
+    sets = sets_data_in_index()
+    cutoff = (_dt.date.today() - _dt.timedelta(days=IMAGE_VERSION_RECENT_DAYS)).isoformat()
+    recent = {
+        sid for sid, code in printings
+        if sid and (sets.get((code or "").upper()) or {}).get("release_date", "") >= cutoff
+    }
+    if not recent:
+        return {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            cache = json.load(f)
+    except (OSError, ValueError):
+        cache = {}
+    now = _time.time()
+    need = [sid for sid in recent if now - (cache.get(sid) or {}).get("t", 0) > IMAGE_VERSION_REFRESH_SECONDS]
+    changed = False
+    for i in range(0, len(need), 75):
+        chunk = need[i:i + 75]
+        try:
+            req = urllib.request.Request(
+                "https://api.scryfall.com/cards/collection",
+                data=json.dumps({"identifiers": [{"id": sid} for sid in chunk]}).encode(),
+                headers={"User-Agent": "brewlist/1.0 (personal use)", "Accept": "application/json", "Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                found = json.loads(resp.read().decode("utf-8")).get("data") or []
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+            break
+        for card in found:
+            uris = card.get("image_uris") or ((card.get("card_faces") or [{}])[0].get("image_uris")) or {}
+            uri = uris.get("small") or ""
+            cache[card["id"]] = {"v": uri.split("?", 1)[1] if "?" in uri else "", "t": now}
+            changed = True
+        _time.sleep(0.11)  # Scryfall asks for <=10 requests/second
+    if changed:
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            tmp = f"{path}.{os.getpid()}.tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(cache, f)
+            os.replace(tmp, path)
+        except OSError:
+            pass
+    return {sid: cache[sid]["v"] for sid in recent if (cache.get(sid) or {}).get("v")}
 
 
 def gameplay_data_in_index(path: str = PRICE_INDEX_PATH) -> dict[str, dict]:
@@ -3360,9 +3455,9 @@ document.body.addEventListener('mousemove', (e) => {{
 
 const SAMPLE_HAND_LIBRARY = {sample_hand_json};
 const DFC_LAYOUTS = ['transform', 'modal_dfc'];
-function scryfallImg(id, size, face) {{
+function scryfallImg(id, size, face, version) {{
   if (!id) return null;
-  return 'https://cards.scryfall.io/' + size + '/' + (face || 'front') + '/' + id[0] + '/' + id[1] + '/' + id + '.jpg';
+  return 'https://cards.scryfall.io/' + size + '/' + (face || 'front') + '/' + id[0] + '/' + id[1] + '/' + id + '.jpg' + (version ? '?' + version : '');
 }}
 function drawSampleHand() {{
   const pool = SAMPLE_HAND_LIBRARY.slice();
@@ -3373,12 +3468,12 @@ function drawSampleHand() {{
   const container = document.getElementById('sample-hand-cards');
   if (!container) return;
   container.innerHTML = pool.slice(0, 7).map(c => {{
-    const small = scryfallImg(c.scryfall_id, 'small');
-    const full = scryfallImg(c.scryfall_id, 'normal');
+    const small = scryfallImg(c.scryfall_id, 'small', undefined, c.v);
+    const full = scryfallImg(c.scryfall_id, 'normal', undefined, c.v);
     if (!small) return `<div class="sample-hand-card"><div class="sample-hand-thumb" title="${{c.name}}"></div></div>`;
     if (DFC_LAYOUTS.includes(c.layout)) {{
-      const backSmall = scryfallImg(c.scryfall_id, 'small', 'back');
-      const backFull = scryfallImg(c.scryfall_id, 'normal', 'back');
+      const backSmall = scryfallImg(c.scryfall_id, 'small', 'back', c.v);
+      const backFull = scryfallImg(c.scryfall_id, 'normal', 'back', c.v);
       return `<div class="sample-hand-card">`
         + `<img class="sample-hand-thumb card-thumb" src="${{small}}" data-full="${{full}}" `
         + `data-front-small="${{small}}" data-front-full="${{full}}" data-back-small="${{backSmall}}" `
@@ -4073,6 +4168,7 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
         {
             "name": r.entry.name,
             "scryfall_id": _display_scryfall_id(r),
+            "v": cached_image_version(_display_scryfall_id(r)),
             "layout": (gameplay.get(normalize_name(r.entry.name)) or {}).get("layout", ""),
         }
         for r in library_results for _ in range(r.entry.quantity)

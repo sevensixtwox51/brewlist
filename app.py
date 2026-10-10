@@ -29,6 +29,7 @@ from datetime import datetime, timezone
 from flask import Flask, Response, abort, jsonify, request
 
 from brewlist_core import (
+    scryfall_image_versions,
     BUCKET_ORDER,
     PICKABLE_STORE_LABELS,
     STORE_DISPLAY_NAMES,
@@ -1564,9 +1565,15 @@ function normalizeName(name) {{ return name.trim().toLowerCase(); }}
 
 // Same direct Scryfall CDN hotlink pattern as scryfall_image_url() in
 // brewlist_core.py -- no API call needed, just the card's own Scryfall ID.
+// Scryfall can keep serving a stale/wrong-language file at a card's plain
+// image URL for a while after a set releases; for those printings the server
+// supplies the version number Scryfall's API reports (see
+// scryfall_image_versions), which selects the current file.
+let imageVersions = {{}};
 function scryfallImg(scryfallId, size) {{
   if (!scryfallId) return null;
-  return `https://cards.scryfall.io/${{size}}/front/${{scryfallId[0]}}/${{scryfallId[1]}}/${{scryfallId}}.jpg`;
+  const v = imageVersions[scryfallId];
+  return `https://cards.scryfall.io/${{size}}/front/${{scryfallId[0]}}/${{scryfallId[1]}}/${{scryfallId}}.jpg` + (v ? '?' + v : '');
 }}
 
 // Same category order as brewlist_core.BUCKET_ORDER (the compare report's
@@ -2399,6 +2406,7 @@ fetch('/builder/collection-data')
   .then(data => {{
     if (data.error) {{ showError(data.error); return; }}
     collection = data.cards;
+    imageVersions = data.image_versions || {{}};
     annotateFilterCounts();
     renderAll();
   }})
@@ -3600,7 +3608,8 @@ def builder_collection_data():
     except ValueError as e:
         return jsonify(error=str(e)), 400
     cards = owned_collection_gameplay_view(owned, gameplay_data_in_index())
-    return jsonify(cards=cards)
+    image_versions = scryfall_image_versions([(c.get("scryfall_id"), c.get("set_code")) for c in cards])
+    return jsonify(cards=cards, image_versions=image_versions)
 
 
 @app.route("/builder/commander-popularity", methods=["GET"])
