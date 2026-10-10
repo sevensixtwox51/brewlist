@@ -111,12 +111,29 @@ def _load_cache() -> dict:
         return {}
 
 
+# Serializes cache writes. Several deck-type pages are fetched in parallel
+# (see commander_theme_page), and a shared ".tmp" file plus a load-modify-save
+# cycle per thread both lose: one thread renames the temp file out from under
+# another, and each save overwrites entries the others just added.
+_cache_write_lock = threading.RLock()
+
+
 def _save_cache(cache: dict) -> None:
-    os.makedirs(os.path.dirname(CACHE_PATH), exist_ok=True)
-    tmp = CACHE_PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(cache, f)
-    os.replace(tmp, CACHE_PATH)
+    with _cache_write_lock:
+        os.makedirs(os.path.dirname(CACHE_PATH), exist_ok=True)
+        tmp = f"{CACHE_PATH}.{os.getpid()}.{threading.get_ident()}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(cache, f)
+        os.replace(tmp, CACHE_PATH)
+
+
+def _store_cache_entry(section: str, key: str, entry: dict) -> None:
+    """Adds one entry to the on-disk cache, re-reading the file under the lock
+    so concurrent writers don't clobber each other's entries."""
+    with _cache_write_lock:
+        cache = _load_cache()
+        cache.setdefault(section, {})[key] = entry
+        _save_cache(cache)
 
 
 def _cardviews_to_entries(cardviews: list[dict]) -> list[dict]:
@@ -413,8 +430,7 @@ def commander_synergy_cards(commander_name: str) -> dict[str, dict]:
         break  # first slug that actually resolves to a real page wins
 
     if found:
-        synergy_cache[nm] = {"fetched_at": now, "cards": cards, "themes": themes, "avg_planeswalkers": avg_planeswalkers}
-        _save_cache(cache)
+        _store_cache_entry("synergy", nm, {"fetched_at": now, "cards": cards, "themes": themes, "avg_planeswalkers": avg_planeswalkers})
         return cards
     # Fetch failed (offline, rate-limited): keep serving an older cached
     # copy rather than dropping to nothing.
@@ -429,3 +445,70 @@ def commander_profile(commander_name: str) -> dict:
     commander_synergy_cards(commander_name)
     entry = _load_cache().get("synergy", {}).get(commander_name.strip().lower()) or {}
     return {"themes": entry.get("themes") or [], "avg_planeswalkers": entry.get("avg_planeswalkers")}
+
+
+def _cards_from_cardlists(cardlists: list[dict]) -> dict[str, dict]:
+    """{normalized_card_name: {"name", "synergy", "num_decks"}} from an EDHREC
+    page's cardlists, deduped keeping the highest synergy seen (same shape and
+    rule commander_synergy_cards has always used)."""
+    cards: dict[str, dict] = {}
+    for cl in cardlists:
+        for c in cl.get("cardviews") or []:
+            card_name = c.get("name") or ""
+            card_nm = normalize_name(card_name)
+            synergy = c.get("synergy")
+            if not card_nm or synergy is None:
+                continue
+            existing = cards.get(card_nm)
+            if existing is None or synergy > existing["synergy"]:
+                cards[card_nm] = {"name": card_name, "synergy": synergy, "num_decks": c.get("num_decks")}
+    return cards
+
+
+def commander_theme_page(commander_name: str, theme_slug: str) -> dict:
+    """One of the deck types EDHREC lists for a commander (its "tags":
+    Nekusar -> wheels, group-slug, ...), straight from
+    edhrec.com/commanders/<commander>/<theme>: {"cards": {normalized_name:
+    {"name", "synergy", "num_decks"}}, "avg_planeswalkers", "avg_creatures",
+    "num_decks"} -- the same card-list shape as commander_synergy_cards but
+    scored against ONLY the decks built that way. The commander's general
+    page blends every deck type (Atraxa: the Planeswalkers build shares just
+    3 of its top 25 cards with the general page, and averages 18
+    planeswalkers to Infect's 2), so recommending from it mixes plans.
+    Cached per (commander, theme) like the general page; {} on any failure."""
+    nm = commander_name.strip().lower()
+    key = f"{nm}|{theme_slug}"
+    cache = _load_cache()
+    theme_cache = cache.setdefault("theme_synergy", {})
+    cached = theme_cache.get(key)
+    now = time.time()
+    if cached and now - cached.get("fetched_at", 0) < _SYNERGY_CACHE_MAX_AGE:
+        return cached
+
+    popularity = commander_popularity(commander_name)
+    candidates = [popularity["slug"]] if popularity and popularity.get("slug") else []
+    if " // " in commander_name:
+        candidates.append(_slugify(commander_name.split(" // ")[0]))
+    candidates.append(_slugify(commander_name))
+
+    for slug in candidates:
+        data = _fetch_next_data(f"https://edhrec.com/commanders/{slug}/{theme_slug}")
+        if not data:
+            continue
+        try:
+            page = data["props"]["pageProps"]["data"]
+            cardlists = page["container"]["json_dict"]["cardlists"]
+            num_decks = page["container"]["json_dict"]["card"].get("num_decks")
+        except (KeyError, TypeError):
+            continue
+        pw, cre = page.get("planeswalker"), page.get("creature")
+        entry = {
+            "fetched_at": now,
+            "cards": _cards_from_cardlists(cardlists),
+            "avg_planeswalkers": pw if isinstance(pw, (int, float)) else None,
+            "avg_creatures": cre if isinstance(cre, (int, float)) else None,
+            "num_decks": num_decks,
+        }
+        _store_cache_entry("theme_synergy", key, entry)
+        return entry
+    return cached or {}

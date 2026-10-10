@@ -28,7 +28,7 @@ from brewlist_core import (
     normalize_name,
     prices_data_in_index,
 )
-from edhrec_data import commander_profile, commander_synergy_cards
+from edhrec_data import commander_profile, commander_synergy_cards, commander_theme_page
 
 # WOTC_BRACKET_GAME_CHANGER_MAX is keyed 1/2/3 (brackets 1-2 share a cap
 # of 0 per WotC's own rules; 4-5 have no cap at all -- see its definition
@@ -393,7 +393,7 @@ def _card_role(name: str, category: str, role_members: dict[str, frozenset[str]]
 _MEANINGFUL_SYNERGY = 0.08
 
 
-def _synergy_reason(score: float | None) -> str | None:
+def _synergy_reason(score: float | None, deck_label: str | None = None) -> str | None:
     """Wording for an EDHREC synergy score, tiered so the label never
     overstates a weak number -- real, user-reported bug: Sol Ring (a
     universal staple played regardless of commander, so its synergy with
@@ -409,9 +409,10 @@ def _synergy_reason(score: float | None) -> str | None:
     rather than mentioning EDHREC at all for a score this weak."""
     if score is None or score < _MEANINGFUL_SYNERGY:
         return None
+    whose = f"your commander's {deck_label} decks" if deck_label else "your commander"
     if score >= 0.20:
-        return f"high synergy with your commander (per EDHREC, {score:.0%})"
-    return f"synergizes with your commander (per EDHREC, {score:.0%})"
+        return f"high synergy with {whose} (per EDHREC, {score:.0%})"
+    return f"synergizes with {whose} (per EDHREC, {score:.0%})"
 
 
 def role_counts_for_entries(
@@ -495,6 +496,45 @@ _EDHREC_THEME_TO_CURATED = {
     "group hug": "Group Hug", "group slug": "Group Slug", "enchantress": "Enchantress",
     "voltron": "Voltron",
 }
+
+
+def edhrec_commander_view(commander_name: str, edhrec_theme: str | None = None) -> dict:
+    """Everything EDHREC-driven about one commander, for ONE deck type.
+
+    EDHREC lists the ways a commander is built ("tags": Nekusar -> Wheels,
+    Group Slug, ...) and has a page per way, scored against only those decks.
+    The general page blends them all, so recommending from it mixes plans
+    (Atraxa: Planeswalkers vs Infect share 1 of their top 25 cards).
+
+    `edhrec_theme` is a theme slug the player chose; None/unknown means "the
+    commander's most common deck type". Returns {"synergy_data": {name: {...}},
+    "profile": {"themes", "avg_planeswalkers"} for the wipe/theme-boost/
+    planeswalker rules (an explicit choice narrows themes to just that one),
+    "deck_type": {"slug", "value", "count", "auto"} or None when EDHREC has no
+    page for it, in which case the general page is used}."""
+    profile = commander_profile(commander_name)
+    themes = profile.get("themes") or []
+    by_slug = {t.get("slug"): t for t in themes}
+    explicit = edhrec_theme if edhrec_theme in by_slug else None
+    chosen = by_slug[explicit] if explicit else (themes[0] if themes else None)
+    avg_pw = profile.get("avg_planeswalkers")
+    synergy_data = None
+    if chosen:
+        page = commander_theme_page(commander_name, chosen["slug"])
+        if page.get("cards"):
+            synergy_data = page["cards"]
+            if page.get("avg_planeswalkers") is not None:
+                avg_pw = page["avg_planeswalkers"]
+    deck_type = None
+    if synergy_data is None:
+        synergy_data = commander_synergy_cards(commander_name)
+    else:
+        deck_type = {"slug": chosen["slug"], "value": chosen.get("value"), "count": chosen.get("count"), "auto": explicit is None}
+    return {
+        "synergy_data": synergy_data,
+        "profile": {"themes": [chosen] if (explicit and chosen) else themes, "avg_planeswalkers": avg_pw},
+        "deck_type": deck_type,
+    }
 
 
 def _edhrec_theme_names(profile: dict, top: int = 3, min_share: float = 0.5) -> list[str]:
@@ -938,6 +978,7 @@ def suggest_replacements(
     limit: int = 6,
     excluded_set_codes: set[str] | None = None,
     excluded_card_names: set[str] | None = None,
+    edhrec_theme: str | None = None,
 ) -> list[dict]:
     """Owned, legal, color-correct cards that could swap in for
     target_name -- restricted to the same role it fills (see _card_role:
@@ -974,8 +1015,10 @@ def suggest_replacements(
     synergy_by_name: dict[str, float] = {}
     edhrec_tracked_names: set[str] = set()
     commander_entry = next((e for e in wip_entries if e.section == "commander"), None)
+    edhrec_view = {"synergy_data": {}, "profile": {}, "deck_type": None}
     if deck_format == "commander" and commander_entry:
-        synergy_data = commander_synergy_cards(commander_entry.name)
+        edhrec_view = edhrec_commander_view(commander_entry.name, edhrec_theme)
+        synergy_data = edhrec_view["synergy_data"]
         edhrec_tracked_names = set(synergy_data.keys())
         for nm, info in synergy_data.items():
             if info["synergy"] > 0:
@@ -990,7 +1033,7 @@ def suggest_replacements(
     target_tag = tag_by_name.get(normalize_name(target_name))
     same_role = [c for c in candidates if role_of(c["name"], c["category"]) == target_role]
 
-    edhrec_profile = commander_profile(commander_entry.name) if (deck_format == "commander" and commander_entry) else {}
+    edhrec_profile = edhrec_view["profile"]
     wipe_stance, symmetric_wipes, one_sided_wipes = _wipe_policy(
         commander_entry.name if commander_entry else None,
         budget_alt.get("groups") or {}, tag_labels, None, edhrec_profile,
@@ -1008,7 +1051,7 @@ def suggest_replacements(
     for c in same_role[:limit]:
         nm = normalize_name(c["name"])
         shares_tag = target_tag is not None and tag_by_name.get(nm) == target_tag
-        synergy_reason = _synergy_reason(synergy_by_name.get(nm))
+        synergy_reason = _synergy_reason(synergy_by_name.get(nm), (edhrec_view["deck_type"] or {}).get("value"))
         reason = (
             synergy_reason
             or (f'shares the "{tag_label}" role with {target_name}' if shares_tag and tag_label else None)
@@ -1042,6 +1085,8 @@ def suggest_builder_cards(
     pools_out: dict | None = None,
     alternates_per_role: int = 30,
     unowned_alternates_per_role: int = 12,
+    edhrec_theme: str | None = None,
+    meta_out: dict | None = None,
 ) -> list[dict]:
     """Fill-the-gaps auto-suggest: proposes owned, legal, color-correct
     cards to fill the remaining slots in a work-in-progress deck. This is
@@ -1184,8 +1229,12 @@ def suggest_builder_cards(
     synergy_by_name: dict[str, float] = {}
     edhrec_tracked_names: set[str] = set()
     commander_entry = next((e for e in wip_entries if e.section == "commander"), None)
+    edhrec_view = {"synergy_data": {}, "profile": {}, "deck_type": None}
     if deck_format == "commander" and commander_entry:
-        synergy_data = commander_synergy_cards(commander_entry.name)
+        edhrec_view = edhrec_commander_view(commander_entry.name, edhrec_theme)
+        if meta_out is not None:
+            meta_out["deck_type"] = edhrec_view["deck_type"]
+        synergy_data = edhrec_view["synergy_data"]
         edhrec_tracked_names = set(synergy_data.keys())
         for nm, info in synergy_data.items():
             if info["synergy"] > 0:
@@ -1250,7 +1299,7 @@ def suggest_builder_cards(
                         reason = f'shares the "{label}" theme with {count} card(s) already in your deck'
                     theme_reason_by_name[normalize_name(c["name"])] = reason
 
-    edhrec_profile = commander_profile(commander_entry.name) if (deck_format == "commander" and commander_entry) else {}
+    edhrec_profile = edhrec_view["profile"]
     wipe_stance, symmetric_wipes, one_sided_wipes = _wipe_policy(
         commander_entry.name if commander_entry else None,
         budget_alt.get("groups") or {}, tag_labels, preferred_theme_label, edhrec_profile,
@@ -1637,7 +1686,7 @@ def suggest_builder_cards(
 
     def make_suggestion(c: dict, role: str, owned: bool) -> dict:
         nm = normalize_name(c["name"])
-        synergy_reason = _synergy_reason(synergy_by_name.get(nm))
+        synergy_reason = _synergy_reason(synergy_by_name.get(nm), (edhrec_view["deck_type"] or {}).get("value"))
         basis = suggestion_basis(nm)
         out = {
             "name": c["name"],
@@ -1731,6 +1780,7 @@ def optimize_builder_combos(
     intended_bracket: str | None = None,
     excluded_set_codes: set[str] | None = None,
     excluded_card_names: set[str] | None = None,
+    edhrec_theme: str | None = None,
 ) -> list[dict]:
     """Second-pass optimizer for a deck that's already built (typically to
     its full target size). suggest_builder_cards()'s own combo-completion
@@ -1814,7 +1864,7 @@ def optimize_builder_combos(
     synergy_by_name: dict[str, float] = {}
     commander_entry = next((e for e in wip_entries if e.section == "commander"), None)
     if commander_entry:
-        for nm, info in commander_synergy_cards(commander_entry.name).items():
+        for nm, info in edhrec_commander_view(commander_entry.name, edhrec_theme)["synergy_data"].items():
             synergy_by_name[nm] = info["synergy"]
 
     def role_of(name: str, category: str) -> str:

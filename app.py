@@ -62,7 +62,7 @@ from deck_builder import (
     suggest_builder_cards,
     suggest_replacements,
 )
-from edhrec_data import bulk_commander_popularity
+from edhrec_data import bulk_commander_popularity, commander_profile, commander_theme_page
 from edhrec_data import refresh_all as edhrec_refresh_all
 from edhrec_data import top_list_status as edhrec_top_list_status
 
@@ -1090,6 +1090,16 @@ body.compact .builder-tile .name-text { overflow:hidden; text-overflow:ellipsis;
 body.compact .tile-corner-actions { align-self:center; }
 body.compact .collection-grid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
 body.compact .deck-row .card-thumb { display:none; }
+#deck-type-select { padding:8px 10px; border-radius:8px; border:1px solid var(--card-border); background:var(--bg); color:var(--text); font-size:0.85rem; max-width:260px; }
+.wz-types { display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:10px; margin-top:6px; }
+.wz-type { border:2px solid var(--card-border); border-radius:10px; padding:10px 12px; cursor:pointer; background:var(--bg); opacity:0.75; transition:opacity .12s, border-color .12s; }
+.wz-type:hover { opacity:1; }
+.wz-type.selected { opacity:1; border-color:var(--accent); background:color-mix(in srgb, var(--accent) 8%, var(--bg)); }
+.wz-type-head { display:flex; align-items:baseline; gap:8px; }
+.wz-type-count { margin-left:auto; font-size:0.75rem; color:var(--text-dim); font-variant-numeric:tabular-nums; }
+.wz-type-tag { font-size:0.65rem; padding:0 6px; border-radius:999px; border:1px solid var(--accent); color:var(--accent); }
+.wz-type-stats { margin-top:4px; font-size:0.75rem; color:var(--text-dim); }
+.wz-type-cards { margin-top:6px; font-size:0.75rem; line-height:1.3; }
 .theme-picker { position:relative; }
 .theme-picker input[type=text] { width:200px; margin:0; padding:8px 12px; font-size:0.85rem; }
 .theme-dropdown {
@@ -1262,6 +1272,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
         "intended_bracket": brew.get("intended_bracket") or "",
         "preferred_theme_tag_ids": brew.get("preferred_theme_tag_ids") or [],
         "preferred_theme_label": brew.get("preferred_theme_label") or "",
+        "edhrec_theme": brew.get("edhrec_theme") or "",
         "excluded_set_codes": brew.get("excluded_set_codes") or [],
         "excluded_card_names": brew.get("excluded_card_names") or [],
         "ai_summary": brew.get("ai_summary") or "",
@@ -1346,6 +1357,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
       <div class="action-group">
         <button type="button" class="btn ghost" id="guided-suggest-btn" title="Review the autopicker's choices one deck role at a time, and swap any you disagree with">Suggest cards</button>
         <button type="button" class="btn ghost small" id="suggest-btn" title="One click: drop the autopicker's suggestions into a list below, no review step">Quick suggest</button>
+        <select id="deck-type-select" style="display:none;" title="Which way of building this commander EDHREC's synergy data comes from (its tags on EDHREC). Each has its own card synergies, so this changes which cards are suggested. Separate from Preferred theme, which boosts cards you own that carry a theme's tags."></select>
         <div class="theme-picker">
           <input type="text" id="theme-input" placeholder="Preferred theme (optional)" autocomplete="off">
           <div class="theme-dropdown" id="theme-dropdown"></div>
@@ -1535,6 +1547,7 @@ document.getElementById('deck-format').addEventListener('change', (e) => {{
   updateFormatUI();
   renderAll();
   loadThemeOptions();
+  loadDeckTypes();
 }});
 document.getElementById('target-format').addEventListener('change', (e) => {{ brew.target_format = e.target.value; }});
 document.getElementById('intended-bracket').addEventListener('change', (e) => {{ brew.intended_bracket = e.target.value; }});
@@ -1659,6 +1672,7 @@ function isCommanderEligible(card) {{
 }}
 
 function setCommander(card) {{
+  if (!brew.commander || brew.commander.name !== card.name) brew.edhrec_theme = '';
   brew.commander = {{
     name: card.name, scryfall_id: card.scryfall_id, type_line: card.type_line, color_identity: card.color_identity,
     cmc: card.cmc, mana_cost: card.mana_cost, category: card.category, quantity: 1,
@@ -1666,9 +1680,10 @@ function setCommander(card) {{
   }};
   renderAll();
   loadThemeOptions();
+  loadDeckTypes();
 }}
 
-function clearCommander() {{ brew.commander = null; renderAll(); loadThemeOptions(); }}
+function clearCommander() {{ brew.commander = null; brew.edhrec_theme = ''; renderAll(); loadThemeOptions(); loadDeckTypes(); }}
 
 function addCard(card) {{
   const existing = findCard(card.name);
@@ -1819,6 +1834,41 @@ function annotateFilterCounts() {{
 // itself and, in this embedded layout, was rendering nowhere near the
 // input; a plain absolutely-positioned div anchored to .theme-picker
 // (position:relative) is fully within our own control instead.
+// ---- Deck type (EDHREC tags): which way of building this commander the
+// EDHREC synergy data should come from. Empty = the most common one. Separate
+// from "Preferred theme" below, which boosts owned cards carrying a theme's
+// Oracle Tags; the two stack.
+let deckTypeList = [];
+let deckTypeRequestId = 0;
+const deckTypeSelect = document.getElementById('deck-type-select');
+function renderDeckTypeSelect() {{
+  if (brew.format !== 'commander' || !brew.commander || !deckTypeList.length) {{ deckTypeSelect.style.display = 'none'; return; }}
+  const fmt = t => (t.count || 0).toLocaleString() + ' decks';
+  deckTypeSelect.innerHTML = deckTypeList.map((t, i) =>
+    '<option value="' + (i === 0 ? '' : escapeHtml(t.slug)) + '">Deck type: ' + escapeHtml(t.value) + (i === 0 ? ' (most common)' : ' (' + fmt(t) + ')') + '</option>'
+  ).join('');
+  deckTypeSelect.value = (brew.edhrec_theme && deckTypeList.some(t => t.slug === brew.edhrec_theme)) ? brew.edhrec_theme : '';
+  deckTypeSelect.style.display = '';
+}}
+function loadDeckTypes() {{
+  const requestId = ++deckTypeRequestId;
+  if (brew.format !== 'commander' || !brew.commander) {{ deckTypeList = []; renderDeckTypeSelect(); return; }}
+  fetch('/builder/deck-types', {{
+    method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
+    body: JSON.stringify({{ commander: brew.commander }}),
+  }})
+    .then(r => r.json())
+    .then(data => {{
+      if (requestId !== deckTypeRequestId) return;
+      deckTypeList = data.deck_types || [];
+      if (brew.edhrec_theme && !deckTypeList.some(t => t.slug === brew.edhrec_theme)) brew.edhrec_theme = '';
+      renderDeckTypeSelect();
+    }})
+    .catch(() => {{}});
+}}
+deckTypeSelect.addEventListener('change', () => {{ brew.edhrec_theme = deckTypeSelect.value; }});
+loadDeckTypes();
+
 let themeOptionsList = [];
 function loadThemeOptions() {{
   const requestId = ++themeRequestId;
@@ -2196,7 +2246,7 @@ function openReplacePopup(btn, card) {{
     method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
     body: JSON.stringify({{
       card_name: card.name, category: card.category, cards: brew.cards,
-      commander: brew.commander, format: brew.format, target_format: brew.target_format,
+      commander: brew.commander, format: brew.format, target_format: brew.target_format, edhrec_theme: brew.edhrec_theme,
       excluded_set_codes: brew.excluded_set_codes, excluded_card_names: brew.excluded_card_names,
     }}),
   }})
@@ -2499,16 +2549,10 @@ function wizardKey(card) {{ return normalizeName(card.name); }}
 function wizardStepSelectedCount(step) {{ return wizardCards(step).filter(c => wizard.selected.has(wizardKey(c))).length; }}
 function wizardTotalSelected() {{ return wizard.steps.reduce((n, s) => n + wizardStepSelectedCount(s), 0); }}
 
-function openWizard() {{
-  if (brew.format === 'commander' && !brew.commander) {{
-    showError('Choose a commander first (click the star on an eligible card), then suggest cards.');
-    return;
-  }}
-  const requestId = ++wizard.requestId;
-  wizardModal.classList.add('show');
-  document.getElementById('wizard-title').textContent = 'Suggest cards';
-  document.getElementById('wizard-steps').innerHTML = '';
+function wizardLoadPools(requestId) {{
+  wizard.choosing = false;
   wizardBody.innerHTML = '<div class="hint wz-loading">Building your suggestions&hellip; (checking your collection and EDHREC, may take a few seconds)</div>';
+  document.getElementById('wizard-steps').innerHTML = '';
   setWizardFooter({{ back: false, next: false, accept: false, status: '' }});
   fetch('/builder/suggest-pools', {{
     method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
@@ -2516,6 +2560,7 @@ function openWizard() {{
       cards: brew.cards, commander: brew.commander, format: brew.format, target_format: brew.target_format,
       mix_targets: brew.mix_targets, intended_bracket: brew.intended_bracket,
       preferred_theme_tag_ids: brew.preferred_theme_tag_ids, preferred_theme_label: brew.preferred_theme_label,
+      edhrec_theme: brew.edhrec_theme,
       excluded_set_codes: brew.excluded_set_codes, excluded_card_names: brew.excluded_card_names,
     }}),
   }})
@@ -2532,8 +2577,66 @@ function openWizard() {{
     }});
 }}
 
+function openWizard() {{
+  if (brew.format === 'commander' && !brew.commander) {{
+    showError('Choose a commander first (click the star on an eligible card), then suggest cards.');
+    return;
+  }}
+  const requestId = ++wizard.requestId;
+  wizard.choosing = false;
+  wizardModal.classList.add('show');
+  document.getElementById('wizard-title').textContent = 'Suggest cards';
+  document.getElementById('wizard-steps').innerHTML = '';
+  setWizardFooter({{ back: false, next: false, accept: false, status: '' }});
+  if (brew.format !== 'commander') {{ wizardLoadPools(requestId); return; }}
+  // Commander decks first ask which way to build the commander (EDHREC's
+  // tags for it), since each has its own synergies -- skipped when EDHREC
+  // lists fewer than two, and never allowed to block the suggestions.
+  wizardBody.innerHTML = '<div class="hint wz-loading">Looking up how this commander is built on EDHREC&hellip;</div>';
+  fetch('/builder/deck-types', {{
+    method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
+    body: JSON.stringify({{ commander: brew.commander, details: true }}),
+  }})
+    .then(r => r.json())
+    .then(data => {{
+      if (requestId !== wizard.requestId || !wizardModal.classList.contains('show')) return;
+      const types = data.deck_types || [];
+      if (types.length < 2) {{ wizardLoadPools(requestId); return; }}
+      wizard.deckTypes = types;
+      wizard.pickedType = (brew.edhrec_theme && types.some(t => t.slug === brew.edhrec_theme)) ? brew.edhrec_theme : types[0].slug;
+      renderDeckTypeChoice();
+    }})
+    .catch(() => {{ if (requestId === wizard.requestId) wizardLoadPools(requestId); }});
+}}
+
+function renderDeckTypeChoice() {{
+  wizard.choosing = true;
+  document.getElementById('wizard-title').textContent = 'Suggest cards — choose a deck type';
+  document.getElementById('wizard-steps').innerHTML = '';
+  const num = v => (v == null ? '?' : Math.round(v));
+  const html = '<div class="hint wz-tip">EDHREC lists the ways players build <b>' + escapeHtml(brew.commander.name) + '</b>, and each has its own card synergies. '
+    + 'Picking one keeps the suggestions to a single plan instead of mixing them. You can change it later from the Deck type menu.</div>'
+    + '<div class="wz-types">' + wizard.deckTypes.map((t, i) =>
+      '<div class="wz-type' + (t.slug === wizard.pickedType ? ' selected' : '') + '" data-type="' + escapeHtml(t.slug) + '">'
+      + '<div class="wz-type-head"><b>' + escapeHtml(t.value) + '</b>'
+      + (i === 0 ? ' <span class="wz-type-tag">most common</span>' : '')
+      + '<span class="wz-type-count">' + (t.count || 0).toLocaleString() + ' decks</span></div>'
+      + (t.avg_creatures != null ? '<div class="wz-type-stats">avg ' + num(t.avg_creatures) + ' creatures &middot; ' + num(t.avg_planeswalkers) + ' planeswalkers</div>' : '')
+      + ((t.top_cards || []).length ? '<div class="wz-type-cards">' + t.top_cards.map(escapeHtml).join(', ') + '</div>' : '')
+      + '</div>').join('') + '</div>';
+  wizardBody.innerHTML = html;
+  setWizardFooter({{ back: false, next: true, nextLabel: 'Continue →', accept: false, status: '' }});
+}}
+
+function confirmDeckType() {{
+  const auto = wizard.deckTypes[0].slug;
+  brew.edhrec_theme = wizard.pickedType === auto ? '' : wizard.pickedType;
+  renderDeckTypeSelect();
+  wizardLoadPools(wizard.requestId);
+}}
+
 function startWizard(data) {{
-  wizard.meta = {{ gcCap: data.gc_cap, gcExisting: data.gc_existing || 0, libraryTarget: data.library_target, libraryCount: data.library_count }};
+  wizard.meta = {{ gcCap: data.gc_cap, gcExisting: data.gc_existing || 0, libraryTarget: data.library_target, libraryCount: data.library_count, deckType: data.deck_type || null }};
   wizard.selected = new Set();
   const byRole = {{}};
   (data.steps || []).forEach(s => {{ byRole[s.role] = s; }});
@@ -2645,7 +2748,8 @@ function renderWizard() {{
     : '';
   let html = '<div class="wz-intro"><span class="hint wz-blurb">' + escapeHtml(info.blurb) + '</span>'
     + '<span class="wz-count ' + countClass + '"><b>' + n + '</b> selected (aiming for ' + step.needed + ') &middot; ' + countNote + fillerNote + '</span>'
-    + '<span class="wz-tools"><button type="button" class="btn ghost small" data-wz="none">Select none</button>'
+    + '<span class="wz-tools">' + (wizard.meta.deckType ? '<button type="button" class="btn ghost small" data-wz="type" title="Pick a different EDHREC deck type for this commander (restarts the suggestions)">Deck type: ' + escapeHtml(wizard.meta.deckType.value || '') + ' &#9662;</button>' : '')
+    + '<button type="button" class="btn ghost small" data-wz="none">Select none</button>'
     + '<button type="button" class="btn ghost small" data-wz="reset">Reset to suggested</button></span></div>'
     + gcNote
     + '<div class="hint wz-tip">Click a card to add or remove it. Cards marked <b>Not owned</b> would need to be bought; <b>Slot filler</b> means EDHREC has nothing on that card for your commander and it was only picked to fill the slot.</div>';
@@ -2682,6 +2786,11 @@ function renderWizard() {{
 function wizardRefresh() {{ renderWizard(); }}
 
 wizardBody.addEventListener('click', (e) => {{
+  if (wizard.choosing) {{
+    const typeEl = e.target.closest('[data-type]');
+    if (typeEl) {{ wizard.pickedType = typeEl.dataset.type; renderDeckTypeChoice(); }}
+    return;
+  }}
   if (e.target.closest('a')) return; // purchase links just open
   const avoidBtn = e.target.closest('[data-avoid]');
   if (avoidBtn) {{
@@ -2698,6 +2807,7 @@ wizardBody.addEventListener('click', (e) => {{
   }}
   const tool = e.target.closest('[data-wz]');
   if (tool) {{
+    if (tool.dataset.wz === 'type') {{ openWizard(); return; }}
     const step = wizard.steps[wizard.idx];
     if (tool.dataset.wz === 'none') wizardCards(step).forEach(c => wizard.selected.delete(wizardKey(c)));
     if (tool.dataset.wz === 'reset') {{
@@ -2723,6 +2833,7 @@ document.getElementById('wizard-back').addEventListener('click', () => {{
   if (wizard.idx > 0) {{ wizard.idx -= 1; renderWizard(); wizardBody.scrollTop = 0; }}
 }});
 document.getElementById('wizard-next').addEventListener('click', () => {{
+  if (wizard.choosing) {{ confirmDeckType(); return; }}
   if (wizard.idx < wizard.steps.length - 1) {{ wizard.idx += 1; renderWizard(); wizardBody.scrollTop = 0; }}
   else finishWizard();
 }});
@@ -2776,6 +2887,7 @@ suggestBtn.addEventListener('click', () => {{
       cards: brew.cards, commander: brew.commander, format: brew.format, target_format: brew.target_format,
       mix_targets: brew.mix_targets, intended_bracket: brew.intended_bracket,
       preferred_theme_tag_ids: brew.preferred_theme_tag_ids, preferred_theme_label: brew.preferred_theme_label,
+      edhrec_theme: brew.edhrec_theme,
       excluded_set_codes: brew.excluded_set_codes, excluded_card_names: brew.excluded_card_names,
     }}),
   }})
@@ -2787,6 +2899,9 @@ suggestBtn.addEventListener('click', () => {{
       if (!data.suggestions.length) {{
         panel.innerHTML += '<div class="hint" style="margin:0;">No suggestions -- your deck may already be full, or nothing left fits the color/legality filters.</div>';
         return;
+      }}
+      if (data.deck_type) {{
+        panel.insertAdjacentHTML('beforeend', '<div class="hint" style="margin:0 0 6px;">Using EDHREC deck type: <b>' + escapeHtml(data.deck_type.value || '') + '</b>' + (data.deck_type.auto ? ' (most common &mdash; change it in the Deck type menu)' : '') + '</div>');
       }}
       const fillerCount = data.suggestions.filter(isFiller).length;
       if (fillerCount) {{
@@ -2882,7 +2997,7 @@ optimizeBtn.addEventListener('click', () => {{
     method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
     body: JSON.stringify({{
       cards: brew.cards, commander: brew.commander, format: brew.format, target_format: brew.target_format,
-      intended_bracket: brew.intended_bracket, excluded_set_codes: brew.excluded_set_codes,
+      intended_bracket: brew.intended_bracket, edhrec_theme: brew.edhrec_theme, excluded_set_codes: brew.excluded_set_codes,
       excluded_card_names: brew.excluded_card_names,
     }}),
   }})
@@ -3572,6 +3687,7 @@ def builder_save():
         intended_bracket=body.get("intended_bracket") or "",
         preferred_theme_tag_ids=body.get("preferred_theme_tag_ids") or [],
         preferred_theme_label=body.get("preferred_theme_label") or "",
+        edhrec_theme=body.get("edhrec_theme") or "",
         excluded_set_codes=body.get("excluded_set_codes") or [],
         excluded_card_names=body.get("excluded_card_names") or [],
         ai_summary=body.get("ai_summary") or "",
@@ -3600,7 +3716,7 @@ def _excluded_card_names(body: dict) -> set[str] | None:
     return names or None
 
 
-def _run_suggest(body: dict, pools_out: dict | None = None):
+def _run_suggest(body: dict, pools_out: dict | None = None, meta_out: dict | None = None):
     """Shared by /builder/suggest and /builder/suggest-pools: same request
     shape, same pipeline, so the guided flow can never drift from what the
     one-click Suggest would have picked. Returns (suggestions, None) on
@@ -3641,6 +3757,8 @@ def _run_suggest(body: dict, pools_out: dict | None = None):
         gameplay=gameplay,
         excluded_card_names=_excluded_card_names(body),
         pools_out=pools_out,
+        edhrec_theme=body.get("edhrec_theme") or None,
+        meta_out=meta_out,
     )
     return suggestions, None
 
@@ -3648,10 +3766,11 @@ def _run_suggest(body: dict, pools_out: dict | None = None):
 @app.route("/builder/suggest", methods=["POST"])
 def builder_suggest():
     body = request.get_json(silent=True) or {}
-    suggestions, err = _run_suggest(body)
+    meta: dict = {}
+    suggestions, err = _run_suggest(body, meta_out=meta)
     if err:
         return jsonify(error=err[0]), err[1]
-    return jsonify(suggestions=suggestions)
+    return jsonify(suggestions=suggestions, deck_type=meta.get("deck_type"))
 
 
 @app.route("/builder/suggest-pools", methods=["POST"])
@@ -3663,10 +3782,53 @@ def builder_suggest_pools():
     `pools_out`. Same request body as /builder/suggest."""
     body = request.get_json(silent=True) or {}
     pools: dict = {}
-    _, err = _run_suggest(body, pools_out=pools)
+    meta: dict = {}
+    _, err = _run_suggest(body, pools_out=pools, meta_out=meta)
     if err:
         return jsonify(error=err[0]), err[1]
+    pools["deck_type"] = meta.get("deck_type")
     return jsonify(pools)
+
+
+@app.route("/builder/deck-types", methods=["POST"])
+def builder_deck_types():
+    """The ways EDHREC says the chosen commander is built (its "tags":
+    Nekusar -> Wheels, Group Slug, ...), most common first, for the deck-type
+    picker. Each entry: {slug, value, count, share (of the commander's decks),
+    auto (the default, most common one)}. `details=1` also fetches each of the
+    top few deck types' own EDHREC page for the guided flow's choice step --
+    average creature/planeswalker counts and the cards that define the build
+    (cached after the first time, so only the first look at a commander is
+    slow)."""
+    body = request.get_json(silent=True) or {}
+    commander = body.get("commander") or {}
+    name = commander.get("name")
+    if not name:
+        return jsonify(deck_types=[])
+    profile = commander_profile(name)
+    themes = profile.get("themes") or []
+    total = max((t.get("count") or 0) for t in themes) if themes else 0
+    deck_types = [
+        {"slug": t["slug"], "value": t.get("value"), "count": t.get("count"), "auto": i == 0}
+        for i, t in enumerate(themes[:10])
+    ]
+    if body.get("details") and deck_types:
+        from concurrent.futures import ThreadPoolExecutor
+
+        def detail(dt: dict) -> dict:
+            page = commander_theme_page(name, dt["slug"])
+            cards = sorted((page.get("cards") or {}).values(), key=lambda c: -c["synergy"])
+            return {
+                **dt,
+                "avg_planeswalkers": page.get("avg_planeswalkers"),
+                "avg_creatures": page.get("avg_creatures"),
+                "num_decks": page.get("num_decks"),
+                "top_cards": [c["name"] for c in cards[:5]],
+            }
+
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            deck_types = list(pool.map(detail, deck_types[:8]))
+    return jsonify(deck_types=deck_types, total_decks=total)
 
 
 @app.route("/builder/optimize", methods=["POST"])
@@ -3694,6 +3856,7 @@ def builder_optimize():
         intended_bracket=body.get("intended_bracket") or None,
         excluded_set_codes=_excluded_set_codes(body),
         excluded_card_names=_excluded_card_names(body),
+        edhrec_theme=body.get("edhrec_theme") or None,
     )
     return jsonify(proposals=proposals)
 
@@ -3750,6 +3913,7 @@ def builder_replace():
         commander_color_identity=commander.get("color_identity") if deck_format == "commander" else None,
         excluded_set_codes=_excluded_set_codes(body),
         excluded_card_names=_excluded_card_names(body),
+        edhrec_theme=body.get("edhrec_theme") or None,
     )
     return jsonify(replacements=replacements)
 
