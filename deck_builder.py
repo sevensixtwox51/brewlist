@@ -1085,6 +1085,7 @@ def suggest_builder_cards(
     pools_out: dict | None = None,
     alternates_per_role: int = 30,
     unowned_alternates_per_role: int = 12,
+    unowned_alternates_extra: int = 8,
     edhrec_theme: str | None = None,
     meta_out: dict | None = None,
 ) -> list[dict]:
@@ -1119,7 +1120,8 @@ def suggest_builder_cards(
     `alternates` are the next-best owned candidates the ranking passed
     over (up to `alternates_per_role`); `unowned_alternates` are the
     best cards NOT owned for that role (up to
-    `unowned_alternates_per_role`), restricted to cards EDHREC actually
+    `unowned_alternates_per_role`, plus up to `unowned_alternates_extra`
+    more that have real EDHREC synergy), restricted to cards EDHREC actually
     tracks for this commander -- ranking the whole 35k-card pool with no
     real-world signal would just surface alphabetical junk. Needs
     `gameplay`, like the purchase fallback.
@@ -1749,11 +1751,22 @@ def suggest_builder_cards(
             # which across the whole ~35k-card pool would surface junk.
             unowned_alts = []
             if edhrec_tracked_names:
-                unowned_alts = [
-                    make_suggestion(c, role, False)
-                    for c in (unowned_by_role.get(role) or [])
+                tracked_pool = [
+                    c for c in (unowned_by_role.get(role) or [])
                     if normalize_name(c["name"]) in edhrec_tracked_names and normalize_name(c["name"]) not in picked_names
-                ][:unowned_alternates_per_role]
+                ]
+                # The first `unowned_alternates_per_role` are always offered;
+                # up to `unowned_alternates_extra` more only if they have real
+                # EDHREC synergy (or complete a combo) -- Draw/Interaction
+                # run out of good buys well before 20, and padding them with
+                # noise-level or negative-synergy cards helps nobody.
+                head = tracked_pool[:unowned_alternates_per_role]
+                extra = [
+                    c for c in tracked_pool[unowned_alternates_per_role:]
+                    if synergy_by_name.get(normalize_name(c["name"]), 0.0) >= _MEANINGFUL_SYNERGY
+                    or normalize_name(c["name"]) in reason_by_name
+                ][:unowned_alternates_extra]
+                unowned_alts = [make_suggestion(c, role, False) for c in head + extra]
             steps.append({
                 "role": role,
                 "have": have,
