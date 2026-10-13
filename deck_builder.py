@@ -2362,7 +2362,7 @@ def suggest_builder_cards(
                 make_suggestion(c, role, True)
                 for c in alt_pool
                 if normalize_name(c["name"]) not in picked_names
-            ][:alternates_per_role]
+            ][:(120 if role == "Lands" else alternates_per_role)]  # a land collection runs deep (Nykthos sat at #57 of 85)
             # Only cards EDHREC tracks for this commander: with no real-
             # world signal at all, rank_key's last tiebreak is alphabetical,
             # which across the whole ~35k-card pool would surface junk.
