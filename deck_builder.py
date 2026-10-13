@@ -473,15 +473,16 @@ def commander_deck_shape_targets(deck_format: str, target_size: int) -> dict[str
 # from two public deck-building walkthroughs that agree on the big numbers
 # (38 lands; 10-12 ramp; 12+ real card advantage) and differ on the rest.
 # Counts are for a 100-card deck; Synergy is always the remainder of the 99.
-#   engine      -- a value/sacrifice-style template: 38 lands, 12 ramp, 13 card
-#                  advantage, 12 interaction, leaving 24 theme cards.
+#   commanderchallenge -- the Commander Challenge YouTube channel's seven-step
+#                  process (a value/sacrifice-style build): 38 lands, 12 ramp,
+#                  13 card advantage, 12 interaction, leaving 24 theme cards.
 #   commandzone -- the Command Zone podcast's template: 38 lands, 10 ramp,
 #                  12 card advantage, 12 targeted + 6 mass disruption = 18. It
 #                  budgets 30 "plan" cards by letting cards count in two roles
 #                  (108 minus overlap); our roles are disjoint, so the plan
 #                  share here is simply what's left.
 TEMPLATE_FRACTIONS = {
-    "engine": {"Lands": 0.38, "Ramp": 0.12, "Draw": 0.13, "Interaction": 0.12},
+    "commanderchallenge": {"Lands": 0.38, "Ramp": 0.12, "Draw": 0.13, "Interaction": 0.12},
     "commandzone": {"Lands": 0.38, "Ramp": 0.10, "Draw": 0.12, "Interaction": 0.18},
 }
 

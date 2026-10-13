@@ -1369,10 +1369,10 @@ def render_builder_page(deck_id: str | None = None) -> str:
         <details class="mix-targets-field" id="mix-targets-field">
           <summary>Deck mix targets</summary>
           <div class="mix-targets-grid">
-            <label title="Standard is the default shape. Engine (38 lands, 12 ramp, 13 card draw, 12 interaction) is value-heavy; Command Zone (38/10/12/18) follows the Command Zone podcast template. Presets just fill the numbers below.">Template
+            <label title="Standard is the default shape. Commander Challenge (38 lands, 12 ramp, 13 card draw, 12 interaction) follows that YouTube channel&#39;s seven-step process and suits value-heavy decks; Command Zone (38/10/12/18) follows the Command Zone podcast template. Presets just fill the numbers below.">Template
               <select id="mix-template">
                 <option value="standard">Standard</option>
-                <option value="engine">Engine (value-heavy)</option>
+                <option value="commanderchallenge">Commander Challenge</option>
                 <option value="commandzone">Command Zone</option>
                 <option value="custom" hidden>Custom</option>
               </select>
