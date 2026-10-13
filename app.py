@@ -54,6 +54,8 @@ from brewlist_core import (
 )
 from deck_builder import (
     commander_deck_shape_targets,
+    deck_shape_targets_with_mix,
+    deck_templates,
     brew_to_card_entries,
     list_theme_options,
     optimize_builder_combos,
@@ -1118,6 +1120,7 @@ body.compact .deck-row .card-thumb { display:none; }
 .mix-targets-field[open] { position:relative; z-index:5; }
 .mix-targets-grid { display:flex; gap:16px; flex-wrap:wrap; align-items:flex-end; padding:2px 0 12px; }
 .mix-targets-grid label { display:flex; flex-direction:column; gap:3px; font-size:0.78rem; color:var(--text-dim); }
+.mix-targets-grid select { padding:6px 8px; border-radius:6px; border:1px solid var(--card-border); background:var(--bg); color:var(--text); font-size:0.85rem; margin:0; }
 .mix-targets-grid input[type=number] {
   width:60px; padding:6px 8px; border-radius:6px; border:1px solid var(--card-border);
   background:var(--bg); color:var(--text); font-size:0.85rem; margin:0;
@@ -1366,6 +1369,14 @@ def render_builder_page(deck_id: str | None = None) -> str:
         <details class="mix-targets-field" id="mix-targets-field">
           <summary>Deck mix targets</summary>
           <div class="mix-targets-grid">
+            <label title="Standard is the default shape. Engine (38 lands, 12 ramp, 13 card draw, 12 interaction) is value-heavy; Command Zone (38/10/12/18) follows the Command Zone podcast template. Presets just fill the numbers below.">Template
+              <select id="mix-template">
+                <option value="standard">Standard</option>
+                <option value="engine">Engine (value-heavy)</option>
+                <option value="commandzone">Command Zone</option>
+                <option value="custom" hidden>Custom</option>
+              </select>
+            </label>
             <label>Lands <input type="number" id="mix-lands" min="0" max="100"></label>
             <label>Ramp <input type="number" id="mix-ramp" min="0" max="100"></label>
             <label>Draw <input type="number" id="mix-draw" min="0" max="100"></label>
@@ -1505,6 +1516,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
 <script>
 let deckId = {json.dumps(deck_id)};
 let brew = {json.dumps(brew_state)};
+const DECK_TEMPLATES = {json.dumps(deck_templates(100))};
 let collection = [];
 let themeLabelToIds = {{}};
 let themeRequestId = 0;
@@ -1529,12 +1541,33 @@ document.getElementById('theme-input').value = brew.preferred_theme_label || '';
 
 function targetSize() {{ return brew.format === 'commander' ? 100 : 60; }}
 
+// Which named template (if any) the four numbers currently match; anything
+// else reads as "Custom". Presets just fill the same four numbers Suggest and
+// Analyze already use, so they never override or replace the default.
+function currentTemplateKey() {{
+  const t = brew.mix_targets;
+  for (const key of Object.keys(DECK_TEMPLATES)) {{
+    const p = DECK_TEMPLATES[key];
+    if (p.Lands === t.Lands && p.Ramp === t.Ramp && p.Draw === t.Draw && p.Interaction === t.Interaction) return key;
+  }}
+  return 'custom';
+}}
 function updateSynergyReadout() {{
   const t = brew.mix_targets;
   const synergy = Math.max(0, 100 - (t.Lands + t.Ramp + t.Draw + t.Interaction));
   document.getElementById('mix-synergy-readout').textContent = `Synergy (remainder): ${{synergy}}`;
+  document.getElementById('mix-template').value = currentTemplateKey();
 }}
 updateSynergyReadout();
+document.getElementById('mix-template').addEventListener('change', (e) => {{
+  const preset = DECK_TEMPLATES[e.target.value];
+  if (!preset) return;
+  ['Lands', 'Ramp', 'Draw', 'Interaction'].forEach(role => {{
+    brew.mix_targets[role] = preset[role];
+    document.getElementById('mix-' + role.toLowerCase()).value = preset[role];
+  }});
+  updateSynergyReadout();
+}});
 
 function updateFormatUI() {{
   const isCommander = brew.format === 'commander';
@@ -3380,7 +3413,7 @@ analyzeBtn.addEventListener('click', () => {{
   const requestSeq = ++analyzeRequestSeq;
   fetch('/builder/stats', {{
     method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
-    body: JSON.stringify({{ cards: brew.cards, commander: brew.commander, format: brew.format }}),
+    body: JSON.stringify({{ cards: brew.cards, commander: brew.commander, format: brew.format, mix_targets: brew.mix_targets }}),
   }})
     .then(r => r.json())
     .then(data => {{
@@ -3724,6 +3757,16 @@ def _excluded_set_codes(body: dict) -> set[str] | None:
     return codes or None
 
 
+def _mix_targets_from(body: dict) -> dict[str, int] | None:
+    """The Deck mix targets box (Lands/Ramp/Draw/Interaction) from a request
+    body, or None when empty -- same parsing /builder/suggest has always done."""
+    raw = body.get("mix_targets") or {}
+    return {
+        role: int(raw[role]) for role in ("Lands", "Ramp", "Draw", "Interaction")
+        if role in raw and isinstance(raw[role], (int, float))
+    } or None
+
+
 def _excluded_card_names(body: dict) -> set[str] | None:
     """Parses the "never suggest this again" list (see the deck-row/
     suggestion-row avoid buttons) out of a /builder/suggest, /builder/
@@ -3986,7 +4029,7 @@ def builder_stats():
         extra_turn_count=totals.get("extra_turn_count") or 0,
         is_commander_format=is_commander_format,
         role_counts=role_counts_for_entries(entries),
-        role_targets=commander_deck_shape_targets(deck_format, target_size),
+        role_targets=deck_shape_targets_with_mix(deck_format, target_size, _mix_targets_from(body)),
     )
 
 

@@ -468,6 +468,48 @@ def commander_deck_shape_targets(deck_format: str, target_size: int) -> dict[str
     return {"Lands": lands, "Ramp": None, "Draw": None, "Interaction": None, "Synergy": target_size - lands}
 
 
+# Named presets for the Deck mix targets box. "standard" IS the default
+# (commander_deck_shape_targets) and is never redefined here. The others come
+# from two public deck-building walkthroughs that agree on the big numbers
+# (38 lands; 10-12 ramp; 12+ real card advantage) and differ on the rest.
+# Counts are for a 100-card deck; Synergy is always the remainder of the 99.
+#   engine      -- a value/sacrifice-style template: 38 lands, 12 ramp, 13 card
+#                  advantage, 12 interaction, leaving 24 theme cards.
+#   commandzone -- the Command Zone podcast's template: 38 lands, 10 ramp,
+#                  12 card advantage, 12 targeted + 6 mass disruption = 18. It
+#                  budgets 30 "plan" cards by letting cards count in two roles
+#                  (108 minus overlap); our roles are disjoint, so the plan
+#                  share here is simply what's left.
+TEMPLATE_FRACTIONS = {
+    "engine": {"Lands": 0.38, "Ramp": 0.12, "Draw": 0.13, "Interaction": 0.12},
+    "commandzone": {"Lands": 0.38, "Ramp": 0.10, "Draw": 0.12, "Interaction": 0.18},
+}
+
+
+def deck_templates(target_size: int = 100) -> dict[str, dict[str, int]]:
+    """{template_key: {"Lands","Ramp","Draw","Interaction"}} for the mix-targets
+    preset menu. Synergy is always the remainder."""
+    templates = {"standard": {k: v for k, v in commander_deck_shape_targets("commander", target_size).items() if k != "Synergy"}}
+    for key, fractions in TEMPLATE_FRACTIONS.items():
+        templates[key] = {role: round(target_size * frac) for role, frac in fractions.items()}
+    return templates
+
+
+def deck_shape_targets_with_mix(deck_format: str, target_size: int, mix_targets: dict[str, int] | None = None) -> dict[str, int | None]:
+    """commander_deck_shape_targets with the player's own per-role overrides
+    (the Deck mix targets box) applied and Synergy recomputed as the
+    remainder -- what Suggest builds toward, so Analyze's Deck Shape can judge
+    a deck against the same numbers instead of always the defaults."""
+    targets = commander_deck_shape_targets(deck_format, target_size)
+    if deck_format != "commander" or not mix_targets:
+        return targets
+    for role in ("Lands", "Ramp", "Draw", "Interaction"):
+        if mix_targets.get(role) is not None:
+            targets[role] = max(0, int(mix_targets[role]))
+    targets["Synergy"] = max(0, target_size - sum(targets[r] or 0 for r in ("Lands", "Ramp", "Draw", "Interaction")))
+    return targets
+
+
 def _is_basic_land(type_line: str) -> bool:
     return "Basic" in type_line and "Land" in type_line
 
@@ -637,6 +679,86 @@ def _hits_own_board(c: dict, nm: str, symmetric: frozenset[str], one_sided: froz
         text = c.get("oracle_text") or ""
         return bool(_ALL_CREATURES_RE.search(text)) and not _OPPONENT_ONLY_RE.search(text)
     return False
+
+
+_NUM_WORDS = {"a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7}
+_DRAW_NUM_RE = re.compile(r"\bdraws? (?:up to )?(a|an|one|two|three|four|five|six|seven|\d+) (?:additional )?cards?\b")
+_DRAW_VARIABLE_RE = re.compile(r"\bdraws? (?:a card for each|cards? equal to|x cards?|that many cards?|cards? for each)")
+_EXILE_PLAY_RE = re.compile(r"exile the top (a|one|two|three|four|five|x|\d+)? ?cards? of (?:your|their) library")
+_DISCARD_RE = re.compile(r"discard (a|an|one|two|three|four|x|\d+) cards?\b")
+_PUT_BACK_RE = re.compile(r"put (a|an|one|two|three|four|\d+) cards? from your hand (?:on top of|into) (?:your|their) library")
+_SELF_PUT_BACK_RE = re.compile(r"put [^.]*? on top of (?:its owner's|your) library")
+_REPEATABLE_RE = re.compile(r"whenever|at the beginning of|\{t\}|each (?:upkeep|turn|end step)|\bdies\b|\bleaves the battlefield\b")
+
+
+def _net_cards_drawn(c: dict) -> tuple[int, bool] | None:
+    """(net cards this card's draw effect nets you, repeatable) from its rules
+    text, or None when no draw/impulse-draw effect can be read from it -- the
+    "I can't tell" case, which callers must NOT treat as weak. Net = cards
+    drawn minus cards discarded/put back in the same effect, so Faithless
+    Looting (draw 2, discard 2) is 0 and Brainstorm (draw 3, put back 2) is 1.
+    Symmetric "each player" draws (Windfall) and "target player" are treated
+    as 1: they don't reliably put YOU up cards."""
+    text = (c.get("oracle_text") or "").lower()
+    if not text or ("draw" not in text and "exile the top" not in text):
+        return None
+    is_spell = any(t in (c.get("type_line") or "") for t in ("Instant", "Sorcery"))
+    best = None
+    for sentence in re.split(r"(?<=[.])\s+|\n", text):
+        if "would draw" in sentence:
+            continue  # replacement effect (Teferi's Ageless Insight), not card draw
+        if _DRAW_VARIABLE_RE.search(sentence):
+            drawn = 3  # scales with the board/hand; treat as real card advantage
+        else:
+            m = _DRAW_NUM_RE.search(sentence)
+            if m:
+                drawn = _NUM_WORDS.get(m.group(1)) or int(m.group(1))
+            else:
+                m = _EXILE_PLAY_RE.search(sentence)
+                if not m or "play" not in text:
+                    continue
+                g = m.group(1) or "a"
+                drawn = _NUM_WORDS.get(g) or (3 if g == "x" else (int(g) if g.isdigit() else 1))
+        if re.search(r"each player|all players", sentence):
+            drawn = min(drawn, 1)
+        net = drawn
+        put_back = False
+        for rx in (_DISCARD_RE, _PUT_BACK_RE):
+            dm = rx.search(sentence)
+            if dm:
+                put_back = put_back or rx is _PUT_BACK_RE
+                g = dm.group(1)
+                net -= _NUM_WORDS.get(g) or (3 if g == "x" else (int(g) if g.isdigit() else 1))
+        if not put_back and _SELF_PUT_BACK_RE.search(sentence):
+            net -= 1  # e.g. Sensei's Divining Top: draws, then puts itself back on top
+        # A sacrifice cost makes it a one-shot even with a {T} in it (Mind Stone:
+        # "{1}, {T}, Sacrifice: Draw a card" replaces itself, nothing more).
+        repeatable = (not is_spell) and bool(_REPEATABLE_RE.search(sentence)) and "sacrifice" not in sentence
+        cand = (net, repeatable)
+        if best is None or (cand[1], cand[0]) > (best[1], best[0]):
+            best = cand
+    return best
+
+
+def _is_cantrip(c: dict) -> bool:
+    """True when a card's draw effect provably does not put you up cards: a
+    one-shot that nets 0-1 cards (Gitaxian Probe, Opt, Brainstorm, Faithless
+    Looting, an ETB "draw a card" body). Real card advantage -- per the deck-
+    building rule "it has to replace itself and draw at least one more" -- is
+    a one-shot netting 2+, or a repeatable source netting 1+. Unreadable text
+    is never called a cantrip."""
+    result = _net_cards_drawn(c)
+    if result is None:
+        return False
+    net, repeatable = result
+    return not ((repeatable and net >= 1) or net >= 2)
+
+
+def _cantrip_filler(c: dict, role: str) -> bool:
+    """Draw-role card that is only a cantrip/loot/wheel -- ranked behind real
+    card advantage among cards with no commander-specific signal (a card
+    EDHREC rates for this commander keeps its EDHREC standing)."""
+    return role == "Draw" and _is_cantrip(c)
 
 
 def _costly_filler(c: dict, role: str) -> bool:
@@ -1043,7 +1165,7 @@ def suggest_replacements(
     def rank_key(c: dict):
         nm = normalize_name(c["name"])
         shares_tag = target_tag is not None and tag_by_name.get(nm) == target_tag
-        return (voltron_commander and _hits_own_board(c, nm, symmetric_wipes, one_sided_wipes), -synergy_by_name.get(nm, 0.0), nm not in edhrec_tracked_names, not shares_tag, nm not in game_changers, _costly_filler(c, target_role), _overall_rank(c), c["name"])
+        return (voltron_commander and _hits_own_board(c, nm, symmetric_wipes, one_sided_wipes), -synergy_by_name.get(nm, 0.0), nm not in edhrec_tracked_names, not shares_tag, nm not in game_changers, _costly_filler(c, target_role), _cantrip_filler(c, target_role), _overall_rank(c), c["name"])
 
     same_role.sort(key=rank_key)
     tag_label = tag_labels.get(target_tag) if target_tag else None
@@ -1385,6 +1507,7 @@ def suggest_builder_cards(
             nm not in game_changers,
             pw_unwanted and c["category"] == "Planeswalkers",
             _costly_filler(c, role_of(c["name"], c["category"])),
+            _cantrip_filler(c, role_of(c["name"], c["category"])),
             # Voltron: among equally cheap no-signal cards, a one-sided
             # wipe (clears blockers, spares the commander) goes first. Kept
             # behind the cost check on purpose: the one-sided tag is loose
