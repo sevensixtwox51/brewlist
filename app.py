@@ -2720,7 +2720,7 @@ function setWizardFooter(opts) {{
   if (opts.nextLabel) document.getElementById('wizard-next').textContent = opts.nextLabel;
 }}
 
-const FILLER_TIP = 'No EDHREC data for this card with your commander, and no combo or theme link -- it was picked only to fill a slot, ranked by overall popularity.';
+const FILLER_TIP = 'This card is not on EDHREC&#39;s list for this commander&#39;s decks (and has no combo or theme link here) -- it was picked only to fill a slot, ranked by overall popularity. It can still be a popular card elsewhere.';
 function isFiller(card) {{ return card.basis === 'filler'; }}
 function fillerBadgeHtml(card) {{
   return isFiller(card) ? '<span class="filler-badge" title="' + FILLER_TIP + '">Slot filler</span>' : '';
@@ -2796,7 +2796,7 @@ function renderWizard() {{
     + '<button type="button" class="btn ghost small" data-wz="none">Select none</button>'
     + '<button type="button" class="btn ghost small" data-wz="reset">Reset to suggested</button></span></div>'
     + gcNote
-    + '<div class="hint wz-tip">Click a card to add or remove it. Cards marked <b>Not owned</b> would need to be bought; <b>Slot filler</b> means EDHREC has nothing on that card for your commander and it was only picked to fill the slot.</div>';
+    + '<div class="hint wz-tip">Click a card to add or remove it. Cards marked <b>Not owned</b> would need to be bought; <b>Slot filler</b> means the card isn&#39;t on EDHREC&#39;s list for your commander&#39;s decks and was only picked to fill the slot.</div>';
 
   if (step.role === 'Synergy') {{
     const isCreature = c => c.category === 'Creatures';
@@ -2812,7 +2812,7 @@ function renderWizard() {{
   }}
   if (step.weak.length) {{
     html += '<h4 class="wz-group-title">Other purchase ideas</h4>'
-      + '<div class="hint wz-tip">EDHREC has no data on these for your commander, so they start unselected &mdash; they are only here because this role came up short.</div>'
+      + '<div class="hint wz-tip">These aren&#39;t on EDHREC&#39;s list for your commander&#39;s decks, so they start unselected &mdash; they are only here because this role came up short.</div>'
       + wizardGridHtml(step.weak);
   }}
   const scrollTop = wizardBody.scrollTop;
@@ -2909,7 +2909,7 @@ function finishWizard() {{
   }}
   const fillers = toAdd.filter(isFiller);
   if (fillers.length) {{
-    html += '<div class="filler-note" style="margin-top:8px;"><b>' + fillers.length + ' slot filler' + (fillers.length === 1 ? '' : 's') + ' added</b> (no EDHREC data for your commander; worth a look): '
+    html += '<div class="filler-note" style="margin-top:8px;"><b>' + fillers.length + ' slot filler' + (fillers.length === 1 ? '' : 's') + ' added</b> (not on EDHREC&#39;s list for your commander&#39;s decks; worth a look): '
       + fillers.map(c => escapeHtml(c.name)).join(', ') + '.</div>';
   }}
   panel.innerHTML = html;
@@ -2949,7 +2949,7 @@ suggestBtn.addEventListener('click', () => {{
       }}
       const fillerCount = data.suggestions.filter(isFiller).length;
       if (fillerCount) {{
-        panel.insertAdjacentHTML('beforeend', '<div class="filler-note"><b>' + fillerCount + ' of ' + data.suggestions.length + '</b> picks are <b>slot fillers</b>: EDHREC has no data on them for your commander, so they were only chosen to fill a slot.</div>');
+        panel.insertAdjacentHTML('beforeend', '<div class="filler-note"><b>' + fillerCount + ' of ' + data.suggestions.length + '</b> picks are <b>slot fillers</b>: they aren&#39;t on EDHREC&#39;s list for your commander&#39;s decks, so they were only chosen to fill a slot.</div>');
       }}
       // Tracks which suggestions haven't been individually added yet, so
       // "+ Add All" reflects reality instead of a stale snapshot -- without

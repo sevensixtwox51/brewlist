@@ -1833,7 +1833,7 @@ def suggest_builder_cards(
             fallback_reason = f"fills out {role}" if deck_format == "commander" else f"fills out {c['category']}"
             rank = c.get("edhrec_rank")
             if basis == "filler":
-                fallback_reason = f"no EDHREC data for this card with your commander; picked to fill {role}" + (f" (overall popularity #{rank})" if rank else "")
+                fallback_reason = f"not on EDHREC's list for your commander's decks; picked to fill {role}" + (f" (overall popularity #{rank})" if rank else "")
             elif basis == "edhrec":
                 fallback_reason = f"played in EDHREC decks for this commander (no distinctive synergy); fills out {role}"
             out["reason"] = reason_by_name.get(nm) or synergy_reason or theme_reason_by_name.get(nm) or fallback_reason
