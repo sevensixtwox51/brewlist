@@ -1838,11 +1838,25 @@ def suggest_builder_cards(
             return "Lands" if category in ("Lands", "Basic Lands") else "Synergy"
         return _card_role(name, category, role_members)
 
+    # LIBRARY cards only: role targets cover the 99, so the commander (which
+    # sits in wip_entries) must not count toward its own role -- it silently cost
+    # every deck one slot, hidden by a looser cap that no longer applies.
     current_role_counts: dict[str, int] = {}
     for e in wip_entries:
+        if e.section == "commander":
+            continue
         r = role_of(e.name, categorize(e.type_line))
         current_role_counts[r] = current_role_counts.get(r, 0) + e.quantity
     role_needed = {role: max(0, target - current_role_counts.get(role, 0)) for role, target in role_targets.items()}
+    # Combo pieces are pulled in ahead of the role round-robin; they must use up
+    # their role's slots too, or a role runs over target and the whole deck over
+    # 99 (real case: Nekusar's Peer into the Abyss took a Draw slot ON TOP of
+    # the 12 the Draw role budgets -> 13 Draw, 100 library cards, 101 total).
+    combo_per_role: dict[str, int] = {}
+    for c in combo_first:
+        r = role_of(c["name"], c["category"])
+        combo_per_role[r] = combo_per_role.get(r, 0) + 1
+    slots_needed = {role: max(0, need - combo_per_role.get(role, 0)) for role, need in role_needed.items()}
 
     role_candidates: dict[str, list[dict]] = {}
     for c in role_pool_candidates:
@@ -1936,7 +1950,7 @@ def suggest_builder_cards(
     # (this cost Synergy -- the actual creatures/win-cons -- its entire
     # share the first time this was tried).
     eligible = {
-        role: needed for role, needed in role_needed.items()
+        role: needed for role, needed in slots_needed.items()
         if needed > 0 and role_candidates.get(role)
     }
     if not eligible:
@@ -2007,7 +2021,7 @@ def suggest_builder_cards(
                         break
                     if not role_candidates[role]:
                         continue
-                    role_cap = role_targets.get(role, len(role_candidates[role]))
+                    role_cap = slots_needed.get(role, len(role_candidates[role]))
                     if role_cap is not None and role_slots.get(role, 0) < min(role_cap, len(role_candidates[role])):
                         role_slots[role] = role_slots.get(role, 0) + 1
                         leftover -= 1
@@ -2282,6 +2296,39 @@ def suggest_builder_cards(
             out["supported"] = nm in edhrec_tracked_names or nm in reason_by_name
         return out
 
+    # Safety net: never hand back more cards than the library has room for. If
+    # any path above still overshoots, drop the last-ranked non-combo pick from
+    # whichever role is furthest over its own need.
+    def _total_cards() -> int:
+        return (
+            sum(copy_counts.get(normalize_name(c["name"]), 1) for c in ordered)
+            + sum(n for _, n in basic_picks) + len(unowned_picks)
+        )
+    protected_ids = {id(c) for c in combo_first}
+    guard = 0
+    while deck_format == "commander" and _total_cards() > remaining and guard < 50:
+        guard += 1
+        placed_now: dict[str, int] = {}
+        for c in ordered:
+            r = role_of(c["name"], c["category"])
+            placed_now[r] = placed_now.get(r, 0) + copy_counts.get(normalize_name(c["name"]), 1)
+        placed_now["Lands"] = placed_now.get("Lands", 0) + sum(n for _, n in basic_picks)
+        for _c, r in unowned_picks:
+            placed_now[r] = placed_now.get(r, 0) + 1
+        over_role = max(role_needed, key=lambda r: placed_now.get(r, 0) - role_needed.get(r, 0))
+        if over_role == "Lands" and basic_picks:
+            card, n = basic_picks[-1]
+            basic_picks[-1:] = [(card, n - 1)] if n > 1 else []
+            continue
+        if unowned_picks and any(r == over_role for _c, r in unowned_picks):
+            idx = max(i for i, (_c, r) in enumerate(unowned_picks) if r == over_role)
+            unowned_picks.pop(idx)
+            continue
+        victims = [c for c in ordered if id(c) not in protected_ids and role_of(c["name"], c["category"]) == over_role]
+        if not victims:
+            break
+        ordered.remove(victims[-1])
+
     suggestions = [make_suggestion(c, role_of(c["name"], c["category"]), True) for c in ordered]
     for sg in suggestions:
         n = copy_counts.get(normalize_name(sg["name"]), 1)
@@ -2308,7 +2355,7 @@ def suggest_builder_cards(
         commander_role = role_of(commander_entry.name, categorize(commander_entry.type_line)) if commander_entry else None
         steps = []
         for role in role_targets:
-            have = current_role_counts.get(role, 0) - (1 if role == commander_role else 0)
+            have = current_role_counts.get(role, 0)
             role_picks = [s for s in suggestions if s["role"] == role and s.get("basis") != "basic"]
             alt_pool = list(role_candidates.get(role) or []) + (dropped_lands if role == "Lands" else []) + too_obscure.get(role, [])
             owned_alts = [
