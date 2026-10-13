@@ -1320,6 +1320,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
     </div>
     <div class="header-actions">
       <a href="/decks" class="btn ghost small">&larr; Decks</a>
+      <button type="button" class="btn small danger" id="shutdown-btn" title="Stops the local server">&#9209; Shut Down</button>
     </div>
   </div>
   <div id="error-box" class="error" style="display:none;"></div>
@@ -1525,6 +1526,26 @@ def render_builder_page(deck_id: str | None = None) -> str:
 let deckId = {json.dumps(deck_id)};
 let brew = {json.dumps(brew_state)};
 const DECK_TEMPLATES = {json.dumps(deck_templates(100))};
+// What's on disk right now (the deck as loaded, or as last saved), so Shut Down
+// can warn before throwing away unsaved work.
+let lastSavedJson = JSON.stringify(brew);
+document.getElementById('shutdown-btn').addEventListener('click', () => {{
+  const unsaved = brew.cards.length > 0 && JSON.stringify(brew) !== lastSavedJson;
+  const msg = unsaved
+    ? 'This deck has unsaved changes. Shut down anyway? (Cancel, then Save or Copy Decklist first.)'
+    : 'Shut down the server? You will need to relaunch it to use this again.';
+  if (!confirm(msg)) return;
+  fetch('/shutdown', {{ method: 'POST' }}).catch(() => {{}});
+  // Unlike the other pages, leave the builder on screen: the deck is still
+  // here and Copy Decklist works without the server.
+  const banner = document.createElement('div');
+  banner.className = 'update-banner';
+  banner.style.cssText = 'position:sticky;top:0;z-index:500;text-align:center;';
+  banner.textContent = 'Server stopped. ' + (unsaved ? 'Unsaved changes are still on this page -- use Copy Decklist now; closing this tab loses them.' : 'You can close this tab.');
+  document.body.prepend(banner);
+  document.querySelectorAll('button, input, select').forEach(el => {{ if (el.id !== 'copy-decklist-btn') el.disabled = true; }});
+  document.querySelectorAll('a.btn').forEach(el => {{ el.style.pointerEvents = 'none'; el.style.opacity = '0.5'; }});  // links to a server that's gone
+}});
 let collection = [];
 let themeLabelToIds = {{}};
 let themeRequestId = 0;
@@ -2579,6 +2600,7 @@ saveBtn.addEventListener('click', () => {{
     .then(data => {{
       if (data.error) {{ showError(data.error); return; }}
       deckId = data.deck_id;
+      lastSavedJson = JSON.stringify(brew);
       window.history.replaceState(null, '', '/builder?id=' + encodeURIComponent(deckId));
       saveLabel.textContent = 'Saved.';
       saveLabel.style.display = 'block';
@@ -3643,6 +3665,7 @@ function saveThenViewReport() {{
     .then(data => {{
       if (data.error) {{ throw new Error(data.error); }}
       deckId = data.deck_id;
+      lastSavedJson = JSON.stringify(brew);
       window.history.replaceState(null, '', '/builder?id=' + encodeURIComponent(deckId));
       return fetch('/builder/report/start', {{
         method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
