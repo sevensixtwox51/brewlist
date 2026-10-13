@@ -484,7 +484,7 @@ def commander_theme_page(commander_name: str, theme_slug: str) -> dict:
     now = time.time()
     # Entries cached before the basic/nonbasic averages were stored are
     # refetched once.
-    if cached and "avg_nonbasic" in cached and now - cached.get("fetched_at", 0) < _SYNERGY_CACHE_MAX_AGE:
+    if cached and "avg_nonbasic" in cached and "mana_curve" in cached and now - cached.get("fetched_at", 0) < _SYNERGY_CACHE_MAX_AGE:
         return cached
 
     popularity = commander_popularity(commander_name)
@@ -513,6 +513,9 @@ def commander_theme_page(commander_name: str, theme_slug: str) -> dict:
             # 5 nonbasic; Cloud: 11 / 24) -- how many nonbasic lands to run.
             "avg_basic": page.get("basic") if isinstance(page.get("basic"), (int, float)) else None,
             "avg_nonbasic": page.get("nonbasic") if isinstance(page.get("nonbasic"), (int, float)) else None,
+            # Average mana curve of real decks of this build: {"1": 9, "2": 21, ...}
+            # = cards at each mana value in the average deck's nonland cards.
+            "mana_curve": (page.get("panels") or {}).get("mana_curve") or {},
             "num_decks": num_decks,
         }
         _store_cache_entry("theme_synergy", key, entry)

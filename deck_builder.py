@@ -584,11 +584,15 @@ def edhrec_commander_view(commander_name: str, edhrec_theme: str | None = None) 
     avg_pw = profile.get("avg_planeswalkers")
     synergy_data = None
     avg_nonbasic = None
+    avg_big = None
     if chosen:
         page = commander_theme_page(commander_name, chosen["slug"])
         if page.get("cards"):
             synergy_data = page["cards"]
             avg_nonbasic = page.get("avg_nonbasic")
+            curve = page.get("mana_curve") or {}
+            if curve:
+                avg_big = sum(v for k, v in curve.items() if str(k).isdigit() and int(k) >= 6)
             if page.get("avg_planeswalkers") is not None:
                 avg_pw = page["avg_planeswalkers"]
     deck_type = None
@@ -601,6 +605,7 @@ def edhrec_commander_view(commander_name: str, edhrec_theme: str | None = None) 
         "profile": {"themes": [chosen] if (explicit and chosen) else themes, "avg_planeswalkers": avg_pw},
         "deck_type": deck_type,
         "avg_nonbasic_lands": avg_nonbasic,
+        "avg_big_cards": avg_big,
     }
 
 
@@ -899,6 +904,34 @@ def _allocate_counts(n: int, weights: dict[str, float], caps: dict[str, int]) ->
                 remaining -= 1
         active = [k for k in active if alloc[k] < caps[k]]
     return alloc, remaining
+
+
+_DISCOUNT_RE = re.compile(
+    r"\bdelve\b|costs? (?:\{[^}]+\}|x|\d+) less|\bwarp\b|affinity for|\bconvoke\b|\bimprovise\b|\bemerge\b"
+    r"|without paying (?:its|their) mana cost|you may cast this spell for",
+    re.I,
+)
+
+
+def _is_discounted(c: dict) -> bool:
+    """A big-mana-value card that usually isn't paid for in full (delve, cost
+    reduction, warp, convoke, alternative costs): Cavern-Hoard Dragon (MV 9)
+    and Afterlife from the Loam (MV 8) in a Sauron list."""
+    return bool(_DISCOUNT_RE.search(c.get("oracle_text") or ""))
+
+
+def _effective_cmc(c: dict) -> float:
+    cmc = c.get("cmc") or 0
+    return min(cmc, 5) if _is_discounted(c) else cmc
+
+
+def _is_big(c: dict) -> bool:
+    """Counts toward the top-end limit: a nonland card costing 6+ that is paid
+    for in full. Discounted/cheated ones (delve, cost reduction, warp...) are
+    exempt: a first version counted them and dropped Rise of the Dark Realms,
+    Cavern-Hoard Dragon and Afterlife from the Loam from a Sauron list whose
+    owner plays all three -- they're how his deck gets its top end cheaply."""
+    return "Land" not in (c.get("type_line") or "") and (c.get("cmc") or 0) >= 6 and not _is_discounted(c)
 
 
 def _costly_filler(c: dict, role: str) -> bool:
@@ -1331,7 +1364,7 @@ def suggest_replacements(
     def rank_key(c: dict):
         nm = normalize_name(c["name"])
         shares_tag = target_tag is not None and tag_by_name.get(nm) == target_tag
-        return (voltron_commander and _hits_own_board(c, nm, symmetric_wipes, one_sided_wipes), nm not in staple_names, -inclusion_by_name.get(nm, 0.0) if nm in staple_names else 0.0, -synergy_by_name.get(nm, 0.0), nm not in edhrec_tracked_names, not shares_tag, nm not in game_changers, _costly_filler(c, target_role), _cantrip_filler(c, target_role), _overall_rank(c), c["name"])
+        return (voltron_commander and _hits_own_board(c, nm, symmetric_wipes, one_sided_wipes), nm not in staple_names, -inclusion_by_name.get(nm, 0.0) if nm in staple_names else 0.0, -synergy_by_name.get(nm, 0.0), nm not in edhrec_tracked_names, not shares_tag, nm not in game_changers, _costly_filler(c, target_role), _cantrip_filler(c, target_role), min(_effective_cmc(c), 6), _overall_rank(c), c["name"])
 
     same_role.sort(key=rank_key)
     tag_label = tag_labels.get(target_tag) if target_tag else None
@@ -1628,6 +1661,23 @@ def suggest_builder_cards(
         if e.section != "commander"
         and is_own_board_wipe(owned_by_name.get(normalize_name(e.name)) or {"name": e.name})
     )
+
+    # Top-end limit on cards with a printed mana value of 6+. Both deck-building
+    # walkthroughs checked against (and a real Sauron list) sit at about 3-5, but
+    # a build that is deliberately top-heavy -- EDHREC's average deck of that
+    # type runs 9+ (Kaalia 24, Zhulodok 32, cheating big things out is the
+    # plan) -- keeps its own average. Never below 3. Combo pieces are never
+    # blocked but do count.
+    _avg_big = edhrec_view.get("avg_big_cards")
+    if deck_format == "commander" and _avg_big is not None:
+        big_cap = round(_avg_big) if _avg_big >= 9 else max(3, min(round(_avg_big), 5))
+    else:
+        big_cap = None
+    running_big_count = sum(
+        e.quantity for e in wip_entries
+        if e.section != "commander" and _is_big(owned_by_name.get(normalize_name(e.name)) or {})
+    )
+    big_blocked = 0
     # EDHREC's average planeswalker count in this commander's decks (Cloud 0,
     # Atraxa 5). Under 1 means players essentially never run them, so a
     # planeswalker with no commander-specific signal shouldn't fill a slot.
@@ -1702,6 +1752,7 @@ def suggest_builder_cards(
             # (Elspeth, Sun's Champion carries it, but her -3 destroys the
             # Voltron commander too) and shouldn't override "no 6-drops".
             not (voltron_commander and nm in one_sided_wipes and not _hits_own_board(c, nm, symmetric_wipes, one_sided_wipes)),
+            min(_effective_cmc(c), 6),  # cheaper is usually better when nothing else separates two cards
             _overall_rank(c),
             c["name"],
         )
@@ -1732,6 +1783,8 @@ def suggest_builder_cards(
             running_gc_count += 1
         if is_own_board_wipe(c):
             running_wipe_count += 1  # a real combo piece wins, but it still counts
+        if _is_big(c):
+            running_big_count += 1
     combo_first_names = {normalize_name(c["name"]) for c in combo_first}
     role_pool_candidates = [c for c in candidates if normalize_name(c["name"]) not in combo_first_names]
 
@@ -1961,6 +2014,9 @@ def suggest_builder_cards(
                     continue  # over the intended bracket's cap -- try this role's next candidate instead
                 if wipe_cap is not None and running_wipe_count >= wipe_cap and is_own_board_wipe(candidate):
                     continue  # enough symmetric wipes for this kind of deck already
+                if big_cap is not None and running_big_count >= big_cap and _is_big(candidate):
+                    big_blocked += 1
+                    continue  # this build's usual top-end is already full
                 picked = candidate
                 break
             if picked is None:
@@ -1972,6 +2028,8 @@ def suggest_builder_cards(
                 running_gc_count += 1
             if is_own_board_wipe(picked):
                 running_wipe_count += 1
+            if _is_big(picked):
+                running_big_count += 1
 
     # What the owned round-robin (plus the combo-first carve-out) already
     # placed per role. The purchase fallback below needs the real remaining
@@ -2115,12 +2173,16 @@ def suggest_builder_cards(
                     continue
                 if wipe_cap is not None and running_wipe_count >= wipe_cap and is_own_board_wipe(candidate):
                     continue
+                if big_cap is not None and running_big_count >= big_cap and _is_big(candidate):
+                    continue
                 unowned_picks.append((candidate, role))
                 taken += 1
                 if is_gc:
                     running_gc_count += 1
                 if is_own_board_wipe(candidate):
                     running_wipe_count += 1
+                if _is_big(candidate):
+                    running_big_count += 1
 
     prices = prices_data_in_index() if (unowned_picks or (pools_out is not None and unowned_by_role)) else {}
 
@@ -2261,6 +2323,11 @@ def suggest_builder_cards(
             }
             if role == "Draw" and draw_note:
                 step["note"] = draw_note
+            if role == "Synergy" and big_blocked and big_cap is not None:
+                step["note"] = (
+                    f"Top-end limit: this build is capped at {big_cap} cards costing 6+ mana (real decks average about {round(_avg_big)}; "
+                    f"most guides say 3-5), so {big_blocked} more big card{'s' if big_blocked != 1 else ''} were skipped -- they're still in the options below. Discounted or cheated cards (delve, cost reduction, warp) don't count."
+                )
             if role == "Lands" and basics_by_color:
                 suggested = {s["name"]: s["quantity"] for s in suggestions if s.get("basis") == "basic"}
                 step["basics"] = [
