@@ -15,6 +15,7 @@ has to app.py/brewlist_cli.py.
 
 from __future__ import annotations
 
+import math
 import re
 
 from brewlist_core import (
@@ -363,6 +364,18 @@ def _role_member_names(groups: dict, tag_labels: dict) -> dict[str, frozenset[st
             if entry:
                 target.add(entry[0])
     result[_INCIDENTAL_BURN_KEY] = frozenset(soft - hard)
+    # "End the turn" cards (Sundial of the Infinite, Time Stop, ...) carry
+    # counterspell-exile because they exile the stack, but Sundial can only be
+    # activated on your own turn, so it answers nothing an opponent does and was
+    # being picked as Interaction filler. Without a real removal/sweeper tag they
+    # are not Interaction.
+    end_turn = {e[0] for e in (groups.get(label_to_id.get("end turn")) or []) if e}
+    if end_turn:
+        real = set()
+        for label in _ROLE_TAG_LABELS["Interaction"]:
+            if label.startswith(("removal", "sweeper", "burn", "multi removal", "swap removal", "one-sided fight")):
+                real |= {e[0] for e in (groups.get(label_to_id.get(label)) or []) if e}
+        result["Interaction"] = frozenset(result["Interaction"] - (end_turn - real))
     return result
 
 
@@ -955,6 +968,16 @@ def _costly_filler(c: dict, role: str) -> bool:
     return role in ("Ramp", "Draw", "Interaction") and (c.get("cmc") or 0) >= 6
 
 
+def _rank_octave(c: dict) -> int:
+    """Overall popularity in bands of a factor of two (#1-1, #2-3, #4-7, ...
+    #2,048-4,095 is one band). Lets the "cheaper first" tiebreak decide only
+    between cards of broadly similar popularity: without bands, Vampire
+    Hexmage (#9,184, 2 mana) outranked Witch of the Moors (#2,567, 5 mana) in an
+    Aristocrats deck purely on cost."""
+    rank = c.get("edhrec_rank")
+    return int(math.log2(rank)) if rank and rank > 0 else 99
+
+
 def _overall_rank(c: dict) -> int:
     """EDHREC's overall popularity rank (1 = most played), or a huge number
     when unknown so unranked cards sort after ranked ones. The last
@@ -1372,7 +1395,7 @@ def suggest_replacements(
     def rank_key(c: dict):
         nm = normalize_name(c["name"])
         shares_tag = target_tag is not None and tag_by_name.get(nm) == target_tag
-        return (voltron_commander and _hits_own_board(c, nm, symmetric_wipes, one_sided_wipes), nm not in staple_names, -inclusion_by_name.get(nm, 0.0) if nm in staple_names else 0.0, -synergy_by_name.get(nm, 0.0), nm not in edhrec_tracked_names, not shares_tag, nm not in game_changers, _costly_filler(c, target_role), _cantrip_filler(c, target_role), min(_effective_cmc(c), 6), _overall_rank(c), c["name"])
+        return (voltron_commander and _hits_own_board(c, nm, symmetric_wipes, one_sided_wipes), nm not in staple_names, -inclusion_by_name.get(nm, 0.0) if nm in staple_names else 0.0, -synergy_by_name.get(nm, 0.0), nm not in edhrec_tracked_names, not shares_tag, nm not in game_changers, _costly_filler(c, target_role), _cantrip_filler(c, target_role), _rank_octave(c), min(_effective_cmc(c), 6), _overall_rank(c), c["name"])
 
     same_role.sort(key=rank_key)
     tag_label = tag_labels.get(target_tag) if target_tag else None
@@ -1760,7 +1783,8 @@ def suggest_builder_cards(
             # (Elspeth, Sun's Champion carries it, but her -3 destroys the
             # Voltron commander too) and shouldn't override "no 6-drops".
             not (voltron_commander and nm in one_sided_wipes and not _hits_own_board(c, nm, symmetric_wipes, one_sided_wipes)),
-            min(_effective_cmc(c), 6),  # cheaper is usually better when nothing else separates two cards
+            _rank_octave(c),  # similar popularity first...
+            min(_effective_cmc(c), 6),  # ...then cheaper (usually better when nothing else separates two cards)
             _overall_rank(c),
             c["name"],
         )
