@@ -3039,7 +3039,7 @@ suggestBtn.addEventListener('click', () => {{
         onclick: () => {{ panel.innerHTML = ''; }},
       }});
       function refreshAddAllBtn() {{
-        addAllBtn.textContent = `+ Add All (${{remaining.length}})`;
+        addAllBtn.textContent = `+ Add All (${{remaining.reduce((n, sg) => n + (sg.quantity || 1), 0)}})`;
         addAllBtn.style.display = remaining.length ? '' : 'none';
         dismissAllBtn.style.display = remaining.length ? '' : 'none';
       }}
@@ -3253,9 +3253,12 @@ copyDecklistBtn.addEventListener('click', () => {{
   const text = buildDecklistText();
   const label = document.getElementById('save-label');
   const finish = () => {{
+    // Total copies, not lines: a deck with 18 basics on 3 lines is 100 cards
+    // (commander + 99), not "85".
+    const libraryCopies = brew.cards.reduce((n, c) => n + c.quantity, 0);
     label.textContent = brew.commander
-      ? `Copied ${{brew.cards.length + 1}} cards. Paste into Moxfield/Archidekt, then set your commander to: ${{brew.commander.name}}.`
-      : `Copied ${{brew.cards.length}} cards. Paste into Moxfield/Archidekt to import.`;
+      ? `Copied ${{libraryCopies + 1}} cards (${{brew.commander.name}} on the first line + ${{libraryCopies}} others). Paste into Moxfield/Archidekt and set that first card as your commander -- don't add the commander again.`
+      : `Copied ${{libraryCopies}} cards. Paste into Moxfield/Archidekt to import.`;
     label.style.display = 'block';
     setTimeout(() => {{ label.style.display = 'none'; }}, 6000);
   }};
