@@ -391,6 +391,13 @@ def _card_role(name: str, category: str, role_members: dict[str, frozenset[str]]
 # Below this, an EDHREC synergy score is noise (see _synergy_reason): the card
 # is simply played everywhere, not distinctively with this commander.
 _MEANINGFUL_SYNERGY = 0.08
+# A card played in at least this share of the commander's decks (for the chosen
+# deck type) is a staple of that build (Sol Ring and Arcane Signet in 97-99% of
+# Sauron decks). EDHREC's synergy score rates how DISTINCTIVE a card is to the
+# commander, so staples score ~0 and were ranked below far more niche cards --
+# the autobuild left Sol Ring and Arcane Signet out of a Sauron deck whose
+# owner runs both. Staples rank first, most-played first.
+_STAPLE_INCLUSION = 0.6
 
 
 def _synergy_reason(score: float | None, deck_label: str | None = None) -> str | None:
@@ -1229,6 +1236,7 @@ def suggest_replacements(
     synergy_by_name: dict[str, float] = {}
     edhrec_tracked_names: set[str] = set()
     commander_entry = next((e for e in wip_entries if e.section == "commander"), None)
+    inclusion_by_name: dict[str, float] = {}
     edhrec_view = {"synergy_data": {}, "profile": {}, "deck_type": None}
     if deck_format == "commander" and commander_entry:
         edhrec_view = edhrec_commander_view(commander_entry.name, edhrec_theme)
@@ -1237,6 +1245,10 @@ def suggest_replacements(
         for nm, info in synergy_data.items():
             if info["synergy"] > 0:
                 synergy_by_name[nm] = info["synergy"]
+        _deck_total = max((info.get("num_decks") or 0) for info in synergy_data.values()) if synergy_data else 0
+        if _deck_total:
+            inclusion_by_name = {nm: (info.get("num_decks") or 0) / _deck_total for nm, info in synergy_data.items()}
+    staple_names = {nm for nm, r in inclusion_by_name.items() if r >= _STAPLE_INCLUSION}
 
     def role_of(name: str, category: str) -> str:
         if deck_format != "commander":
@@ -1257,7 +1269,7 @@ def suggest_replacements(
     def rank_key(c: dict):
         nm = normalize_name(c["name"])
         shares_tag = target_tag is not None and tag_by_name.get(nm) == target_tag
-        return (voltron_commander and _hits_own_board(c, nm, symmetric_wipes, one_sided_wipes), -synergy_by_name.get(nm, 0.0), nm not in edhrec_tracked_names, not shares_tag, nm not in game_changers, _costly_filler(c, target_role), _cantrip_filler(c, target_role), _overall_rank(c), c["name"])
+        return (voltron_commander and _hits_own_board(c, nm, symmetric_wipes, one_sided_wipes), nm not in staple_names, -inclusion_by_name.get(nm, 0.0) if nm in staple_names else 0.0, -synergy_by_name.get(nm, 0.0), nm not in edhrec_tracked_names, not shares_tag, nm not in game_changers, _costly_filler(c, target_role), _cantrip_filler(c, target_role), _overall_rank(c), c["name"])
 
     same_role.sort(key=rank_key)
     tag_label = tag_labels.get(target_tag) if target_tag else None
@@ -1445,6 +1457,7 @@ def suggest_builder_cards(
     synergy_by_name: dict[str, float] = {}
     edhrec_tracked_names: set[str] = set()
     commander_entry = next((e for e in wip_entries if e.section == "commander"), None)
+    inclusion_by_name: dict[str, float] = {}
     edhrec_view = {"synergy_data": {}, "profile": {}, "deck_type": None}
     if deck_format == "commander" and commander_entry:
         edhrec_view = edhrec_commander_view(commander_entry.name, edhrec_theme)
@@ -1455,6 +1468,10 @@ def suggest_builder_cards(
         for nm, info in synergy_data.items():
             if info["synergy"] > 0:
                 synergy_by_name[nm] = info["synergy"]
+        _deck_total = max((info.get("num_decks") or 0) for info in synergy_data.values()) if synergy_data else 0
+        if _deck_total:
+            inclusion_by_name = {nm: (info.get("num_decks") or 0) / _deck_total for nm, info in synergy_data.items()}
+    staple_names = {nm for nm, r in inclusion_by_name.items() if r >= _STAPLE_INCLUSION}
 
     # Theme/synergy signal -- reuses the exact same Oracle Tags data the
     # budget-alternative suggestions already use (one representative
@@ -1586,6 +1603,8 @@ def suggest_builder_cards(
             # card EDHREC tracks for this commander (it's popular as a
             # generic red/white staple, not because it suits the plan).
             voltron_commander and _hits_own_board(c, nm, symmetric_wipes, one_sided_wipes),
+            nm not in staple_names,
+            -inclusion_by_name.get(nm, 0.0) if nm in staple_names else 0.0,
             # Meaningful EDHREC synergy first; then cards that fit the
             # commander's EDHREC theme (Synergy role only), ahead of cards
             # EDHREC merely lists at noise-level synergy (Lightning Greaves
