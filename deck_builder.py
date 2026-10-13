@@ -398,6 +398,14 @@ _MEANINGFUL_SYNERGY = 0.08
 # the autobuild left Sol Ring and Arcane Signet out of a Sauron deck whose
 # owner runs both. Staples rank first, most-played first.
 _STAPLE_INCLUSION = 0.6
+# A card with no real backing for this commander (not on EDHREC's list for the
+# deck type, no combo/theme link) and an overall popularity worse than this is
+# too obscure to count as one of a deck's Draw/Interaction/Ramp cards. Without
+# a floor the ranking only ORDERED the leftovers: Bold Biochemist (#26,647)
+# filled the Draw slot of four different decks, and Superior Foes of Spider-Man
+# (a creature whose impulse draw needs a 4+ cost spell, #15,216) another. The
+# slot becomes a purchase suggestion instead; the card stays in the options.
+_FILLER_RANK_FLOOR = 10000
 
 
 def _synergy_reason(score: float | None, deck_label: str | None = None) -> str | None:
@@ -1842,6 +1850,23 @@ def suggest_builder_cards(
     for pool in role_candidates.values():
         pool.sort(key=rank_key)
 
+    # Quality floor for the support roles (see _FILLER_RANK_FLOOR).
+    too_obscure: dict[str, list[dict]] = {}
+    if deck_format == "commander":
+        for _role in ("Draw", "Interaction", "Ramp"):
+            keep, dropped = [], []
+            for c in role_candidates.get(_role) or []:
+                nm = normalize_name(c["name"])
+                backed = (
+                    nm in edhrec_tracked_names or nm in reason_by_name or nm in theme_reason_by_name
+                    or synergy_by_name.get(nm, 0.0) >= _MEANINGFUL_SYNERGY
+                )
+                rank = c.get("edhrec_rank")
+                (dropped if (not backed and rank is not None and rank > _FILLER_RANK_FLOOR) else keep).append(c)
+            if dropped:
+                role_candidates[_role] = keep
+                too_obscure[_role] = dropped
+
     # Basic lands. Commander lets you run as many basics as you own, and a mono-
     # or two-colour deck's land slots should mostly BE basics -- but each card
     # is suggested once, so without this a Krenko deck got one Mountain and 36
@@ -2285,7 +2310,7 @@ def suggest_builder_cards(
         for role in role_targets:
             have = current_role_counts.get(role, 0) - (1 if role == commander_role else 0)
             role_picks = [s for s in suggestions if s["role"] == role and s.get("basis") != "basic"]
-            alt_pool = list(role_candidates.get(role) or []) + (dropped_lands if role == "Lands" else [])
+            alt_pool = list(role_candidates.get(role) or []) + (dropped_lands if role == "Lands" else []) + too_obscure.get(role, [])
             owned_alts = [
                 make_suggestion(c, role, True)
                 for c in alt_pool
