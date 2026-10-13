@@ -2749,6 +2749,7 @@ function startWizard(data) {{
       unowned: s.unowned_alternates.map(c => Object.assign({{}}, c, {{ suggested: false }})),
       weak: s.picks.filter(isWeak).map(c => Object.assign({{}}, c, {{ suggested: false }})),
       basics: s.basics || [],
+      note: s.note || '',
     }};
     step.basics.forEach(b => {{ wizard.basicQty[b.name] = b.quantity || 0; }});
     step.picks.forEach(c => wizard.selected.add(wizardKey(c)));
@@ -2850,6 +2851,7 @@ function renderWizard() {{
     + gcNote
     + '<div class="hint wz-tip">Click a card to add or remove it. Cards marked <b>Not owned</b> would need to be bought; <b>Slot filler</b> means the card isn&#39;t on EDHREC&#39;s list for your commander&#39;s decks and was only picked to fill the slot.</div>';
 
+  if (step.note) html += '<div class="hint wz-tip" style="color:var(--accent);">' + escapeHtml(step.note) + '</div>';
   html += wizardBasicsHtml(step);
   if (step.role === 'Synergy') {{
     const isCreature = c => c.category === 'Creatures';
@@ -4099,7 +4101,10 @@ def builder_stats():
         extra_turn_count=totals.get("extra_turn_count") or 0,
         is_commander_format=is_commander_format,
         role_counts=role_counts_for_entries(entries),
-        role_targets=deck_shape_targets_with_mix(deck_format, target_size, _mix_targets_from(body)),
+        role_targets=deck_shape_targets_with_mix(
+            deck_format, target_size, _mix_targets_from(body),
+            commander_card=gameplay_data_in_index().get(normalize_name((body.get("commander") or {}).get("name") or "")),
+        ),
     )
 
 

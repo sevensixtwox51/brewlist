@@ -503,17 +503,31 @@ def deck_templates(target_size: int = 100) -> dict[str, dict[str, int]]:
     return templates
 
 
-def deck_shape_targets_with_mix(deck_format: str, target_size: int, mix_targets: dict[str, int] | None = None) -> dict[str, int | None]:
+def draw_target_for_commander(commander_card: dict | None, current_draw: int | None, default_draw: int | None) -> int | None:
+    """A commander that is itself a repeatable card-draw engine (Sauron: draw
+    four whenever the Ring tempts you) needs fewer Draw slots. Only applied
+    while the Draw target is still the standard default: a number the player
+    edited, or a template preset, is left alone."""
+    if current_draw is None or default_draw is None or current_draw != default_draw:
+        return current_draw
+    engine, _ = commander_draw_engine(commander_card)
+    return max(MIN_DRAW_TARGET, default_draw - DRAW_ENGINE_REDUCTION) if engine else current_draw
+
+
+def deck_shape_targets_with_mix(deck_format: str, target_size: int, mix_targets: dict[str, int] | None = None, commander_card: dict | None = None) -> dict[str, int | None]:
     """commander_deck_shape_targets with the player's own per-role overrides
     (the Deck mix targets box) applied and Synergy recomputed as the
     remainder -- what Suggest builds toward, so Analyze's Deck Shape can judge
     a deck against the same numbers instead of always the defaults."""
     targets = commander_deck_shape_targets(deck_format, target_size)
-    if deck_format != "commander" or not mix_targets:
+    default_draw = targets.get("Draw")
+    if deck_format == "commander":
+        for role in ("Lands", "Ramp", "Draw", "Interaction"):
+            if mix_targets and mix_targets.get(role) is not None:
+                targets[role] = max(0, int(mix_targets[role]))
+        targets["Draw"] = draw_target_for_commander(commander_card, targets.get("Draw"), default_draw)
+    if deck_format != "commander" or not (mix_targets or targets.get("Draw") != default_draw):
         return targets
-    for role in ("Lands", "Ramp", "Draw", "Interaction"):
-        if mix_targets.get(role) is not None:
-            targets[role] = max(0, int(mix_targets[role]))
     targets["Synergy"] = max(0, target_size - sum(targets[r] or 0 for r in ("Lands", "Ramp", "Draw", "Interaction")))
     return targets
 
@@ -715,7 +729,12 @@ def _net_cards_drawn(c: dict) -> tuple[int, bool] | None:
         return None
     is_spell = any(t in (c.get("type_line") or "") for t in ("Instant", "Sorcery"))
     best = None
-    for sentence in re.split(r"(?<=[.])\s+|\n", text):
+    for line in text.split("\n"):
+      # Repeatability is read per line, so "Whenever X, you may discard your
+      # hand. If you do, draw four cards." (Sauron) counts as one repeatable
+      # effect even though the draw is in a later sentence.
+      line_repeatable = (not is_spell) and bool(_REPEATABLE_RE.search(line))
+      for sentence in re.split(r"(?<=[.])\s+", line):
         if "would draw" in sentence:
             continue  # replacement effect (Teferi's Ageless Insight), not card draw
         if _DRAW_VARIABLE_RE.search(sentence):
@@ -744,11 +763,54 @@ def _net_cards_drawn(c: dict) -> tuple[int, bool] | None:
             net -= 1  # e.g. Sensei's Divining Top: draws, then puts itself back on top
         # A sacrifice cost makes it a one-shot even with a {T} in it (Mind Stone:
         # "{1}, {T}, Sacrifice: Draw a card" replaces itself, nothing more).
-        repeatable = (not is_spell) and bool(_REPEATABLE_RE.search(sentence)) and "sacrifice" not in sentence
+        repeatable = line_repeatable and "sacrifice" not in sentence
         cand = (net, repeatable)
         if best is None or (cand[1], cand[0]) > (best[1], best[0]):
             best = cand
     return best
+
+
+_TRIGGER_RE = re.compile(r"^(?:whenever|at the beginning of) ([^,]+),")
+# How many Draw slots a commander that is itself a repeatable card-draw engine
+# frees up. Real case: Sauron ("Whenever the Ring tempts you, you may discard
+# your hand. If you do, draw four cards") -- the owner's list runs 4 Draw-tagged
+# cards, not the template's 10, because the Ring-tempting cards (Nazgul, Call
+# of the Ring, Bilbo) all refill his hand.
+DRAW_ENGINE_REDUCTION = 4
+MIN_DRAW_TARGET = 4
+
+
+def _find_commander_card(name: str | None, owned_view: list[dict], gameplay: dict | None) -> dict | None:
+    """The commander's card dict (rules text included): from the owned
+    collection when present, else the full card database."""
+    if not name:
+        return None
+    nm = normalize_name(name)
+    return next((c for c in owned_view if normalize_name(c["name"]) == nm), None) or (gameplay or {}).get(nm)
+
+
+def commander_draw_engine(c: dict | None) -> tuple[bool, str | None]:
+    """(is_engine, trigger_phrase). True when the commander's own rules text
+    draws cards repeatably and nets at least 2 cards a trigger (or 1 with no
+    discard); trigger_phrase is what it triggers on ("the ring tempts you",
+    "this creature attacks"), used to find cards that set the trigger off."""
+    if not c:
+        return False, None
+    result = _net_cards_drawn(c)
+    if result is None:
+        return False, None
+    net, repeatable = result
+    if not repeatable or net < 1:
+        return False, None
+    phrase = None
+    for line in (c.get("oracle_text") or "").lower().split("\n"):
+        m = _TRIGGER_RE.match(line)
+        if m and "draw" in line:
+            phrase = m.group(1).strip()
+            break
+    # One extra card a turn (Phyrexian Arena-style, or a symmetric "each
+    # player draws") is just one more Draw card, not a reason to cut four.
+    return net >= 2, phrase
 
 
 def _is_cantrip(c: dict) -> bool:
@@ -1533,6 +1595,22 @@ def suggest_builder_cards(
                     theme_reason_by_name[normalize_name(c["name"])] = reason
 
     edhrec_profile = edhrec_view["profile"]
+    # A commander that is itself a card-draw engine draws when something
+    # happens ("whenever the Ring tempts you"); the cards that make that happen
+    # (Nazgul, Call of the Ring, Bilbo) are what the deck wants more of than
+    # generic draw. Guarded so a very common trigger ("whenever a creature
+    # enters") doesn't tag half the collection.
+    edhrec_theme_boost: set[str] = set()
+    _engine, _trigger = commander_draw_engine(_find_commander_card(commander_entry.name if commander_entry else None, owned_view, gameplay)) if deck_format == "commander" else (False, None)
+    if _engine and _trigger and len(_trigger) >= 8:
+        _enablers = [c for c in candidates if _trigger in (c.get("oracle_text") or "").lower()]
+        if 1 <= len(_enablers) <= 40:
+            for c in _enablers:
+                nm = normalize_name(c["name"])
+                if nm not in theme_reason_by_name:
+                    theme_reason_by_name[nm] = f'sets off your commander\'s card draw ("{_trigger}")'
+                edhrec_theme_boost.add(nm)
+
     wipe_stance, symmetric_wipes, one_sided_wipes = _wipe_policy(
         commander_entry.name if commander_entry else None,
         budget_alt.get("groups") or {}, tag_labels, preferred_theme_label, edhrec_profile,
@@ -1563,7 +1641,6 @@ def suggest_builder_cards(
     # got nothing. Give every owned card carrying one of the theme's Oracle
     # Tags the same "fits the theme" standing the deck's own emerging themes
     # already get in rank_key -- after anything EDHREC itself tracks.
-    edhrec_theme_boost: set[str] = set()
     if deck_format == "commander" and tag_labels:
         groups = budget_alt.get("groups") or {}
         label_to_id = {label: tag_id for tag_id, label in tag_labels.items()}
@@ -1681,6 +1758,18 @@ def suggest_builder_cards(
                     role_targets[role] = max(0, int(mix_targets[role]))
     else:
         role_targets = {"Lands": round(library_target * CONSTRUCTED_LAND_FRACTION)}
+    _cmd_card = _find_commander_card(commander_entry.name if commander_entry else None, owned_view, gameplay) if deck_format == "commander" else None
+    _draw_engine, _draw_trigger = commander_draw_engine(_cmd_card)
+    if deck_format == "commander":
+        _std_draw = commander_deck_shape_targets(deck_format, target_size).get("Draw")
+        _before = role_targets.get("Draw")
+        role_targets["Draw"] = draw_target_for_commander(_cmd_card, _before, _std_draw)
+        draw_note = (
+            f"{commander_entry.name} is itself a card-draw engine (it draws on \"{_draw_trigger or 'its trigger'}\"), "
+            f"so the Draw target is lowered from {_before} to {role_targets['Draw']}."
+        ) if role_targets["Draw"] != _before else None
+    else:
+        draw_note = None
     role_targets["Synergy"] = max(0, library_target - sum(role_targets.values()))
 
     def role_of(name: str, category: str) -> str:
@@ -2170,6 +2259,8 @@ def suggest_builder_cards(
                 "alternates": owned_alts,
                 "unowned_alternates": unowned_alts,
             }
+            if role == "Draw" and draw_note:
+                step["note"] = draw_note
             if role == "Lands" and basics_by_color:
                 suggested = {s["name"]: s["quantity"] for s in suggestions if s.get("basis") == "basic"}
                 step["basics"] = [
