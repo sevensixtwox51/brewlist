@@ -287,11 +287,15 @@ def commander_popularity(name: str, cache: dict | None = None, index: dict[str, 
             cache = _load_cache()
         index = _build_name_index(cache)
     nm = name.strip().lower()
+    # A double-faced card is stored by its full name ("Sephiroth, Fabled SOLDIER
+    # // Sephiroth, One-Winged Angel") but EDHREC ranks it under just one face
+    # ("Sephiroth, Fabled SOLDIER", #24) -- try the full name, then each face.
+    variants = [nm] + [part.strip() for part in nm.split("//") if part.strip()] if "//" in nm else [nm]
     ranks: dict[str, int] = {}
     slug = None
     num_decks = None
     for window, by_name in index.items():
-        c = by_name.get(nm)
+        c = next((by_name[v] for v in variants if v in by_name), None)
         if c:
             ranks[window] = c["rank"]
             slug = slug or c["slug"]
