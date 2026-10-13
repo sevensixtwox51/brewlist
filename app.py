@@ -998,6 +998,14 @@ body:not(.compact) .builder-tile .tile-icon-stack { grid-area:stack; }
 .filler-note { margin:0 0 8px; padding:6px 10px; border-radius:8px; font-size:0.78rem; color:var(--text-dim); border:1px dashed var(--text-dim); }
 .wz-badge-row .filler-badge { margin-left:0; }
 .wz-badge-row .unowned-badge + .filler-badge { margin-left:4px; }
+.wz-qty { margin-left:4px; font-size:0.72rem; padding:0 5px; border-radius:6px; background:color-mix(in srgb, var(--accent) 22%, transparent); color:var(--accent); font-weight:700; }
+.wz-basics { margin:10px 0 4px; }
+.wz-basic-rows { display:flex; flex-direction:column; gap:6px; }
+.wz-basic { display:flex; align-items:center; gap:10px; padding:6px 10px; border:1px solid var(--card-border); border-radius:8px; background:var(--bg); }
+.wz-basic-name { font-weight:600; min-width:90px; }
+.wz-basic-meta { margin:0 !important; flex:1; }
+.wz-basic-step { display:flex; align-items:center; gap:8px; }
+.wz-basic-step b { min-width:28px; text-align:center; font-variant-numeric:tabular-nums; }
 .wz-count .filler-count { color:var(--text-dim); border-bottom:1px dashed var(--text-dim); cursor:help; }
 a.unowned-badge { cursor:pointer; }
 a.unowned-badge:hover { background:color-mix(in srgb, var(--gold) 28%, transparent); }
@@ -1701,6 +1709,16 @@ function findCard(name) {{
   const nm = normalizeName(name);
   return brew.cards.find(c => normalizeName(c.name) === nm);
 }}
+// How many copies of a card the deck may hold: 1 in Commander unless the card
+// allows more (basic lands, "a deck can have any number/up to N cards named",
+// e.g. Nazgul), and never more than you own. Constructed uses its own 4-of rule.
+let collectionIndex = {{}};
+function maxCopies(name) {{
+  const info = collectionIndex[normalizeName(name)];
+  if (!info) return 1;
+  const limit = info.copy_limit === null || info.copy_limit === undefined ? Infinity : info.copy_limit;
+  return Math.max(1, Math.min(info.quantity || 1, limit));
+}}
 
 function isCommanderEligible(card) {{
   // The full rule (CR 903.3): a legendary creature, OR any card that says
@@ -1728,12 +1746,19 @@ function setCommander(card) {{
 
 function clearCommander() {{ brew.commander = null; brew.edhrec_theme = ''; renderAll(); loadThemeOptions(); loadDeckTypes(); }}
 
-function addCard(card) {{
+function addCard(card, qty) {{
   const existing = findCard(card.name);
+  qty = Math.max(1, qty || 1);
   if (brew.format === 'commander') {{
-    if (existing) return;
+    const cap = maxCopies(card.name);
+    if (existing) {{
+      if (existing.quantity < cap) existing.quantity = Math.min(cap, existing.quantity + qty);
+      else return;
+      renderAll();
+      return;
+    }}
     brew.cards.push({{
-      name: card.name, quantity: 1, scryfall_id: card.scryfall_id, cmc: card.cmc, mana_cost: card.mana_cost,
+      name: card.name, quantity: Math.min(qty, cap), scryfall_id: card.scryfall_id, cmc: card.cmc, mana_cost: card.mana_cost,
       type_line: card.type_line, color_identity: card.color_identity, category: card.category,
       set_code: card.set_code, collector_number: card.collector_number,
     }});
@@ -1834,7 +1859,8 @@ document.getElementById('clear-cards-btn').addEventListener('click', () => {{
 function adjustQty(name, delta) {{
   const c = findCard(name);
   if (!c) return;
-  c.quantity = Math.max(1, c.quantity + delta);
+  const cap = brew.format === 'commander' ? maxCopies(name) : Infinity;
+  c.quantity = Math.min(cap, Math.max(1, c.quantity + delta));
   if (c.quantity <= 0) removeCard(name);
   renderAll();
 }}
@@ -2195,9 +2221,11 @@ function renderGrid() {{
     }}
     const addBtn = document.createElement('button');
     addBtn.type = 'button'; addBtn.className = 'btn ghost tile-icon-btn';
-    addBtn.textContent = (brew.format === 'commander' && inDeck) ? '\\u2713' : '+';
-    addBtn.title = (brew.format === 'commander' && inDeck) ? 'Already in deck' : 'Add to deck';
-    addBtn.disabled = brew.format === 'commander' && !!inDeck;
+    const atMax = brew.format === 'commander' && !!inDeck && inDeck.quantity >= maxCopies(card.name);
+    addBtn.textContent = atMax ? '\\u2713' : '+';
+    addBtn.title = atMax ? (maxCopies(card.name) > 1 ? 'All copies you can use are in the deck' : 'Already in deck')
+      : (brew.format === 'commander' && inDeck ? 'Add another copy (' + inDeck.quantity + ' of ' + maxCopies(card.name) + ' in deck)' : 'Add to deck');
+    addBtn.disabled = atMax;
     addBtn.addEventListener('click', () => addCard(card));
     actions.appendChild(addBtn);
     frag.appendChild(tile);
@@ -2249,7 +2277,7 @@ function renderDeckList() {{
       row.innerHTML = `<span class="row-name">${{thumbHtml(c.scryfall_id, 'card-thumb small')}}<span>${{c.name}}</span>${{colorIconsHtml(c.color_identity)}}</span>`;
       const controls = document.createElement('div');
       controls.className = 'qty-controls';
-      if (brew.format !== 'commander') {{
+      if (brew.format !== 'commander' || maxCopies(c.name) > 1) {{
         const minus = Object.assign(document.createElement('button'), {{ className: 'btn ghost small qty-btn', textContent: '\\u2212', onclick: () => adjustQty(c.name, -1) }});
         const qty = Object.assign(document.createElement('span'), {{ textContent: c.quantity }});
         const plus = Object.assign(document.createElement('button'), {{ className: 'btn ghost small qty-btn', textContent: '+', onclick: () => adjustQty(c.name, 1) }});
@@ -2442,6 +2470,8 @@ fetch('/builder/collection-data')
   .then(data => {{
     if (data.error) {{ showError(data.error); return; }}
     collection = data.cards;
+    collectionIndex = {{}};
+    collection.forEach(c => {{ collectionIndex[normalizeName(c.name)] = c; }});
     imageVersions = data.image_versions || {{}};
     annotateFilterCounts();
     renderAll();
@@ -2578,7 +2608,7 @@ const WIZARD_INFO = {{
 }};
 const wizardModal = document.getElementById('wizard-modal');
 const wizardBody = document.getElementById('wizard-body');
-const wizard = {{ steps: [], idx: 0, selected: new Set(), meta: {{}}, requestId: 0 }};
+const wizard = {{ steps: [], idx: 0, selected: new Set(), basicQty: {{}}, meta: {{}}, requestId: 0 }};
 setupHoverPreview(wizardBody);
 
 function wizardInfo(role) {{
@@ -2590,7 +2620,26 @@ function wizardInfo(role) {{
 }}
 function wizardCards(step) {{ return step.picks.concat(step.alternates, step.unowned, step.weak); }}
 function wizardKey(card) {{ return normalizeName(card.name); }}
-function wizardStepSelectedCount(step) {{ return wizardCards(step).filter(c => wizard.selected.has(wizardKey(c))).length; }}
+function wizardBasicCount(step) {{
+  return (step.basics || []).reduce((n, b) => n + (wizard.basicQty[b.name] || 0), 0);
+}}
+function wizardBasicsHtml(step) {{
+  if (!(step.basics || []).length) return '';
+  return '<div class="wz-basics"><h4 class="wz-group-title">Basic lands</h4>'
+    + '<div class="hint wz-tip">Split by the colored mana your picks need, after the nonbasic lands that earn a slot. Adjust freely &mdash; you can use up to the number you own.</div>'
+    + '<div class="wz-basic-rows">' + step.basics.map(b => {{
+      const q = wizard.basicQty[b.name] || 0;
+      return '<div class="wz-basic" data-basic="' + escapeHtml(b.name) + '">'
+        + thumbHtml(b.scryfall_id, 'card-thumb small')
+        + '<span class="wz-basic-name">' + escapeHtml(b.name) + '</span>'
+        + '<span class="hint wz-basic-meta">' + (b.pips || 0) + ' ' + escapeHtml(b.color) + ' pips &middot; ' + b.owned_quantity + ' available</span>'
+        + '<span class="wz-basic-step"><button type="button" class="btn ghost small qty-btn" data-basic-act="dec"' + (q <= 0 ? ' disabled' : '') + '>&minus;</button>'
+        + '<b>' + q + '</b>'
+        + '<button type="button" class="btn ghost small qty-btn" data-basic-act="inc"' + (q >= b.owned_quantity ? ' disabled' : '') + '>+</button></span>'
+        + '</div>';
+    }}).join('') + '</div></div>';
+}}
+function wizardStepSelectedCount(step) {{ return wizardCards(step).filter(c => wizard.selected.has(wizardKey(c))).reduce((n, c) => n + (c.quantity || 1), 0) + wizardBasicCount(step); }}
 function wizardTotalSelected() {{ return wizard.steps.reduce((n, s) => n + wizardStepSelectedCount(s), 0); }}
 
 function wizardLoadPools(requestId) {{
@@ -2682,6 +2731,7 @@ function confirmDeckType() {{
 function startWizard(data) {{
   wizard.meta = {{ gcCap: data.gc_cap, gcExisting: data.gc_existing || 0, libraryTarget: data.library_target, libraryCount: data.library_count, deckType: data.deck_type || null }};
   wizard.selected = new Set();
+  wizard.basicQty = {{}};
   const byRole = {{}};
   (data.steps || []).forEach(s => {{ byRole[s.role] = s; }});
   wizard.steps = WIZARD_ORDER.filter(role => byRole[role]).map(role => {{
@@ -2698,10 +2748,12 @@ function startWizard(data) {{
       alternates: s.alternates.map(c => Object.assign({{}}, c, {{ suggested: false }})),
       unowned: s.unowned_alternates.map(c => Object.assign({{}}, c, {{ suggested: false }})),
       weak: s.picks.filter(isWeak).map(c => Object.assign({{}}, c, {{ suggested: false }})),
+      basics: s.basics || [],
     }};
+    step.basics.forEach(b => {{ wizard.basicQty[b.name] = b.quantity || 0; }});
     step.picks.forEach(c => wizard.selected.add(wizardKey(c)));
     return step;
-  }}).filter(step => step.picks.length > 0 || (step.needed > 0 && step.alternates.length + step.unowned.length > 0));
+  }}).filter(step => step.picks.length > 0 || step.basics.some(b => b.quantity > 0) || (step.needed > 0 && step.alternates.length + step.unowned.length > 0));
   wizard.idx = 0;
   if (!wizard.steps.length) {{
     document.getElementById('wizard-steps').innerHTML = '';
@@ -2740,7 +2792,7 @@ function wizardTileHtml(card) {{
     + '<div class="wz-check" aria-hidden="true">&#10003;</div>'
     + '<button type="button" class="wz-avoid" title="Never suggest this card again for this deck" data-avoid="' + escapeHtml(wizardKey(card)) + '">&#128683;</button>'
     + thumbHtml(card.scryfall_id, 'card-thumb wz-img')
-    + '<div class="wz-name">' + escapeHtml(card.name) + gc + '</div>'
+    + '<div class="wz-name">' + escapeHtml(card.name) + (card.quantity > 1 ? ' <span class="wz-qty" title="This card allows several copies; all of them are suggested">&times;' + card.quantity + '</span>' : '') + gc + '</div>'
     + '<div class="wz-reason" title="' + escapeHtml(card.reason) + '">' + escapeHtml(card.reason) + '</div>'
     + (badges ? '<div class="wz-badge-row">' + badges + '</div>' : '')
     + '</div>';
@@ -2798,6 +2850,7 @@ function renderWizard() {{
     + gcNote
     + '<div class="hint wz-tip">Click a card to add or remove it. Cards marked <b>Not owned</b> would need to be bought; <b>Slot filler</b> means the card isn&#39;t on EDHREC&#39;s list for your commander&#39;s decks and was only picked to fill the slot.</div>';
 
+  html += wizardBasicsHtml(step);
   if (step.role === 'Synergy') {{
     const isCreature = c => c.category === 'Creatures';
     html += wizardGroupHtml('Creatures', step.picks.filter(isCreature), step.alternates.filter(isCreature));
@@ -2835,6 +2888,16 @@ wizardBody.addEventListener('click', (e) => {{
     if (typeEl) {{ wizard.pickedType = typeEl.dataset.type; renderDeckTypeChoice(); }}
     return;
   }}
+  const basicBtn = e.target.closest('[data-basic-act]');
+  if (basicBtn) {{
+    const row = basicBtn.closest('[data-basic]');
+    const step = wizard.steps[wizard.idx];
+    const b = step.basics.find(x => x.name === row.dataset.basic);
+    const delta = basicBtn.dataset.basicAct === 'inc' ? 1 : -1;
+    wizard.basicQty[b.name] = Math.max(0, Math.min(b.owned_quantity, (wizard.basicQty[b.name] || 0) + delta));
+    wizardRefresh();
+    return;
+  }}
   if (e.target.closest('a')) return; // purchase links just open
   const avoidBtn = e.target.closest('[data-avoid]');
   if (avoidBtn) {{
@@ -2853,10 +2916,11 @@ wizardBody.addEventListener('click', (e) => {{
   if (tool) {{
     if (tool.dataset.wz === 'type') {{ openWizard(); return; }}
     const step = wizard.steps[wizard.idx];
-    if (tool.dataset.wz === 'none') wizardCards(step).forEach(c => wizard.selected.delete(wizardKey(c)));
+    if (tool.dataset.wz === 'none') {{ wizardCards(step).forEach(c => wizard.selected.delete(wizardKey(c))); step.basics.forEach(b => {{ wizard.basicQty[b.name] = 0; }}); }}
     if (tool.dataset.wz === 'reset') {{
       wizardCards(step).forEach(c => wizard.selected.delete(wizardKey(c)));
       step.picks.forEach(c => wizard.selected.add(wizardKey(c)));
+      step.basics.forEach(b => {{ wizard.basicQty[b.name] = b.quantity || 0; }});
     }}
     wizardRefresh();
     return;
@@ -2895,11 +2959,17 @@ function finishWizard() {{
   wizard.steps.forEach(step => wizardCards(step).forEach(c => {{
     if (wizard.selected.has(wizardKey(c)) && !findCard(c.name)) toAdd.push(c);
   }}));
-  toAdd.forEach(addCard);
+  toAdd.forEach(c => addCard(c, c.quantity || 1));
+  let basicsAdded = 0;
+  wizard.steps.forEach(step => step.basics.forEach(b => {{
+    const n = wizard.basicQty[b.name] || 0;
+    if (n > 0) {{ addCard(b, n); basicsAdded += n; }}
+  }}));
   closeWizard();
   const panel = document.getElementById('suggestions-panel');
   const unowned = toAdd.filter(c => c.owned === false);
-  let html = '<div class="hint" style="margin:0 0 6px;">Added ' + toAdd.length + ' card' + (toAdd.length === 1 ? '' : 's') + ' from your guided picks. Use Optimize, Analyze or the swap button on any card to keep refining.</div>';
+  const addedTotal = toAdd.reduce((n, c) => n + (c.quantity || 1), 0) + basicsAdded;
+  let html = '<div class="hint" style="margin:0 0 6px;">Added ' + addedTotal + ' card' + (addedTotal === 1 ? '' : 's') + (basicsAdded ? ' (including ' + basicsAdded + ' basic lands)' : '') + ' from your guided picks. Use Optimize, Analyze or the swap button on any card to keep refining.</div>';
   if (unowned.length) {{
     const total = unowned.reduce((sum, c) => sum + (c.price || 0), 0);
     html += '<div class="hint" style="margin:0 0 4px;font-weight:600;">Cards to pick up (' + unowned.length + ', about $' + total.toFixed(2) + '):</div>'
@@ -2959,7 +3029,7 @@ suggestBtn.addEventListener('click', () => {{
       let remaining = data.suggestions.slice();
       const addAllBtn = Object.assign(document.createElement('button'), {{
         className: 'btn ghost small', style: 'margin-bottom:8px;margin-right:8px;',
-        onclick: () => {{ remaining.forEach(addCard); panel.innerHTML = ''; }},
+        onclick: () => {{ remaining.forEach(sg => addCard(sg, sg.quantity || 1)); panel.innerHTML = ''; }},
       }});
       const dismissAllBtn = Object.assign(document.createElement('button'), {{
         className: 'btn ghost small', textContent: 'Dismiss All', style: 'margin-bottom:8px;',
@@ -2999,7 +3069,7 @@ suggestBtn.addEventListener('click', () => {{
                 ? `<a class="unowned-badge" href="${{s.price_url}}" target="_blank" rel="noopener" title="Buy this card">Not owned${{priceText}}</a>`
                 : `<span class="unowned-badge">Not owned${{priceText}}</span>`)
             : '';
-          row.innerHTML = `<span class="row-name">${{thumbHtml(s.scryfall_id, 'card-thumb small')}}<span>${{s.name}} ${{colorIconsHtml(s.color_identity)}}${{priceBadge}}${{fillerBadgeHtml(s)}}<div class="reason">${{s.reason}}</div></span></span>`;
+          row.innerHTML = `<span class="row-name">${{thumbHtml(s.scryfall_id, 'card-thumb small')}}<span>${{s.name}}${{s.quantity > 1 ? ' <b>&times;' + s.quantity + '</b>' : ''}} ${{colorIconsHtml(s.color_identity)}}${{priceBadge}}${{fillerBadgeHtml(s)}}<div class="reason">${{s.reason}}</div></span></span>`;
           const dropRow = () => {{
             row.remove();
             remaining = remaining.filter(x => x !== s);
@@ -3010,14 +3080,14 @@ suggestBtn.addEventListener('click', () => {{
           const addBtn = Object.assign(document.createElement('button'), {{
             className: 'btn ghost tile-icon-btn', textContent: '+',
             title: s.owned === false ? "Add to deck (not owned -- you'll need to pick this up)" : 'Add to deck',
-            onclick: () => {{ addCard(s); dropRow(); }},
+            onclick: () => {{ addCard(s, s.quantity || 1); dropRow(); }},
           }});
           const avoidBtn = Object.assign(document.createElement('button'), {{
             className: 'btn ghost tile-icon-btn', textContent: '🚫', title: 'Never suggest this card again for this deck',
             onclick: () => {{ avoidCard(s.name); dropRow(); }},
           }});
           const actions = Object.assign(document.createElement('div'), {{ className: 'suggestion-actions' }});
-          actions.append(addBtn, avoidBtn);
+          if (s.basis === 'basic') actions.append(addBtn); else actions.append(addBtn, avoidBtn);
           row.appendChild(actions);
           panel.appendChild(row);
         }});

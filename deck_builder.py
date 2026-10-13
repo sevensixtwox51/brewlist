@@ -562,10 +562,12 @@ def edhrec_commander_view(commander_name: str, edhrec_theme: str | None = None) 
     chosen = by_slug[explicit] if explicit else (themes[0] if themes else None)
     avg_pw = profile.get("avg_planeswalkers")
     synergy_data = None
+    avg_nonbasic = None
     if chosen:
         page = commander_theme_page(commander_name, chosen["slug"])
         if page.get("cards"):
             synergy_data = page["cards"]
+            avg_nonbasic = page.get("avg_nonbasic")
             if page.get("avg_planeswalkers") is not None:
                 avg_pw = page["avg_planeswalkers"]
     deck_type = None
@@ -577,6 +579,7 @@ def edhrec_commander_view(commander_name: str, edhrec_theme: str | None = None) 
         "synergy_data": synergy_data,
         "profile": {"themes": [chosen] if (explicit and chosen) else themes, "avg_planeswalkers": avg_pw},
         "deck_type": deck_type,
+        "avg_nonbasic_lands": avg_nonbasic,
     }
 
 
@@ -762,6 +765,73 @@ def _cantrip_filler(c: dict, role: str) -> bool:
     return role == "Draw" and _is_cantrip(c)
 
 
+_BASIC_FOR_COLOR = {"W": "Plains", "U": "Island", "B": "Swamp", "R": "Mountain", "G": "Forest"}
+_COLOR_NAME = {"W": "white", "U": "blue", "B": "black", "R": "red", "G": "green"}
+_BASIC_SUBTYPE_COLOR = {"Plains": "W", "Island": "U", "Swamp": "B", "Mountain": "R", "Forest": "G"}
+_MANA_SYMBOL_RE = re.compile(r"\{([^}]+)\}")
+
+
+def _is_basic_land_card(c: dict) -> bool:
+    return "Basic" in (c.get("type_line") or "") and "Land" in (c.get("type_line") or "")
+
+
+def _color_pips(mana_cost: str | None) -> dict[str, float]:
+    """Colored mana symbols in a mana cost, hybrids split evenly ({W/U} = half
+    each); generic, X, snow and Phyrexian-only symbols don't count."""
+    pips: dict[str, float] = {}
+    for sym in _MANA_SYMBOL_RE.findall(mana_cost or ""):
+        parts = [p for p in sym.split("/") if p in _BASIC_FOR_COLOR]
+        for p in parts:
+            pips[p] = pips.get(p, 0.0) + 1.0 / len(parts)
+    return pips
+
+
+def _land_produces(c: dict) -> set[str]:
+    """Colors (of W/U/B/R/G) a land can make or fetch, read from its basic land
+    types and rules text: duals via type line, "Add {R}" lines, "any color",
+    and fetchlands that name basic types (or any basic)."""
+    tl, text = c.get("type_line") or "", c.get("oracle_text") or ""
+    out = {col for sub, col in _BASIC_SUBTYPE_COLOR.items() if sub in tl}
+    low = text.lower()
+    if "any color" in low or "any one color" in low:
+        out |= set(_BASIC_FOR_COLOR)
+    for m in re.finditer(r"add ([^.\n]*)", text, re.I):
+        out |= {col for col in _BASIC_FOR_COLOR if "{" + col + "}" in m.group(1)}
+    if "search your library for" in low and "land" in low:
+        named = {col for sub, col in _BASIC_SUBTYPE_COLOR.items() if sub.lower() in low}
+        out |= named if named else (set(_BASIC_FOR_COLOR) if "basic land" in low else set())
+    return out
+
+
+def _allocate_counts(n: int, weights: dict[str, float], caps: dict[str, int]) -> tuple[dict[str, int], int]:
+    """Splits n units across keys in proportion to `weights` (largest-remainder
+    rounding), never exceeding each key's cap, and re-spreading what a capped
+    key can't take. Returns (allocation, units that fit nowhere)."""
+    alloc = {k: 0 for k in weights}
+    remaining = n
+    active = [k for k in weights if caps.get(k, 0) > 0]
+    while remaining > 0 and active:
+        use = {k: weights[k] for k in active}
+        tw = sum(use.values())
+        if tw <= 0:
+            use, tw = {k: 1.0 for k in active}, float(len(active))
+        shares = {k: remaining * use[k] / tw for k in active}
+        took = 0
+        for k in active:
+            m = min(int(shares[k]), caps[k] - alloc[k])
+            alloc[k] += m
+            took += m
+        remaining -= took
+        for k in sorted(active, key=lambda k: shares[k] - int(shares[k]), reverse=True):
+            if remaining <= 0:
+                break
+            if alloc[k] < caps[k]:
+                alloc[k] += 1
+                remaining -= 1
+        active = [k for k in active if alloc[k] < caps[k]]
+    return alloc, remaining
+
+
 def _costly_filler(c: dict, role: str) -> bool:
     """True for a 6+ mana card in a role that's supposed to be cheap
     support (Ramp/Draw/Interaction). Only used among cards with no
@@ -783,6 +853,25 @@ def _overall_rank(c: dict) -> int:
     (which used to hand every deck whichever owned cards start with 'A',
     e.g. A.I.M. Synthoids and Abundant Maw)."""
     return c.get("edhrec_rank") or 10**9
+
+
+_COPY_LIMIT_RE = re.compile(r"a deck can have (any number of|up to (\w+)) cards? named", re.I)
+_COPY_WORDS = {"two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10}
+
+
+def card_copy_limit(type_line: str | None, oracle_text: str | None) -> int | None:
+    """How many copies of this card a Commander deck may hold: None = any number
+    (basic lands, and cards that say "A deck can have any number of cards named
+    ...": Relentless Rats, Persistent Petitioners, ...), N for "up to N" (Nazgul
+    9, Seven Dwarves 7), otherwise 1. Always still bounded by how many you own."""
+    if "Basic" in (type_line or ""):
+        return None
+    m = _COPY_LIMIT_RE.search(oracle_text or "")
+    if not m:
+        return 1
+    if m.group(1).lower().startswith("any"):
+        return None
+    return _COPY_WORDS.get((m.group(2) or "").lower(), 1)
 
 
 def owned_collection_gameplay_view(owned: dict[str, OwnedCard], gameplay: dict[str, dict]) -> list[dict]:
@@ -820,6 +909,7 @@ def owned_collection_gameplay_view(owned: dict[str, OwnedCard], gameplay: dict[s
             "legalities": gp.get("legalities") or {},
             "oracle_text": gp.get("oracle_text") or "",
             "edhrec_rank": gp.get("edhrec_rank"),
+            "copy_limit": card_copy_limit(gp.get("type_line"), gp.get("oracle_text")),
         })
     view.sort(key=lambda c: c["name"])
     return view
@@ -854,6 +944,7 @@ def full_card_pool_gameplay_view(gameplay: dict[str, dict], exclude_names: set[s
             "legalities": gp.get("legalities") or {},
             "oracle_text": gp.get("oracle_text") or "",
             "edhrec_rank": gp.get("edhrec_rank"),
+            "copy_limit": card_copy_limit(gp.get("type_line"), gp.get("oracle_text")),
         })
     return view
 
@@ -1590,6 +1681,60 @@ def suggest_builder_cards(
     for pool in role_candidates.values():
         pool.sort(key=rank_key)
 
+    # Basic lands. Commander lets you run as many basics as you own, and a mono-
+    # or two-colour deck's land slots should mostly BE basics -- but each card
+    # is suggested once, so without this a Krenko deck got one Mountain and 36
+    # random nonbasic lands (Glacial Chasm, Field of the Dead, Exotic Orchard).
+    # So: keep only nonbasic lands that earn a slot (EDHREC lists them for this
+    # commander, they fit its theme/a combo, or they fix 2+ of its colors),
+    # and top the leftover land slots up with basics split by color pips below.
+    deck_colors = set(commander_color_identity or []) & set(_BASIC_FOR_COLOR)
+    basics_by_color: dict[str, dict] = {}
+    basics_available: dict[str, int] = {}
+    dropped_lands: list[dict] = []
+    use_basics = deck_format == "commander" and bool(deck_colors)
+    if use_basics:
+        existing_qty = {}
+        for e in wip_entries:
+            existing_qty[normalize_name(e.name)] = existing_qty.get(normalize_name(e.name), 0) + e.quantity
+        for c in owned_view:
+            if _is_basic_land_card(c):
+                col = next((col for sub, col in _BASIC_SUBTYPE_COLOR.items() if sub in c["type_line"]), None)
+                if col in deck_colors and c["name"] == _BASIC_FOR_COLOR[col]:
+                    basics_by_color[col] = c
+                    basics_available[col] = max(0, c["quantity"] - existing_qty.get(normalize_name(c["name"]), 0))
+        lands_pool = role_candidates.get("Lands") or []
+
+        def _earns_slot(c: dict) -> bool:
+            nm = normalize_name(c["name"])
+            if nm in edhrec_tracked_names or nm in reason_by_name or nm in theme_reason_by_name:
+                return True
+            return len(deck_colors) >= 2 and len(_land_produces(c) & deck_colors) >= 2
+
+        good = [c for c in lands_pool if not _is_basic_land_card(c) and _earns_slot(c)]
+        # Real decks for this commander run only so many nonbasic lands (EDHREC's
+        # average for the deck type: Krenko 5, Cloud 24); past that, basics are
+        # the better land. Lands already in the deck count toward it. `good` is
+        # already ranked, so the cap keeps the best ones.
+        avg_nonbasic = edhrec_view.get("avg_nonbasic_lands")
+        over_cap: list[dict] = []
+        if avg_nonbasic is not None:
+            have_nonbasic = sum(
+                e.quantity for e in wip_entries
+                if e.section != "commander" and categorize(e.type_line) in ("Lands", "Basic Lands") and "Basic" not in (e.type_line or "")
+            )
+            cap = max(0, round(avg_nonbasic) - have_nonbasic)
+            if len(good) > cap and sum(basics_available.values()) >= max(0, role_needed.get("Lands", 0) - cap):
+                good, over_cap = good[:cap], good[cap:]
+        if sum(basics_available.values()) >= max(0, role_needed.get("Lands", 0) - len(good)):
+            dropped_lands = over_cap + [c for c in lands_pool if not _is_basic_land_card(c) and c not in good and c not in over_cap]
+            role_candidates["Lands"] = good
+        else:
+            # Not enough basics owned to cover the gap: fall back to the old
+            # behaviour (every owned nonbasic land stays in play).
+            role_candidates["Lands"] = [c for c in lands_pool if not _is_basic_land_card(c)]
+            use_basics = bool(basics_available)
+
     # Slot allocation: split the batch across roles proportional to how
     # much each still needs, so a Suggest click always reflects the
     # target deck shape instead of whichever single category happens to
@@ -1733,6 +1878,98 @@ def suggest_builder_cards(
         r = role_of(c["name"], c["category"])
         placed_per_role[r] = placed_per_role.get(r, 0) + 1
 
+    def _backed(nm: str) -> bool:
+        """Real evidence behind a card (combo, meaningful EDHREC synergy, or a
+        theme link) -- as opposed to a pick that only fills a slot."""
+        return nm in reason_by_name or synergy_by_name.get(nm, 0.0) >= _MEANINGFUL_SYNERGY or nm in theme_reason_by_name
+
+    # Basic lands for the leftover land slots, split by how many colored pips of
+    # each color the deck's spells need (counting what the nonbasic lands
+    # already produce). Colorless-identity commanders skip this entirely.
+    basic_picks: list[tuple[dict, int]] = []
+    pips_by_color: dict[str, float] = {}
+    if use_basics and basics_by_color:
+        lands_gap = max(0, role_needed.get("Lands", 0) - placed_per_role.get("Lands", 0))
+
+        def _cost_and_text(name: str, fallback_type: str = "") -> dict:
+            return owned_by_name.get(normalize_name(name)) or {"type_line": fallback_type, "mana_cost": "", "oracle_text": ""}
+
+        non_land_costs = [c.get("mana_cost") for c in ordered if role_of(c["name"], c["category"]) != "Lands"]
+        sources = {col: 0.0 for col in deck_colors}
+        for c in ordered:
+            if role_of(c["name"], c["category"]) == "Lands":
+                for col in _land_produces(c) & deck_colors:
+                    sources[col] += 1
+        for e in wip_entries:
+            info = _cost_and_text(e.name, e.type_line)
+            if categorize(e.type_line) in ("Lands", "Basic Lands") and e.section != "commander":
+                for col in _land_produces({**info, "type_line": info.get("type_line") or e.type_line}) & deck_colors:
+                    sources[col] += e.quantity
+            else:
+                non_land_costs.append(info.get("mana_cost"))
+        for cost in non_land_costs:
+            for col, n in _color_pips(cost).items():
+                pips_by_color[col] = pips_by_color.get(col, 0.0) + n
+        weights = {col: pips_by_color.get(col, 0.0) + 1.0 for col in deck_colors}  # +1 keeps a pip-light splash alive
+        total_w = sum(weights.values())
+        land_total = role_targets.get("Lands") or 37
+        deficit = {col: max(0.0, land_total * weights[col] / total_w - sources[col]) for col in deck_colors}
+        if sum(deficit.values()) <= 0:
+            deficit = dict(weights)
+        # Step 1: cover each color's source shortfall; step 2: split what's left
+        # of the land slots by how many pips each color has.
+        caps = {col: basics_available.get(col, 0) for col in deck_colors}
+        import math as _math
+        first_n = min(lands_gap, sum(_math.ceil(d) for d in deficit.values()))
+        alloc, _ = _allocate_counts(first_n, deficit, caps)
+        rest, _ = _allocate_counts(
+            lands_gap - sum(alloc.values()), weights,
+            {col: caps[col] - alloc[col] for col in deck_colors},
+        )
+        alloc = {col: alloc[col] + rest[col] for col in deck_colors}
+        basic_picks = [(basics_by_color[col], n) for col, n in alloc.items() if n > 0]
+        placed_per_role["Lands"] = placed_per_role.get("Lands", 0) + sum(n for _, n in basic_picks)
+
+    # Cards that allow several copies in Commander ("A deck can have up to nine
+    # cards named Nazgul"): when one is genuinely backed (EDHREC synergy, theme
+    # or combo), suggest its legal copies (capped by what you own, and at 4 for
+    # "any number" cards) and make room by dropping the weakest same-role picks.
+    copy_counts: dict[str, int] = {}
+    if deck_format == "commander":
+        protected = {id(c) for c in combo_first}
+        for c in list(ordered):
+            nm = normalize_name(c["name"])
+            limit = card_copy_limit(c.get("type_line"), c.get("oracle_text"))
+            if limit == 1 or _is_basic_land_card(c) or not _backed(nm):
+                continue
+            copies = min(limit if limit is not None else 4, c.get("quantity") or 1)
+            if copies <= 1:
+                continue
+            role = role_of(c["name"], c["category"])
+            my_synergy = synergy_by_name.get(nm, 0.0)
+            # Make room by dropping the weakest same-role picks: unbacked ones
+            # first, then backed ones with clearly lower EDHREC synergy than
+            # this card (never combo pieces, other multi-copy cards, or a pick
+            # about as good as this one).
+            def _victim_rank(v: dict) -> float:
+                vnm = normalize_name(v["name"])
+                return synergy_by_name.get(vnm, 0.0) if _backed(vnm) else -1.0
+
+            pool = sorted(
+                (
+                    v for v in ordered
+                    if v is not c and id(v) not in protected and normalize_name(v["name"]) not in copy_counts
+                    and normalize_name(v["name"]) not in reason_by_name
+                    and role_of(v["name"], v["category"]) == role
+                    and _victim_rank(v) < my_synergy - 0.05
+                ),
+                key=_victim_rank,
+            )
+            victims = pool[:copies - 1]
+            for v in victims:
+                ordered.remove(v)
+            copy_counts[nm] = 1 + len(victims)
+
     # Purchase-suggestion fallback: a role whose OWNED pool simply isn't
     # big enough to reach its own target (role_slots[role] was already
     # capped at len(role_candidates[role]) above) would otherwise just
@@ -1813,7 +2050,7 @@ def suggest_builder_cards(
     def make_suggestion(c: dict, role: str, owned: bool) -> dict:
         nm = normalize_name(c["name"])
         synergy_reason = _synergy_reason(synergy_by_name.get(nm), (edhrec_view["deck_type"] or {}).get("value"))
-        basis = suggestion_basis(nm)
+        basis = "basic" if _is_basic_land_card(c) else suggestion_basis(nm)
         out = {
             "name": c["name"],
             "scryfall_id": c["scryfall_id"],
@@ -1851,6 +2088,19 @@ def suggest_builder_cards(
         return out
 
     suggestions = [make_suggestion(c, role_of(c["name"], c["category"]), True) for c in ordered]
+    for sg in suggestions:
+        n = copy_counts.get(normalize_name(sg["name"]), 1)
+        if n > 1:
+            sg["quantity"] = n
+            sg["reason"] += f" -- {n} copies (this card allows more than one)"
+    for c, n in basic_picks:
+        col = next(col for col, b in basics_by_color.items() if b is c)
+        sg = make_suggestion(c, "Lands", True)
+        sg.update(
+            quantity=n, basis="basic", owned_quantity=basics_available.get(col, 0),
+            reason=f"{n} basic {c['name']} to cover your {_COLOR_NAME[col]} mana ({pips_by_color.get(col, 0):g} {_COLOR_NAME[col]} pips in the deck)",
+        )
+        suggestions.append(sg)
     suggestions += [make_suggestion(c, role, False) for c, role in unowned_picks]
 
     if pools_out is not None:
@@ -1864,10 +2114,11 @@ def suggest_builder_cards(
         steps = []
         for role in role_targets:
             have = current_role_counts.get(role, 0) - (1 if role == commander_role else 0)
-            role_picks = [s for s in suggestions if s["role"] == role]
+            role_picks = [s for s in suggestions if s["role"] == role and s.get("basis") != "basic"]
+            alt_pool = list(role_candidates.get(role) or []) + (dropped_lands if role == "Lands" else [])
             owned_alts = [
                 make_suggestion(c, role, True)
-                for c in (role_candidates.get(role) or [])
+                for c in alt_pool
                 if normalize_name(c["name"]) not in picked_names
             ][:alternates_per_role]
             # Only cards EDHREC tracks for this commander: with no real-
@@ -1891,7 +2142,7 @@ def suggest_builder_cards(
                     or normalize_name(c["name"]) in reason_by_name
                 ][:unowned_alternates_extra]
                 unowned_alts = [make_suggestion(c, role, False) for c in head + extra]
-            steps.append({
+            step = {
                 "role": role,
                 "have": have,
                 "needed": max(0, role_targets.get(role, 0) - have),
@@ -1899,7 +2150,20 @@ def suggest_builder_cards(
                 "picks": role_picks,
                 "alternates": owned_alts,
                 "unowned_alternates": unowned_alts,
-            })
+            }
+            if role == "Lands" and basics_by_color:
+                suggested = {s["name"]: s["quantity"] for s in suggestions if s.get("basis") == "basic"}
+                step["basics"] = [
+                    {
+                        "name": b["name"], "color": col, "scryfall_id": b["scryfall_id"], "category": b["category"],
+                        "type_line": b["type_line"], "color_identity": b["color_identity"], "cmc": b["cmc"], "mana_cost": b["mana_cost"],
+                        "set_code": b["set_code"], "collector_number": b["collector_number"],
+                        "owned_quantity": basics_available.get(col, 0), "quantity": suggested.get(b["name"], 0),
+                        "pips": round(pips_by_color.get(col, 0.0), 1),
+                    }
+                    for col, b in sorted(basics_by_color.items())
+                ]
+            steps.append(step)
         pools_out["steps"] = steps
         pools_out["gc_cap"] = gc_cap
         # Game Changers already in the deck count against the cap too, so

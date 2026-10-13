@@ -482,7 +482,9 @@ def commander_theme_page(commander_name: str, theme_slug: str) -> dict:
     theme_cache = cache.setdefault("theme_synergy", {})
     cached = theme_cache.get(key)
     now = time.time()
-    if cached and now - cached.get("fetched_at", 0) < _SYNERGY_CACHE_MAX_AGE:
+    # Entries cached before the basic/nonbasic averages were stored are
+    # refetched once.
+    if cached and "avg_nonbasic" in cached and now - cached.get("fetched_at", 0) < _SYNERGY_CACHE_MAX_AGE:
         return cached
 
     popularity = commander_popularity(commander_name)
@@ -507,6 +509,10 @@ def commander_theme_page(commander_name: str, theme_slug: str) -> dict:
             "cards": _cards_from_cardlists(cardlists),
             "avg_planeswalkers": pw if isinstance(pw, (int, float)) else None,
             "avg_creatures": cre if isinstance(cre, (int, float)) else None,
+            # Average land split in real decks of this build (Krenko: 29 basic /
+            # 5 nonbasic; Cloud: 11 / 24) -- how many nonbasic lands to run.
+            "avg_basic": page.get("basic") if isinstance(page.get("basic"), (int, float)) else None,
+            "avg_nonbasic": page.get("nonbasic") if isinstance(page.get("nonbasic"), (int, float)) else None,
             "num_decks": num_decks,
         }
         _store_cache_entry("theme_synergy", key, entry)
