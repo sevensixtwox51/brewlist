@@ -998,6 +998,8 @@ body:not(.compact) .builder-tile .tile-icon-stack { grid-area:stack; }
 .filler-note { margin:0 0 8px; padding:6px 10px; border-radius:8px; font-size:0.78rem; color:var(--text-dim); border:1px dashed var(--text-dim); }
 .wz-badge-row .filler-badge { margin-left:0; }
 .wz-badge-row .unowned-badge + .filler-badge { margin-left:4px; }
+.import-text { width:100%; min-height:240px; box-sizing:border-box; padding:10px 12px; border-radius:8px; border:1px solid var(--card-border); background:var(--bg); color:var(--text); font-family:ui-monospace, Menlo, monospace; font-size:0.8rem; resize:vertical; }
+.import-opt { display:flex; align-items:center; gap:8px; margin-top:8px; font-size:0.85rem; cursor:pointer; }
 .wz-qty { margin-left:4px; font-size:0.72rem; padding:0 5px; border-radius:6px; background:color-mix(in srgb, var(--accent) 22%, transparent); color:var(--accent); font-weight:700; }
 .wz-basics { margin:10px 0 4px; }
 .wz-basic-rows { display:flex; flex-direction:column; gap:6px; }
@@ -1363,6 +1365,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
         <span id="save-label" class="hint" style="margin:0;display:none;"></span>
         <button type="button" class="btn ghost small" id="report-btn">View full report</button>
         <button type="button" class="btn ghost small" id="copy-decklist-btn" title="Copies a plain-text decklist (with your exact printings) you can paste into Moxfield or Archidekt to import">&#128203; Copy Decklist</button>
+        <button type="button" class="btn ghost small" id="import-decklist-btn" title="Paste a decklist (for example one you copied earlier) to rebuild the deck from your collection">&#128229; Import Decklist</button>
         <button type="button" class="btn ghost small" id="export-csv-btn" title="Downloads a CSV grouped like a physical store's binders, so you can find these cards in your own collection">&#128190; Export CSV</button>
       </div>
     </div>
@@ -1502,6 +1505,26 @@ def render_builder_page(deck_id: str | None = None) -> str:
   </div>
 </div>
 
+<div class="modal-overlay" id="import-modal">
+  <div class="modal-box" style="max-width:640px;">
+    <div class="modal-header">
+      <h3>Import decklist</h3>
+      <button type="button" class="modal-close" id="import-close" aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p class="hint" style="margin:0 0 8px;">Paste a decklist &mdash; for example one from <b>Copy Decklist</b> &mdash; to rebuild the deck from the cards you own. One card per line (<code>1 Sol Ring (EOC) 57</code>, <code>1x Sol Ring</code> or just <code>Sol Ring</code>); Commander / Deck headers work; sideboard and maybeboard lines are ignored.</p>
+      <textarea id="import-text" class="import-text" spellcheck="false" placeholder="1 Nekusar, the Mindrazer (CMM) 349&#10;1 Sol Ring (EOC) 57&#10;11 Island (SPM) 190&#10;..."></textarea>
+      <label class="import-opt"><input type="checkbox" id="import-replace" checked> Replace the current deck</label>
+      <label class="import-opt"><input type="checkbox" id="import-first-commander"> The first card is the commander</label>
+      <p class="hint" id="import-status" style="margin:8px 0 0;"></p>
+    </div>
+    <div class="modal-footer" style="gap:8px;">
+      <button type="button" class="btn ghost small" id="import-cancel">Cancel</button>
+      <button type="button" class="btn small" id="import-go" disabled>Import</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="wizard-modal">
   <div class="modal-box wizard-box">
     <div class="modal-header">
@@ -1541,7 +1564,7 @@ document.getElementById('shutdown-btn').addEventListener('click', () => {{
   const banner = document.createElement('div');
   banner.className = 'update-banner';
   banner.style.cssText = 'position:sticky;top:0;z-index:500;text-align:center;';
-  banner.textContent = 'Server stopped. ' + (unsaved ? 'Unsaved changes are still on this page -- use Copy Decklist now; closing this tab loses them.' : 'You can close this tab.');
+  banner.textContent = 'Server stopped. ' + (unsaved ? 'Unsaved changes are still on this page -- use Copy Decklist now (Import Decklist restores it after a restart); closing this tab loses them.' : 'You can close this tab.');
   document.body.prepend(banner);
   document.querySelectorAll('button, input, select').forEach(el => {{ if (el.id !== 'copy-decklist-btn') el.disabled = true; }});
   document.querySelectorAll('a.btn').forEach(el => {{ el.style.pointerEvents = 'none'; el.style.opacity = '0.5'; }});  // links to a server that's gone
@@ -3268,6 +3291,145 @@ function buildDecklistText() {{
   brew.cards.forEach(c => lines.push(decklistLine(c)));
   return lines.join('\\n');
 }}
+
+// ---- Import Decklist: parse pasted text and rebuild a deck from the collection.
+// Accepts our own Copy Decklist output ("1 Sol Ring (EOC) 57"), Moxfield/
+// Archidekt style lines ("1x Sol Ring (eoc) 57 *F*", "[Ramp]"), plain names,
+// and section headers (Commander / Deck / Sideboard / Maybeboard).
+function parseDecklistText(text) {{
+  const entries = [];
+  let section = 'main';
+  let sawCommanderHeader = false;
+  (text || '').split(/\\r?\\n/).forEach(raw => {{
+    let line = raw.replace(/[‘’]/g, "'").trim();
+    if (!line || /^\\/\\//.test(line)) return;
+    const hdr = line.match(/^(commanders?|deck|main(?:deck|board)?|sideboard|maybeboard|companion)\\s*:?$/i);
+    if (hdr) {{
+      const h = hdr[1].toLowerCase();
+      section = h.startsWith('commander') ? 'commander' : (/side|maybe|companion/.test(h) ? 'skip' : 'main');
+      if (section === 'commander') sawCommanderHeader = true;
+      return;
+    }}
+    if (/^sb:\\s*/i.test(line)) return;               // Moxfield sideboard line
+    if (section === 'skip') return;
+    const m = line.match(/^(\\d+)\\s*x?\\s+(.+)$/i);
+    const qty = m ? parseInt(m[1], 10) : 1;
+    let name = m ? m[2] : line;
+    name = name.replace(/\\s+\\*[A-Za-z]+\\*\\s*$/, '')          // *F* / *E* foil markers
+      .replace(/\\s+\\[[^\\]]*\\]\\s*$/, '')                       // [Category]
+      .replace(/\\s+\\^[^^]*\\^\\s*$/, '')                        // ^Tag^
+      .replace(/\\s+\\(([A-Za-z0-9]{{2,6}})\\)(\\s+[\\w★-]+)?\\s*$/, '')  // (SET) 123
+      .trim();
+    if (name) entries.push({{ qty: qty, name: name, section: section }});
+  }});
+  return {{ entries: entries, sawCommanderHeader: sawCommanderHeader }};
+}}
+
+// Finds an owned card for a pasted name: exact, then either face of a
+// double-faced card ("Sephiroth, Fabled SOLDIER" -> "A // B").
+function findOwnedByName(name, index, faceIndex) {{
+  const key = name.trim().toLowerCase();
+  return index[key] || faceIndex[key] || null;
+}}
+function buildFaceIndex(index) {{
+  const faces = {{}};
+  Object.keys(index).forEach(k => {{
+    if (k.indexOf(' // ') === -1) return;
+    k.split(' // ').forEach(part => {{ if (!faces[part.trim()]) faces[part.trim()] = index[k]; }});
+  }});
+  return faces;
+}}
+
+// ---- Import Decklist dialog (restores a deck from pasted text) ----
+const importModal = document.getElementById('import-modal');
+const importText = document.getElementById('import-text');
+function openImport() {{
+  importText.value = '';
+  importText.dataset.touched = '';
+  document.getElementById('import-replace').checked = true;
+  refreshImportStatus();
+  importModal.classList.add('show');
+  importText.focus();
+}}
+function closeImport() {{ importModal.classList.remove('show'); }}
+function importPlan() {{
+  const parsed = parseDecklistText(importText.value);
+  const faceIndex = buildFaceIndex(collectionIndex);
+  const first = parsed.entries[0] ? findOwnedByName(parsed.entries[0].name, collectionIndex, faceIndex) : null;
+  const total = parsed.entries.reduce((n, e) => n + e.qty, 0);
+  return {{ parsed: parsed, faceIndex: faceIndex, first: first, total: total }};
+}}
+function refreshImportStatus() {{
+  const plan = importPlan();
+  const box = document.getElementById('import-first-commander');
+  const looksLikeCopy = !plan.parsed.sawCommanderHeader && plan.first && isCommanderEligible(plan.first) && plan.total >= 99;
+  box.disabled = plan.parsed.sawCommanderHeader || !plan.first || !isCommanderEligible(plan.first);
+  if (plan.parsed.sawCommanderHeader) box.checked = false;
+  else if (importText.dataset.touched !== '1') box.checked = !!looksLikeCopy;
+  document.getElementById('import-status').textContent = plan.parsed.entries.length
+    ? plan.total + ' card' + (plan.total === 1 ? '' : 's') + ' on ' + plan.parsed.entries.length + ' line' + (plan.parsed.entries.length === 1 ? '' : 's') + (plan.parsed.sawCommanderHeader ? ' (commander section found)' : '')
+    : 'Paste a decklist above (one card per line, like "1 Sol Ring (EOC) 57" or "Sol Ring").';
+  document.getElementById('import-go').disabled = !plan.parsed.entries.length;
+}}
+function runImport() {{
+  const plan = importPlan();
+  const replace = document.getElementById('import-replace').checked;
+  const firstIsCommander = document.getElementById('import-first-commander').checked && !plan.parsed.sawCommanderHeader;
+  const missing = [], trimmed = [];
+  let commanderCard = null;
+  const wanted = {{}};   // normalized name -> {{ card, qty }}
+  plan.parsed.entries.forEach((e, i) => {{
+    const card = findOwnedByName(e.name, collectionIndex, plan.faceIndex);
+    if (!card) {{ missing.push(e.qty > 1 ? e.qty + ' ' + e.name : e.name); return; }}
+    if (e.section === 'commander' || (firstIsCommander && i === 0)) {{ if (!commanderCard) commanderCard = card; return; }}
+    const key = normalizeName(card.name);
+    (wanted[key] = wanted[key] || {{ card: card, qty: 0 }}).qty += e.qty;
+  }});
+  if (commanderCard && brew.format !== 'commander') {{
+    brew.format = 'commander';
+    document.getElementById('deck-format').value = 'commander';
+    updateFormatUI();
+  }}
+  if (replace) brew.cards = [];
+  if (commanderCard) setCommander(commanderCard);
+  const commanderKey = commanderCard ? normalizeName(commanderCard.name) : null;
+  let added = 0;
+  Object.keys(wanted).forEach(key => {{
+    if (key === commanderKey) return;
+    const w = wanted[key];
+    const cap = brew.format === 'commander' ? maxCopies(w.card.name) : Math.max(1, w.card.quantity || 1);
+    const have = (findCard(w.card.name) || {{ quantity: 0 }}).quantity;
+    const qty = Math.max(0, Math.min(w.qty, cap - have));
+    if (qty < w.qty) trimmed.push(w.card.name + ' (' + w.qty + ' -> ' + (have + qty) + ')');
+    if (qty <= 0) return;
+    const existing = findCard(w.card.name);
+    if (existing) existing.quantity += qty;
+    else brew.cards.push({{
+      name: w.card.name, quantity: qty, scryfall_id: w.card.scryfall_id, cmc: w.card.cmc, mana_cost: w.card.mana_cost,
+      type_line: w.card.type_line, color_identity: w.card.color_identity, category: w.card.category,
+      set_code: w.card.set_code, collector_number: w.card.collector_number,
+    }});
+    added += qty;
+  }});
+  renderAll();
+  loadThemeOptions();
+  loadDeckTypes();
+  closeImport();
+  const panel = document.getElementById('suggestions-panel');
+  let html = '<div class="hint" style="margin:0 0 6px;"><b>Imported ' + added + ' card' + (added === 1 ? '' : 's') + '</b>'
+    + (commanderCard ? ' plus the commander, ' + escapeHtml(commanderCard.name) : '') + '. Save the deck to keep it.</div>';
+  if (missing.length) html += '<div class="filler-note" style="margin-bottom:6px;"><b>' + missing.length + ' line' + (missing.length === 1 ? '' : 's') + ' not in your collection (skipped):</b> ' + missing.map(escapeHtml).join(', ') + '.</div>';
+  if (trimmed.length) html += '<div class="filler-note"><b>Trimmed to what the deck can hold (copies you own / allowed):</b> ' + trimmed.map(escapeHtml).join(', ') + '.</div>';
+  panel.innerHTML = html;
+}}
+document.getElementById('import-decklist-btn').addEventListener('click', openImport);
+document.getElementById('import-close').addEventListener('click', closeImport);
+document.getElementById('import-cancel').addEventListener('click', closeImport);
+document.getElementById('import-go').addEventListener('click', runImport);
+importText.addEventListener('input', refreshImportStatus);
+document.getElementById('import-first-commander').addEventListener('change', () => {{ importText.dataset.touched = '1'; }});
+document.addEventListener('keydown', (e) => {{ if (e.key === 'Escape' && importModal.classList.contains('show')) closeImport(); }});
+
 
 const copyDecklistBtn = document.getElementById('copy-decklist-btn');
 copyDecklistBtn.addEventListener('click', () => {{
