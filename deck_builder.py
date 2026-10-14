@@ -1118,6 +1118,7 @@ def owned_collection_gameplay_view(owned: dict[str, OwnedCard], gameplay: dict[s
             "oracle_text": gp.get("oracle_text") or "",
             "edhrec_rank": gp.get("edhrec_rank"),
             "copy_limit": card_copy_limit(gp.get("type_line"), gp.get("oracle_text")),
+            "layout": gp.get("layout") or "",
         })
     view.sort(key=lambda c: c["name"])
     return view
@@ -1153,6 +1154,7 @@ def full_card_pool_gameplay_view(gameplay: dict[str, dict], exclude_names: set[s
             "oracle_text": gp.get("oracle_text") or "",
             "edhrec_rank": gp.get("edhrec_rank"),
             "copy_limit": card_copy_limit(gp.get("type_line"), gp.get("oracle_text")),
+            "layout": gp.get("layout") or "",
         })
     return view
 
@@ -2474,6 +2476,7 @@ def suggest_builder_cards(
             "mana_cost": c["mana_cost"],
             "set_code": c["set_code"],
             "collector_number": c["collector_number"],
+            "layout": c.get("layout") or "",
             "owned": owned,
             "role": role,
             "game_changer": nm in game_changers,

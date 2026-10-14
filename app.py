@@ -908,6 +908,17 @@ body:not(.compact) .builder-tile .tile-icon-stack { grid-area:stack; }
   flex-shrink: 0; background: var(--card-border); cursor: zoom-in;
 }
 .card-thumb.small { width: 32px; height: 44px; border-radius: 3.5px; }
+.thumb-wrap { position:relative; display:inline-flex; flex-shrink:0; line-height:0; }
+.thumb-wrap.wide { display:block; width:100%; }
+.thumb-wrap .flip-btn {
+  position:absolute; right:-5px; bottom:-5px; width:18px; height:18px; padding:0;
+  border-radius:50%; border:1px solid var(--card-border); background:var(--bg-elevated); color:var(--text);
+  font-size:0.8rem; line-height:1; display:flex; align-items:center; justify-content:center;
+  cursor:pointer; box-shadow:0 2px 5px rgba(0,0,0,0.5); z-index:2;
+}
+.thumb-wrap .flip-btn:hover { color:var(--accent); border-color:var(--accent); }
+body:not(.compact) .builder-tile .thumb-wrap { grid-area:thumb; }
+body.compact .thumb-wrap { display:none; }
 .color-icons { display: inline-flex; gap: 2px; align-items: center; flex-shrink: 0; }
 .mana-icon { width: 14px; height: 14px; display: block; }
 .mana-cost-pips { display: inline-flex; align-items: center; gap: 1px; flex-shrink: 0; }
@@ -1659,11 +1670,19 @@ function normalizeName(name) {{ return name.trim().toLowerCase(); }}
 // supplies the version number Scryfall's API reports (see
 // scryfall_image_versions), which selects the current file.
 let imageVersions = {{}};
-function scryfallImg(scryfallId, size) {{
+function scryfallImg(scryfallId, size, face) {{
   if (!scryfallId) return null;
   const v = imageVersions[scryfallId];
-  return `https://cards.scryfall.io/${{size}}/front/${{scryfallId[0]}}/${{scryfallId[1]}}/${{scryfallId}}.jpg` + (v ? '?' + v : '');
+  return `https://cards.scryfall.io/${{size}}/${{face || 'front'}}/${{scryfallId[0]}}/${{scryfallId[1]}}/${{scryfallId}}.jpg` + (v ? '?' + v : '');
 }}
+
+// Only these layouts have a second image on Scryfall's CDN (confirmed: a
+// transform and a modal DFC return 200 on /back/; adventure, split and
+// "prepare" cards return 404), so only they get a flip button. The ids are
+// collected from the collection's own layout field, since deck entries and
+// most suggestion rows carry just a scryfall_id.
+const FLIP_LAYOUTS = ['transform', 'modal_dfc'];
+const flippableIds = new Set();
 
 // Same category order as brewlist_core.BUCKET_ORDER (the compare report's
 // own bucket ordering) -- reused so Suggest's grouped results read in the
@@ -1693,12 +1712,35 @@ function manaCostPipsHtml(manaCost) {{
   ).join('') + '</span>';
 }}
 
-function thumbHtml(scryfallId, cssClass) {{
+function thumbHtml(scryfallId, cssClass, layout) {{
   const small = scryfallImg(scryfallId, 'small');
   const full = scryfallImg(scryfallId, 'normal');
   if (!small) return `<div class="${{cssClass}}"></div>`;
+  if (FLIP_LAYOUTS.includes(layout) || flippableIds.has(scryfallId)) {{
+    return `<span class="thumb-wrap${{cssClass.includes('wz-img') ? ' wide' : ''}}">`
+      + `<img class="${{cssClass}}" src="${{small}}" data-full="${{full}}" data-front-small="${{small}}" data-front-full="${{full}}" `
+      + `data-back-small="${{scryfallImg(scryfallId, 'small', 'back')}}" data-back-full="${{scryfallImg(scryfallId, 'normal', 'back')}}" alt="" loading="lazy" decoding="async">`
+      + `<button type="button" class="flip-btn" title="Show the other face">&#8635;</button></span>`;
+  }}
   return `<img class="${{cssClass}}" src="${{small}}" data-full="${{full}}" alt="" loading="lazy" decoding="async">`;
 }}
+
+// Capture phase on purpose: tiles, rows and wizard cards all have their own
+// click handlers (add / select), and the flip button must not trigger them.
+// Updating data-full in place lets the hover preview show the visible face.
+document.addEventListener('click', (e) => {{
+  const btn = e.target.closest('.flip-btn');
+  if (!btn) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const thumb = btn.previousElementSibling;
+  if (!thumb || !thumb.dataset.backFull) return;
+  const showingBack = thumb.dataset.showingBack === '1';
+  thumb.src = showingBack ? thumb.dataset.frontSmall : thumb.dataset.backSmall;
+  thumb.dataset.full = showingBack ? thumb.dataset.frontFull : thumb.dataset.backFull;
+  thumb.dataset.showingBack = showingBack ? '0' : '1';
+  if (hoverPreview && hoverPreview.classList.contains('show')) hoverPreview.src = thumb.dataset.full;
+}}, true);
 
 const hoverPreview = document.getElementById('hover-preview');
 function setupHoverPreview(container) {{
@@ -2243,7 +2285,7 @@ function renderGrid() {{
       }}
     }}
     tile.innerHTML = `
-      ${{thumbHtml(card.scryfall_id, 'card-thumb')}}
+      ${{thumbHtml(card.scryfall_id, 'card-thumb', card.layout)}}
       <div class="tile-body">
         <div class="name"><span class="name-text">${{card.name}}</span></div>
         <div class="meta">${{card.type_line || 'Unknown type'}} &middot; CMC ${{card.cmc}} &middot; own ${{card.quantity}}</div>
@@ -2518,6 +2560,7 @@ fetch('/builder/collection-data')
     collectionIndex = {{}};
     collection.forEach(c => {{ collectionIndex[normalizeName(c.name)] = c; }});
     imageVersions = data.image_versions || {{}};
+    for (const c of (data.cards || [])) if (c.scryfall_id && FLIP_LAYOUTS.includes(c.layout)) flippableIds.add(c.scryfall_id);
     annotateFilterCounts();
     renderAll();
   }})
@@ -2838,7 +2881,7 @@ function wizardTileHtml(card) {{
   return '<div class="wz-tile' + (sel ? ' selected' : '') + (card.owned === false ? ' unowned' : '') + (isFiller(card) ? ' filler' : '') + '" data-key="' + escapeHtml(wizardKey(card)) + '" data-full="' + (scryfallImg(card.scryfall_id, 'normal') || '') + '">'
     + '<div class="wz-check" aria-hidden="true">&#10003;</div>'
     + '<button type="button" class="wz-avoid" title="Never suggest this card again for this deck" data-avoid="' + escapeHtml(wizardKey(card)) + '">&#128683;</button>'
-    + thumbHtml(card.scryfall_id, 'card-thumb wz-img')
+    + thumbHtml(card.scryfall_id, 'card-thumb wz-img', card.layout)
     + '<div class="wz-name">' + escapeHtml(card.name) + (card.quantity > 1 ? ' <span class="wz-qty" title="This card allows several copies; all of them are suggested">&times;' + card.quantity + '</span>' : '') + gc + '</div>'
     + '<div class="wz-reason" title="' + escapeHtml(card.reason) + '">' + escapeHtml(card.reason) + '</div>'
     + (badges ? '<div class="wz-badge-row">' + badges + '</div>' : '')
@@ -3117,7 +3160,7 @@ suggestBtn.addEventListener('click', () => {{
                 ? `<a class="unowned-badge" href="${{s.price_url}}" target="_blank" rel="noopener" title="Buy this card">Not owned${{priceText}}</a>`
                 : `<span class="unowned-badge">Not owned${{priceText}}</span>`)
             : '';
-          row.innerHTML = `<span class="row-name">${{thumbHtml(s.scryfall_id, 'card-thumb small')}}<span>${{s.name}}${{s.quantity > 1 ? ' <b>&times;' + s.quantity + '</b>' : ''}} ${{colorIconsHtml(s.color_identity)}}${{priceBadge}}${{fillerBadgeHtml(s)}}<div class="reason">${{s.reason}}</div></span></span>`;
+          row.innerHTML = `<span class="row-name">${{thumbHtml(s.scryfall_id, 'card-thumb small', s.layout)}}<span>${{s.name}}${{s.quantity > 1 ? ' <b>&times;' + s.quantity + '</b>' : ''}} ${{colorIconsHtml(s.color_identity)}}${{priceBadge}}${{fillerBadgeHtml(s)}}<div class="reason">${{s.reason}}</div></span></span>`;
           const dropRow = () => {{
             row.remove();
             remaining = remaining.filter(x => x !== s);
@@ -3217,7 +3260,7 @@ optimizeBtn.addEventListener('click', () => {{
         // own Combo Reference section already uses.
         const producesText = (p.produces && p.produces.length) ? ` &rarr; ${{p.produces.join(', ')}}` : '';
         const detailsLink = p.url ? ` <a href="${{p.url}}" target="_blank" rel="noopener">(details)</a>` : '';
-        row.innerHTML = `<span class="row-name">${{thumbHtml(p.add.scryfall_id, 'card-thumb small')}}<span>+ ${{p.add.name}} ${{colorIconsHtml(p.add.color_identity)}}<div class="reason">${{p.reason}}${{producesText}} &mdash; cuts ${{p.remove.name}}${{detailsLink}}</div></span></span>`;
+        row.innerHTML = `<span class="row-name">${{thumbHtml(p.add.scryfall_id, 'card-thumb small', p.add.layout)}}<span>+ ${{p.add.name}} ${{colorIconsHtml(p.add.color_identity)}}<div class="reason">${{p.reason}}${{producesText}} &mdash; cuts ${{p.remove.name}}${{detailsLink}}</div></span></span>`;
         const applyBtn = Object.assign(document.createElement('button'), {{
           className: 'btn ghost small', textContent: 'Apply',
           onclick: () => {{
