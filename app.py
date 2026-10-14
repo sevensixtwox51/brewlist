@@ -866,9 +866,11 @@ body::after {
 .builder-filters input[type=text], .builder-filters select, .builder-filters .btn,
 .builder-filters .segmented, .builder-filters .seg-btn { height:38px; box-sizing:border-box; }
 .builder-filters .btn.small, .builder-filters .seg-btn { padding-top:0; padding-bottom:0; display:inline-flex; align-items:center; }
+.builder-filters .icon-btn { width:38px; padding:0; justify-content:center; }
+#view-density-toggle[data-mode="cards"] .icon-grid, #view-density-toggle[data-mode="compact"] .icon-list { display:none; }
 .builder-filters .set-selection-field, .builder-filters .exact-color-toggle { display:flex; align-items:center; }
 .builder-filters input[type=text] { flex:1 1 240px; min-width:200px; margin:0; }
-#commander-popularity-controls { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-left:auto; }
+#commander-popularity-controls { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
 .builder-filters select {
   padding:8px 10px; border-radius:8px; border:1px solid var(--card-border);
   background:var(--bg); color:var(--text); font-size:0.85rem;
@@ -1452,24 +1454,22 @@ def render_builder_page(deck_id: str | None = None) -> str:
             <button type="button" class="btn ghost small" id="grid-set-filter-btn">Set</button>
             <div class="set-selection-popup" id="grid-set-filter-popup"></div>
           </div>
+          <button type="button" class="btn ghost icon-btn" id="view-density-toggle" data-mode="cards" title="Switch to compact list" aria-label="Switch to compact list">
+            <svg class="icon-list" viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M7 5h10M7 10h10M7 15h10"/><circle cx="3.2" cy="5" r="0.9" fill="currentColor" stroke="none"/><circle cx="3.2" cy="10" r="0.9" fill="currentColor" stroke="none"/><circle cx="3.2" cy="15" r="0.9" fill="currentColor" stroke="none"/></svg>
+            <svg class="icon-grid" viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="2.5" width="6" height="6" rx="1.2"/><rect x="11.5" y="2.5" width="6" height="6" rx="1.2"/><rect x="2.5" y="11.5" width="6" height="6" rx="1.2"/><rect x="11.5" y="11.5" width="6" height="6" rx="1.2"/></svg>
+          </button>
         </div>
-        <div class="filter-row">
-          <div class="segmented" id="view-density-toggle" title="Switches between full tiles and a compact text list with mana-cost pips">
-            <button type="button" class="seg-btn active" data-value="cards">Cards</button>
-            <button type="button" class="seg-btn" data-value="compact">Compact</button>
-          </div>
-          <div id="commander-popularity-controls" style="display:none;">
-            <select id="edhrec-window" title="Which EDHREC time window a commander's popularity rank is based on">
-              <option value="2years">Popularity: past 2 years</option>
-              <option value="month">Popularity: past month</option>
-              <option value="week">Popularity: past week</option>
-            </select>
-            <label class="exact-color-toggle" title="Sorts eligible commanders by their EDHREC rank (most popular first); ones with no rank in this window sort last">
-              <input type="checkbox" id="sort-by-rank"> Sort by rank
-            </label>
-            <button type="button" class="btn ghost small" id="edhrec-refresh-btn" title="EDHREC data only updates when you click this -- it never refetches on its own">&#8635; Refresh rankings</button>
-            <span class="hint" id="edhrec-status" style="margin:0;"></span>
-          </div>
+        <div id="commander-popularity-controls" style="display:none;">
+          <select id="edhrec-window" title="Which EDHREC time window a commander's popularity rank is based on">
+            <option value="2years">Popularity: past 2 years</option>
+            <option value="month">Popularity: past month</option>
+            <option value="week">Popularity: past week</option>
+          </select>
+          <label class="exact-color-toggle" title="Sorts eligible commanders by their EDHREC rank (most popular first); ones with no rank in this window sort last">
+            <input type="checkbox" id="sort-by-rank"> Sort by rank
+          </label>
+          <button type="button" class="btn ghost small" id="edhrec-refresh-btn" title="EDHREC data only updates when you click this -- it never refetches on its own">&#8635; Refresh rankings</button>
+          <span class="hint" id="edhrec-status" style="margin:0;"></span>
         </div>
       </div>
       <div class="collection-grid" id="collection-grid"><div class="hint" style="margin-top:50px;">Loading your collection&hellip;</div></div>
@@ -1860,13 +1860,16 @@ setupHoverPreview(document.getElementById('replace-popup'));
 
 document.getElementById('draw-hand-btn').addEventListener('click', drawSampleHand);
 
-const viewDensityBtns = document.querySelectorAll('#view-density-toggle .seg-btn');
-viewDensityBtns.forEach(btn => {{
-  btn.addEventListener('click', () => {{
-    viewDensityBtns.forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    document.body.classList.toggle('compact', btn.dataset.value === 'compact');
-  }});
+// One icon button: it shows the view a click switches TO (list icon while in
+// card tiles, tile icon while in the compact list).
+const densityBtn = document.getElementById('view-density-toggle');
+densityBtn.addEventListener('click', () => {{
+  const compact = !document.body.classList.contains('compact');
+  document.body.classList.toggle('compact', compact);
+  densityBtn.dataset.mode = compact ? 'compact' : 'cards';
+  const label = compact ? 'Switch to card tiles' : 'Switch to compact list';
+  densityBtn.title = label;
+  densityBtn.setAttribute('aria-label', label);
 }});
 
 function findCard(name) {{
