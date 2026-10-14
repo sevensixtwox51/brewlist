@@ -994,6 +994,44 @@ def _alias_dfc_synergy(synergy_data: dict, names) -> dict:
     return out
 
 
+def _tribe_for_theme(label: str, subtypes: set[str]) -> str | None:
+    """The creature type an EDHREC theme name stands for ("Vampires" ->
+    "vampire", "Elves" -> "elf", "Werewolves" -> "werewolf"), or None when
+    the theme isn't a tribe. `subtypes` is every creature type seen in the
+    candidate pool, so "Tokens" or "Voltron" can't match by accident."""
+    w = (label or "").strip().lower()
+    if not w:
+        return None
+    forms = [w, w[:-1] if w.endswith("s") else w]
+    if w.endswith("ies"):
+        forms.append(w[:-3] + "y")
+    if w.endswith("ves"):
+        forms += [w[:-3] + "f", w[:-3] + "fe"]
+    if w.endswith("es"):
+        forms.append(w[:-2])
+    return next((f for f in forms if f in subtypes), None)
+
+
+def _tribe_members(candidates: list[dict], tribe: str, changelings: bool = False) -> set[str]:
+    """Normalized names of candidates that belong to the tribe: creatures of
+    that type (Changelings only when asked -- they count as every type but
+    are rarely why anyone plays the tribe), plus non-creature cards that name it in their
+    text ("Vampires you control get +1/+1", a Vampire token maker)."""
+    plural = {"elf": "elves", "werewolf": "werewolves", "wolf": "wolves"}.get(tribe, tribe + "s")
+    word = re.compile(rf"\b({re.escape(tribe)}|{re.escape(plural)})\b")
+    out: set[str] = set()
+    for c in candidates:
+        tl = (c.get("type_line") or "").lower()
+        text = (c.get("oracle_text") or "").lower()
+        if "creature" in tl:
+            subs = tl.split("\u2014", 1)[1].split() if "\u2014" in tl else []
+            if tribe in subs or (changelings and "changeling" in text):
+                out.add(normalize_name(c["name"]))
+        elif word.search(text) and "land" not in tl:
+            out.add(normalize_name(c["name"]))
+    return out
+
+
 def _rank_octave(c: dict) -> int:
     """Overall popularity in bands of a factor of two (#1-1, #2-3, #4-7, ...
     #2,048-4,095 is one band). Lets the "cheaper first" tiebreak decide only
@@ -1693,6 +1731,7 @@ def suggest_builder_cards(
     # generic draw. Guarded so a very common trigger ("whenever a creature
     # enters") doesn't tag half the collection.
     edhrec_theme_boost: set[str] = set()
+    tribal_boost: set[str] = set()
     _engine, _trigger = commander_draw_engine(_find_commander_card(commander_entry.name if commander_entry else None, owned_view, gameplay)) if deck_format == "commander" else (False, None)
     if _engine and _trigger and len(_trigger) >= 8:
         _enablers = [c for c in candidates if _trigger in (c.get("oracle_text") or "").lower()]
@@ -1770,6 +1809,37 @@ def suggest_builder_cards(
                         theme_reason_by_name[nm] = f"fits this commander's {theme} theme (per EDHREC)"
                         edhrec_theme_boost.add(nm)
 
+    # A tribal deck type (Edgar: Vampires, Krenko: Goblins) means creatures of
+    # that type ARE the plan, but EDHREC's per-commander list only runs ~250
+    # cards deep, so most of an owned tribe (24 of 31 Vampires) sat unranked
+    # behind generic EDHREC-listed filler. Give every owned member the same
+    # boost the oracle-tag themes get -- Synergy role only, and not for a
+    # tribe so common (Human, Wizard) that the boost would swamp the deck.
+    if deck_format == "commander":
+        _subtypes = {t for c in candidates for t in ((c.get("type_line") or "").lower().split("\u2014", 1)[1].split() if "\u2014" in (c.get("type_line") or "") and "creature" in (c.get("type_line") or "").lower() else [])}
+        _labels = [(edhrec_view.get("deck_type") or {}).get("value")]
+        _themes = edhrec_profile.get("themes") or []
+        _biggest = (_themes[0].get("count") or 0) if _themes else 0
+        _labels += [t.get("value") for t in _themes[:3] if _biggest and (t.get("count") or 0) >= _biggest * 0.5]
+        _seen_tribes: set[str] = set()
+        for _label in _labels:
+            _tribe = _tribe_for_theme(_label or "", _subtypes)
+            if not _tribe or _tribe in _seen_tribes:
+                continue
+            _seen_tribes.add(_tribe)
+            _members = _tribe_members(candidates, _tribe)
+            if not 1 <= len(_members) <= 80:
+                continue
+            _with_changelings = _tribe_members(candidates, _tribe, changelings=True)
+            for c in candidates:
+                nm = normalize_name(c["name"])
+                if nm in _with_changelings and _card_role(c["name"], c["category"], role_members) == "Synergy":
+                    if nm not in theme_reason_by_name:
+                        theme_reason_by_name[nm] = f"fits your commander's {_tribe} tribe (per EDHREC, {_label})"
+                    edhrec_theme_boost.add(nm)
+                    if nm in _members:
+                        tribal_boost.add(nm)
+
     def rank_key(c: dict):
         nm = normalize_name(c["name"])
         # EDHREC synergy sits right after combo-completion and ahead of the
@@ -1797,6 +1867,7 @@ def suggest_builder_cards(
             # at +0.01 shouldn't beat Necromancy in a reanimator deck).
             synergy_by_name.get(nm, 0.0) < _MEANINGFUL_SYNERGY,
             -synergy_by_name.get(nm, 0.0) if synergy_by_name.get(nm, 0.0) >= _MEANINGFUL_SYNERGY else 0.0,
+            nm not in tribal_boost,  # the commander's own creature type first
             nm not in edhrec_theme_boost,
             -synergy_by_name.get(nm, 0.0),
             nm not in edhrec_tracked_names,
