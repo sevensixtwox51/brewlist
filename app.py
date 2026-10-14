@@ -834,7 +834,7 @@ form.addEventListener('submit', (e) => {{
 # --------------------------------------------------------------------------
 
 BUILDER_STYLE = """
-main.builder { max-width: 1400px; }
+main.builder { max-width: min(2200px, 98vw); }
 body::before {
   content: ""; position: fixed; inset: -40px;
   background-image: var(--commander-bg-url, none);
@@ -858,7 +858,7 @@ body::after {
   background:var(--bg); color:var(--text); font-size:0.9rem; margin:0; min-width:160px;
 }
 .action-group { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-.builder-layout { display:grid; grid-template-columns: 1.8fr 1fr; gap:20px; align-items:start; margin-top:20px; }
+.builder-layout { display:grid; grid-template-columns: minmax(0, 1fr) clamp(440px, 27vw, 560px); gap:20px; align-items:start; margin-top:20px; }
 .builder-filters { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:28px; }
 .builder-filters input[type=text] { flex:1 1 220px; min-width:220px; margin:0; }
 .builder-filters select {
@@ -871,7 +871,7 @@ body::after {
 }
 .exact-color-toggle input { margin:0; cursor:pointer; }
 .collection-grid {
-  display:grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  display:grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap:10px; max-height:75vh; overflow-y:auto; padding-right:4px;
 }
 .builder-tile { background:var(--bg-elevated); border:1px solid var(--card-border); border-radius:10px; padding:10px; font-size:0.82rem; display:flex; gap:10px; position:relative; }
