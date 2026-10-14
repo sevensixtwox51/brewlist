@@ -1758,9 +1758,9 @@ document.addEventListener('click', (e) => {{
 // Lightbox: the hover preview is too small to read a card's rules text, so
 // clicking a card image opens it large. Capture phase for the same reason as
 // the flip button -- the image sits inside tiles/rows with their own click
-// actions. Only for the collection grid and what's already in the deck (tiles,
-// deck rows, commander slot) -- not the Suggest / Quick suggest / Optimize
-// views, where an image click keeps its own meaning.
+// actions. Only for the collection grid and the deck panel (tiles, deck rows,
+// commander slot, Quick suggest / Optimize results) -- not the guided wizard,
+// where an image click selects the card.
 const lightbox = document.getElementById('card-lightbox');
 const lightboxImg = document.getElementById('lightbox-img');
 const lightboxFlip = document.getElementById('lightbox-flip');
@@ -1798,7 +1798,7 @@ document.addEventListener('click', (e) => {{
     return;
   }}
   const img = e.target.closest('img.card-thumb');
-  if (!img || !img.closest('.builder-tile, .deck-row, .commander-slot')) return;  // not in the Suggest / Quick suggest / Optimize views
+  if (!img || !img.closest('.builder-tile, .deck-row, .commander-slot, #suggestions-panel')) return;  // not in the guided wizard, where an image click selects the card
   e.preventDefault();
   e.stopPropagation();
   openLightbox(img);
