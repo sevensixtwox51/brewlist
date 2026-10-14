@@ -15,6 +15,7 @@ has to app.py/brewlist_cli.py.
 
 from __future__ import annotations
 
+import collections
 import math
 import re
 
@@ -509,6 +510,10 @@ def commander_deck_shape_targets(deck_format: str, target_size: int) -> dict[str
 #                  budgets 30 "plan" cards by letting cards count in two roles
 #                  (108 minus overlap); our roles are disjoint, so the plan
 #                  share here is simply what's left.
+# How many candidates past a curve-capped card the role loop will look at for
+# one in an open mana-value bucket before settling for the capped card.
+_CURVE_LOOKAHEAD = 60
+
 TEMPLATE_FRACTIONS = {
     "commanderchallenge": {"Lands": 0.38, "Ramp": 0.12, "Draw": 0.13, "Interaction": 0.12},
     "commandzone": {"Lands": 0.38, "Ramp": 0.10, "Draw": 0.12, "Interaction": 0.18},
@@ -609,6 +614,7 @@ def edhrec_commander_view(commander_name: str, edhrec_theme: str | None = None) 
     synergy_data = None
     avg_nonbasic = None
     avg_big = None
+    mana_curve = None
     if chosen:
         page = commander_theme_page(commander_name, chosen["slug"])
         if page.get("cards"):
@@ -617,6 +623,7 @@ def edhrec_commander_view(commander_name: str, edhrec_theme: str | None = None) 
             curve = page.get("mana_curve") or {}
             if curve:
                 avg_big = sum(v for k, v in curve.items() if str(k).isdigit() and int(k) >= 6)
+                mana_curve = {int(k): v for k, v in curve.items() if str(k).isdigit()}
             if page.get("avg_planeswalkers") is not None:
                 avg_pw = page["avg_planeswalkers"]
     deck_type = None
@@ -630,6 +637,7 @@ def edhrec_commander_view(commander_name: str, edhrec_theme: str | None = None) 
         "deck_type": deck_type,
         "avg_nonbasic_lands": avg_nonbasic,
         "avg_big_cards": avg_big,
+        "mana_curve": mana_curve,
     }
 
 
@@ -2168,7 +2176,39 @@ def suggest_builder_cards(
     # candidate in that same pool, instead of just shrinking the role's
     # contribution -- added_counts[role] (bounded by role_slots[role]) is
     # what actually limits how many get taken from each role.
+    # Mana-curve shaping. EDHREC's page for this deck type says how many cards
+    # of each mana value its decks run (Edgar Vampires: 16 two-drops, 17
+    # three-drops, 6 five-drops). Ranking alone ignores that and reaches for
+    # the most popular cards whatever they cost, so an Edgar build came out
+    # with 9 two-drops against ~16-21 in real lists. Each role turn now looks
+    # at the next few ranked candidates and takes the first whose mana value
+    # is still under EDHREC's count for it; only if none is, it takes the top
+    # candidate as before. So the curve bends picks within a short window and
+    # never promotes a card far down the ranking.
+    curve_target: dict[int, int] | None = None
+    _curve = edhrec_view.get("mana_curve")
+    if deck_format == "commander" and _curve and sum(_curve.values()) > 0:
+        _nonland_slots = max(0, library_target - (role_targets.get("Lands") or 0))
+        _scale = _nonland_slots / sum(_curve.values())
+        curve_target = {b: round(_curve.get(b, 0) * _scale) for b in range(1, 8)}
+
+    def _bucket(c: dict) -> int:
+        return min(max(int(c.get("cmc") or 0), 1), 7)
+
+    running_curve: dict[int, int] = collections.Counter()
+    if curve_target is not None:
+        for e in wip_entries:
+            if e.section == "commander" or categorize(e.type_line) in ("Lands", "Basic Lands"):
+                continue
+            info = owned_by_name.get(normalize_name(e.name))
+            if info is not None:
+                running_curve[_bucket(info)] += e.quantity
+        for c in combo_first:
+            if role_of(c["name"], c["category"]) != "Lands":
+                running_curve[_bucket(c)] += 1
+
     ordered: list[dict] = list(combo_first)
+    consumed: dict[str, set[int]] = {role: set() for role in role_slots}
     indices = {role: 0 for role in role_slots}
     added_counts = {role: 0 for role in role_slots}
     active_roles = [r for r in role_slots if role_slots[r] > 0]
@@ -2178,22 +2218,50 @@ def suggest_builder_cards(
                 break
             pool = role_candidates.get(role) or []
             picked = None
-            while added_counts[role] < role_slots[role] and indices[role] < len(pool):
-                candidate = pool[indices[role]]
-                indices[role] += 1
-                is_gc = normalize_name(candidate["name"]) in game_changers
-                if gc_cap is not None and is_gc and running_gc_count >= gc_cap:
-                    continue  # over the intended bracket's cap -- try this role's next candidate instead
-                if wipe_cap is not None and running_wipe_count >= wipe_cap and is_own_board_wipe(candidate):
-                    continue  # enough symmetric wipes for this kind of deck already
-                if big_cap is not None and running_big_count >= big_cap and _is_big(candidate):
-                    big_blocked += 1
-                    continue  # this build's usual top-end is already full
-                picked = candidate
-                break
+            if added_counts[role] < role_slots[role]:
+                while indices[role] < len(pool) and id(pool[indices[role]]) in consumed[role]:
+                    indices[role] += 1
+                window: list[dict] = []
+                j = indices[role]
+                width = _CURVE_LOOKAHEAD if (curve_target is not None and role != "Lands") else 1
+                while j < len(pool) and len(window) < width:
+                    candidate = pool[j]
+                    j += 1
+                    if id(candidate) in consumed[role]:
+                        continue
+                    is_gc = normalize_name(candidate["name"]) in game_changers
+                    if gc_cap is not None and is_gc and running_gc_count >= gc_cap:
+                        consumed[role].add(id(candidate))
+                        continue  # over the intended bracket's cap
+                    if wipe_cap is not None and running_wipe_count >= wipe_cap and is_own_board_wipe(candidate):
+                        consumed[role].add(id(candidate))
+                        continue  # enough symmetric wipes for this kind of deck already
+                    if big_cap is not None and running_big_count >= big_cap and _is_big(candidate):
+                        big_blocked += 1
+                        consumed[role].add(id(candidate))
+                        continue  # this build's usual top-end is already full
+                    window.append(candidate)
+                if window:
+                    picked = window[0]
+                    if curve_target is not None and role != "Lands":
+                        # Only bend among cards with the same standing as the
+                        # top one (EDHREC-listed or theme/combo-backed vs not),
+                        # so the curve never trades a card real decks play for
+                        # slot filler.
+                        def _standing(c: dict) -> bool:
+                            nm = normalize_name(c["name"])
+                            return nm in edhrec_tracked_names or nm in reason_by_name or nm in theme_reason_by_name
+                        top_standing = _standing(window[0])
+                        picked = next(
+                            (c for c in window if _standing(c) == top_standing and running_curve[_bucket(c)] < curve_target[_bucket(c)]),
+                            window[0],
+                        )
+                    consumed[role].add(id(picked))
             if picked is None:
                 active_roles.remove(role)
                 continue
+            if curve_target is not None and role != "Lands":
+                running_curve[_bucket(picked)] += 1
             ordered.append(picked)
             added_counts[role] += 1
             if normalize_name(picked["name"]) in game_changers:
