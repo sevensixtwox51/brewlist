@@ -859,8 +859,16 @@ body::after {
 }
 .action-group { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .builder-layout { display:grid; grid-template-columns: minmax(0, 1fr) clamp(440px, 27vw, 560px); gap:20px; align-items:start; margin-top:20px; }
-.builder-filters { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:28px; }
-.builder-filters input[type=text] { flex:1 1 220px; min-width:220px; margin:0; }
+.builder-filters { display:flex; flex-direction:column; gap:10px; margin-bottom:24px; }
+.filter-row { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+/* One control height across both rows (search, selects, Set, view toggle,
+   refresh) so nothing sits higher or lower than its neighbours. */
+.builder-filters input[type=text], .builder-filters select, .builder-filters .btn,
+.builder-filters .segmented, .builder-filters .seg-btn { height:38px; box-sizing:border-box; }
+.builder-filters .btn.small, .builder-filters .seg-btn { padding-top:0; padding-bottom:0; display:inline-flex; align-items:center; }
+.builder-filters .set-selection-field, .builder-filters .exact-color-toggle { display:flex; align-items:center; }
+.builder-filters input[type=text] { flex:1 1 240px; min-width:200px; margin:0; }
+#commander-popularity-controls { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-left:auto; }
 .builder-filters select {
   padding:8px 10px; border-radius:8px; border:1px solid var(--card-border);
   background:var(--bg); color:var(--text); font-size:0.85rem;
@@ -1433,31 +1441,35 @@ def render_builder_page(deck_id: str | None = None) -> str:
   <div class="builder-layout">
     <div>
       <div class="builder-filters">
-        <input type="text" id="search" placeholder="Search your collection...">
-        <select id="filter-category"><option value="">All types</option><option value="Commander">Commander</option>{category_options}</select>
-        <select id="filter-color"><option value="">Any color</option><option value="C">Colorless</option><optgroup label="One-Color">{color_options}</optgroup>{color_family_optgroups}</select>
-        <label class="exact-color-toggle" title="Only show cards whose color identity is exactly the selected color(s) -- e.g. true Grixis cards, not also mono-colored or two-color ones that merely fit within Grixis">
-          <input type="checkbox" id="filter-color-exact" checked> Exact colors
-        </label>
-        <div class="set-selection-field">
-          <button type="button" class="btn ghost small" id="grid-set-filter-btn">Set</button>
-          <div class="set-selection-popup" id="grid-set-filter-popup"></div>
+        <div class="filter-row">
+          <input type="text" id="search" placeholder="Search your collection...">
+          <select id="filter-category"><option value="">All types</option><option value="Commander">Commander</option>{category_options}</select>
+          <select id="filter-color"><option value="">Any color</option><option value="C">Colorless</option><optgroup label="One-Color">{color_options}</optgroup>{color_family_optgroups}</select>
+          <label class="exact-color-toggle" title="Only show cards whose color identity is exactly the selected color(s) -- e.g. true Grixis cards, not also mono-colored or two-color ones that merely fit within Grixis">
+            <input type="checkbox" id="filter-color-exact" checked> Exact colors
+          </label>
+          <div class="set-selection-field">
+            <button type="button" class="btn ghost small" id="grid-set-filter-btn">Set</button>
+            <div class="set-selection-popup" id="grid-set-filter-popup"></div>
+          </div>
         </div>
-        <div class="segmented" id="view-density-toggle" title="Switches between full tiles and a compact text list with mana-cost pips">
-          <button type="button" class="seg-btn active" data-value="cards">Cards</button>
-          <button type="button" class="seg-btn" data-value="compact">Compact</button>
-        </div>
-        <div id="commander-popularity-controls" style="display:none;">
-        <select id="edhrec-window" title="Which EDHREC time window a commander's popularity rank is based on">
-          <option value="2years">Popularity: past 2 years</option>
-          <option value="month">Popularity: past month</option>
-          <option value="week">Popularity: past week</option>
-        </select>
-        <label class="exact-color-toggle" title="Sorts eligible commanders by their EDHREC rank (most popular first); ones with no rank in this window sort last">
-          <input type="checkbox" id="sort-by-rank"> Sort by rank
-        </label>
-        <button type="button" class="btn ghost small" id="edhrec-refresh-btn" title="EDHREC data only updates when you click this -- it never refetches on its own">&#8635; Refresh rankings</button>
-        <span class="hint" id="edhrec-status" style="margin:0;"></span>
+        <div class="filter-row">
+          <div class="segmented" id="view-density-toggle" title="Switches between full tiles and a compact text list with mana-cost pips">
+            <button type="button" class="seg-btn active" data-value="cards">Cards</button>
+            <button type="button" class="seg-btn" data-value="compact">Compact</button>
+          </div>
+          <div id="commander-popularity-controls" style="display:none;">
+            <select id="edhrec-window" title="Which EDHREC time window a commander's popularity rank is based on">
+              <option value="2years">Popularity: past 2 years</option>
+              <option value="month">Popularity: past month</option>
+              <option value="week">Popularity: past week</option>
+            </select>
+            <label class="exact-color-toggle" title="Sorts eligible commanders by their EDHREC rank (most popular first); ones with no rank in this window sort last">
+              <input type="checkbox" id="sort-by-rank"> Sort by rank
+            </label>
+            <button type="button" class="btn ghost small" id="edhrec-refresh-btn" title="EDHREC data only updates when you click this -- it never refetches on its own">&#8635; Refresh rankings</button>
+            <span class="hint" id="edhrec-status" style="margin:0;"></span>
+          </div>
         </div>
       </div>
       <div class="collection-grid" id="collection-grid"><div class="hint" style="margin-top:50px;">Loading your collection&hellip;</div></div>
@@ -2690,7 +2702,7 @@ function pollCommanderPopularity(attemptsLeft) {{
 }}
 function updateCommanderPopularityControlsVisibility() {{
   const isCommanderFilter = document.getElementById('filter-category').value === 'Commander';
-  document.getElementById('commander-popularity-controls').style.display = isCommanderFilter ? 'contents' : 'none';
+  document.getElementById('commander-popularity-controls').style.display = isCommanderFilter ? 'flex' : 'none';
   if (isCommanderFilter) {{
     // Defaults on every time the Commander filter is chosen -- ranked
     // (most popular first) is almost always more useful than whatever
