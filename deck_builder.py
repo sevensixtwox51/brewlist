@@ -512,6 +512,9 @@ def commander_deck_shape_targets(deck_format: str, target_size: int) -> dict[str
 TEMPLATE_FRACTIONS = {
     "commanderchallenge": {"Lands": 0.38, "Ramp": 0.12, "Draw": 0.13, "Interaction": 0.12},
     "commandzone": {"Lands": 0.38, "Ramp": 0.10, "Draw": 0.12, "Interaction": 0.18},
+    # Built from a real Edgar Markov Vampires list: 33 cards at MV 1-2, 4 ramp,
+    # 6 draw, 10 interaction, most of the deck being creatures and enablers.
+    "lowcurveaggro": {"Lands": 0.36, "Ramp": 0.06, "Draw": 0.08, "Interaction": 0.10},
 }
 
 
@@ -1827,6 +1830,13 @@ def suggest_builder_cards(
             if not _tribe or _tribe in _seen_tribes:
                 continue
             _seen_tribes.add(_tribe)
+            # "Each non-Vampire creature gets -X/-X" (Olivia's Wrath) is tagged
+            # a symmetric sweeper but spares this deck's own board, so it is
+            # not a wipe the wipe-averse stance should block.
+            _spares = re.compile(r"\bnon-" + re.escape(_tribe) + r"\b")
+            _safe = {normalize_name(c["name"]) for c in candidates if _spares.search((c.get("oracle_text") or "").lower())}
+            if _safe & symmetric_wipes:
+                symmetric_wipes = frozenset(symmetric_wipes - _safe)
             _members = _tribe_members(candidates, _tribe)
             if not 1 <= len(_members) <= 80:
                 continue
