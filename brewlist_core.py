@@ -2861,21 +2861,20 @@ details.combos-panel[open] > summary::before {{ transform: rotate(90deg); }}
   gap: 4px;
   max-width: 50%;
 }}
-/* Card view: prices sit in a row UNDER the card text instead of in a ragged
-   right-hand column. The column left a wide dead gap beside short names, made
-   long names wrap early, and right-aligned wrapping pills landed all over the
-   place. Pills are laid out on a column grid so they line up from tile to
-   tile; Compact view keeps the single-row layout. */
-body:not(.compact) .card-body {{ flex-direction: column; justify-content: flex-start; gap: 6px; }}
-body:not(.compact) .card-info {{ width: 100%; }}
-body:not(.compact) .card-prices {{ width: 100%; max-width: none; align-items: stretch; }}
+/* Card view: store pills stay in the right-hand column, but stacked one per
+   line at a uniform width (the widest pill's) so they form a neat column
+   instead of wrapping into a ragged right edge, and at a smaller size so the
+   column stays narrow and the card text keeps its room. Compact view keeps
+   its single-row layout. */
+body:not(.compact) .card-prices {{ max-width: none; }}
 body:not(.compact) .prices {{
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(118px, max-content));
-  justify-content: start;
-  gap: 6px;
+  grid-template-columns: max-content;
+  justify-items: stretch;
+  gap: 4px;
 }}
-body:not(.compact) .finish-note, body:not(.compact) .no-price {{ text-align: left; }}
+body:not(.compact) .price-pill {{ font-size: 0.68rem; padding: 2px 8px; text-align: center; }}
+body:not(.compact) .trend {{ font-size: 0.62rem; }}
 .card-name {{
   font-weight: 600;
   font-size: 0.95rem;
