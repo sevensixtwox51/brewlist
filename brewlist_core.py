@@ -2894,11 +2894,6 @@ body:not(.compact) .trend {{ font-size: 0.62rem; }}
   height: 14px;
   display: block;
 }}
-.icon {{ font-size: 0.85rem; }}
-.card.owned .icon {{ color: var(--owned); }}
-.card.missing .icon {{ color: var(--missing); }}
-.card.owned .icon-missing {{ display: none; }}
-.card.missing .icon-owned {{ display: none; }}
 .badge {{
   font-size: 0.65rem;
   text-transform: uppercase;
@@ -4473,7 +4468,6 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
     <div class="card-body">
       <div class="card-info">
         <div class="card-name">
-          <span class="icon icon-owned">&#10003;</span><span class="icon icon-missing">&#10007;</span>
           {name_esc}{color_icons_html}{mana_cost_pips_html}{badges}
         </div>
         <div class="qty qty-owned">need {e.quantity} &middot; have {r.have}{reserved_note}</div>
@@ -4495,7 +4489,7 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
     {thumb_html}
     <div class="card-body">
       <div class="card-info">
-        <div class="card-name"><span class="icon">&#10007;</span>{name_esc}{color_icons_html}{mana_cost_pips_html}{badges}</div>
+        <div class="card-name">{name_esc}{color_icons_html}{mana_cost_pips_html}{badges}</div>
         <div class="qty">need {r.shortfall} more &middot; deck wants {e.quantity}{have_str}</div>
       </div>
       <div class="card-prices">
