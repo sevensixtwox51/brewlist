@@ -968,6 +968,32 @@ def _costly_filler(c: dict, role: str) -> bool:
     return role in ("Ramp", "Draw", "Interaction") and (c.get("cmc") or 0) >= 6
 
 
+def _dfc_faces(name: str) -> list[str]:
+    """Normalized face names of a double-faced card ("A // B" -> ["a", "b"]);
+    empty for a single-faced one."""
+    if "//" not in name:
+        return []
+    return [normalize_name(part) for part in name.split("//") if part.strip()]
+
+
+def _alias_dfc_synergy(synergy_data: dict, names) -> dict:
+    """EDHREC lists a double-faced card under its front face only (Scheming
+    Silvertongue) while the collection holds the full "A // B" name, so the
+    owned card never matched its own EDHREC entry -- no synergy, no
+    "tracked" standing, and the EDHREC copy showed up as a purchase. Adds
+    each owned DFC's full normalized name as an alias of its face's entry."""
+    out = dict(synergy_data)
+    for name in names:
+        faces = _dfc_faces(name)
+        full = normalize_name(name)
+        if faces and full not in out:
+            for face in faces:
+                if face in synergy_data:
+                    out[full] = synergy_data[face]
+                    break
+    return out
+
+
 def _rank_octave(c: dict) -> int:
     """Overall popularity in bands of a factor of two (#1-1, #2-3, #4-7, ...
     #2,048-4,095 is one band). Lets the "cheaper first" tiebreak decide only
@@ -1366,6 +1392,7 @@ def suggest_replacements(
     edhrec_view = {"synergy_data": {}, "profile": {}, "deck_type": None}
     if deck_format == "commander" and commander_entry:
         edhrec_view = edhrec_commander_view(commander_entry.name, edhrec_theme)
+        edhrec_view["synergy_data"] = _alias_dfc_synergy(edhrec_view["synergy_data"], (c["name"] for c in owned_view))
         synergy_data = edhrec_view["synergy_data"]
         edhrec_tracked_names = set(synergy_data.keys())
         for nm, info in synergy_data.items():
@@ -1587,6 +1614,7 @@ def suggest_builder_cards(
     edhrec_view = {"synergy_data": {}, "profile": {}, "deck_type": None}
     if deck_format == "commander" and commander_entry:
         edhrec_view = edhrec_commander_view(commander_entry.name, edhrec_theme)
+        edhrec_view["synergy_data"] = _alias_dfc_synergy(edhrec_view["synergy_data"], (c["name"] for c in owned_view))
         if meta_out is not None:
             meta_out["deck_type"] = edhrec_view["deck_type"]
         synergy_data = edhrec_view["synergy_data"]
@@ -2214,6 +2242,9 @@ def suggest_builder_cards(
     unowned_by_role: dict[str, list[dict]] = {}
     if gameplay and (has_gap or pools_out is not None):
         owned_or_used_names = {normalize_name(c["name"]) for c in owned_view} | used_names
+        # An owned double-faced card also keeps its faces out of the
+        # purchase pool (the index lists each face as its own card).
+        owned_or_used_names |= {f for c in owned_view for f in _dfc_faces(c["name"])}
         full_pool = full_card_pool_gameplay_view(gameplay, owned_or_used_names)
         unowned_candidates = _filter_candidates(
             wip_entries, full_pool, deck_format, target_format, commander_color_identity,
