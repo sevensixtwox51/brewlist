@@ -514,6 +514,10 @@ def commander_deck_shape_targets(deck_format: str, target_size: int) -> dict[str
 # one in an open mana-value bucket before settling for the capped card.
 _CURVE_LOOKAHEAD = 60
 
+# A colour with at least this many cards in the deck gets a minimum share of
+# land sources (see the basics allocation) however few of its pips there are.
+_MIN_CARDS_FOR_SOURCE_FLOOR = 6
+
 TEMPLATE_FRACTIONS = {
     "commanderchallenge": {"Lands": 0.38, "Ramp": 0.12, "Draw": 0.13, "Interaction": 0.12},
     "commandzone": {"Lands": 0.38, "Ramp": 0.10, "Draw": 0.12, "Interaction": 0.18},
@@ -2321,7 +2325,19 @@ def suggest_builder_cards(
         weights = {col: pips_by_color.get(col, 0.0) + 1.0 for col in deck_colors}  # +1 keeps a pip-light splash alive
         total_w = sum(weights.values())
         land_total = role_targets.get("Lands") or 37
-        deficit = {col: max(0.0, land_total * weights[col] / total_w - sources[col]) for col in deck_colors}
+        # A source count proportional to pip share leaves the minor colour of
+        # a two-colour deck short: The Scarab God (74% black pips, 26% blue)
+        # got 2 Islands and 11 blue sources against 33 black, so blue cards
+        # were on time only 62% of the time by turn 2. A colour with a real
+        # number of cards needs a minimum of sources whatever its pip share.
+        colour_cards = {col: sum(1 for cost in non_land_costs if col in _color_pips(cost)) for col in deck_colors}
+        main_colours = [col for col in deck_colors if colour_cards[col] >= _MIN_CARDS_FOR_SOURCE_FLOOR]
+        floor_share = {1: 0.0, 2: 0.38, 3: 0.32}.get(len(main_colours), 0.28)
+        source_floor = {col: (round(land_total * floor_share) if col in main_colours else 0) for col in deck_colors}
+        deficit = {
+            col: max(0.0, max(land_total * weights[col] / total_w, source_floor[col]) - sources[col])
+            for col in deck_colors
+        }
         if sum(deficit.values()) <= 0:
             deficit = dict(weights)
         # Step 1: cover each color's source shortfall; step 2: split what's left
