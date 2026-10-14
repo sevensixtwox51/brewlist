@@ -2844,6 +2844,13 @@ details.combos-panel[open] > summary::before {{ transform: rotate(90deg); }}
   box-shadow: 0 12px 32px rgba(0,0,0,0.5), 0 0 0 1px var(--card-border);
 }}
 #hover-preview.show {{ display: block; }}
+.lightbox {{ position:fixed; inset:0; z-index:400; background:rgba(0,0,0,0.82); display:flex; align-items:center; justify-content:center; padding:20px; }}
+.lightbox[hidden] {{ display:none; }}
+.lightbox-box {{ position:relative; display:flex; flex-direction:column; align-items:center; gap:12px; }}
+#lightbox-img {{ max-height:86vh; max-width:94vw; width:auto; height:auto; border-radius:4.7%; box-shadow:0 10px 40px rgba(0,0,0,0.7); background:var(--card-border); cursor:default; }}
+.lightbox-close {{ position:absolute; top:-14px; right:-14px; width:32px; height:32px; border-radius:50%; border:1px solid var(--card-border); background:var(--bg-elevated); color:var(--text); font-size:1.2rem; line-height:1; cursor:pointer; z-index:2; }}
+.lightbox-close:hover, .lightbox-flip:hover {{ color:var(--accent); border-color:var(--accent); }}
+.lightbox-flip {{ padding:6px 14px; border-radius:8px; border:1px solid var(--card-border); background:var(--bg-elevated); color:var(--text); font-size:0.85rem; cursor:pointer; }}
 .card-body {{
   flex: 1;
   min-width: 0;
@@ -3247,6 +3254,13 @@ footer {{
 <footer>Generated {generated} &middot; {deck_name}</footer>
 
 <img id="hover-preview" alt="">
+<div id="card-lightbox" class="lightbox" hidden>
+  <div class="lightbox-box">
+    <button type="button" class="lightbox-close" id="lightbox-close" title="Close (Esc)">&times;</button>
+    <img id="lightbox-img" alt="Card image">
+    <button type="button" class="lightbox-flip" id="lightbox-flip" title="Show the other face" hidden>&#8635; Flip</button>
+  </div>
+</div>
 <div id="pie-tooltip"></div>
 
 <div class="modal-overlay" id="value-pie-modal-overlay">
@@ -3660,6 +3674,55 @@ document.body.addEventListener('click', (e) => {{
   thumb.dataset.full = showingBack ? thumb.dataset.frontFull : thumb.dataset.backFull;
   thumb.dataset.showingBack = showingBack ? '0' : '1';
 }});
+
+// Lightbox: the hover preview is too small to read a card's rules text, so
+// clicking any card image opens it large (same behaviour as the Deck Builder).
+// Capture phase so it wins over any click handling on the surrounding tile.
+const lightbox = document.getElementById('card-lightbox');
+const lightboxImg = document.getElementById('lightbox-img');
+const lightboxFlip = document.getElementById('lightbox-flip');
+let lightboxThumb = null;
+function largeUrl(url) {{ return url ? url.replace('/normal/', '/large/') : url; }}
+function showLightboxFace() {{
+  const back = lightboxThumb.dataset.showingBack === '1';
+  lightboxImg.src = largeUrl(back ? lightboxThumb.dataset.backFull : (lightboxThumb.dataset.frontFull || lightboxThumb.dataset.full));
+}}
+function openLightbox(thumb) {{
+  if (!thumb || !(thumb.dataset.frontFull || thumb.dataset.full)) return;
+  lightboxThumb = thumb;
+  lightboxFlip.hidden = !thumb.dataset.backFull;
+  showLightboxFace();
+  if (hoverPreview) hoverPreview.classList.remove('show');
+  lightbox.hidden = false;
+}}
+function closeLightbox() {{
+  lightbox.hidden = true;
+  lightboxImg.removeAttribute('src');
+  lightboxThumb = null;
+}}
+function flipLightbox() {{
+  if (!lightboxThumb || !lightboxThumb.dataset.backFull) return;
+  const showingBack = lightboxThumb.dataset.showingBack === '1';
+  lightboxThumb.src = showingBack ? lightboxThumb.dataset.frontSmall : lightboxThumb.dataset.backSmall;
+  lightboxThumb.dataset.full = showingBack ? lightboxThumb.dataset.frontFull : lightboxThumb.dataset.backFull;
+  lightboxThumb.dataset.showingBack = showingBack ? '0' : '1';
+  showLightboxFace();
+}}
+document.addEventListener('click', (e) => {{
+  if (!lightbox.hidden) {{
+    if (e.target.closest('#lightbox-flip') || e.target === lightboxImg) {{ e.stopPropagation(); flipLightbox(); return; }}
+    if (e.target.closest('#lightbox-close') || e.target === lightbox) {{ e.stopPropagation(); closeLightbox(); }}
+    return;
+  }}
+  const img = e.target.closest('img.card-thumb');
+  if (!img) return;
+  e.preventDefault();
+  e.stopPropagation();
+  openLightbox(img);
+}}, true);
+document.addEventListener('keydown', (e) => {{
+  if (e.key === 'Escape' && !lightbox.hidden) {{ e.stopPropagation(); e.preventDefault(); closeLightbox(); }}
+}}, true);
 
 document.querySelectorAll('.card.foil').forEach(card => {{
   card.addEventListener('mousemove', (e) => {{
