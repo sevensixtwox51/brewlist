@@ -909,7 +909,13 @@ body:not(.compact) .builder-tile .tile-icon-stack { grid-area:stack; }
 }
 .card-thumb.small { width: 32px; height: 44px; border-radius: 3.5px; }
 .thumb-wrap { position:relative; display:inline-flex; flex-shrink:0; line-height:0; }
-.thumb-wrap.wide { display:block; width:100%; }
+.lightbox { position:fixed; inset:0; z-index:400; background:rgba(0,0,0,0.82); display:flex; align-items:center; justify-content:center; padding:20px; }
+.lightbox[hidden] { display:none; }
+.lightbox-box { position:relative; display:flex; flex-direction:column; align-items:center; gap:12px; }
+#lightbox-img { max-height:86vh; max-width:94vw; width:auto; height:auto; border-radius:4.7%; box-shadow:0 10px 40px rgba(0,0,0,0.7); background:var(--card-border); cursor:default; }
+.lightbox-close { position:absolute; top:-14px; right:-14px; width:32px; height:32px; border-radius:50%; border:1px solid var(--card-border); background:var(--bg-elevated); color:var(--text); font-size:1.2rem; line-height:1; cursor:pointer; z-index:2; }
+.lightbox-close:hover, .lightbox-flip:hover { color:var(--accent); border-color:var(--accent); }
+.lightbox-flip { padding:6px 14px; border-radius:8px; border:1px solid var(--card-border); background:var(--bg-elevated); color:var(--text); font-size:0.85rem; cursor:pointer; }
 .thumb-wrap .flip-btn {
   position:absolute; right:-5px; bottom:-5px; width:18px; height:18px; padding:0;
   border-radius:50%; border:1px solid var(--card-border); background:var(--bg-elevated); color:var(--text);
@@ -1325,6 +1331,13 @@ def render_builder_page(deck_id: str | None = None) -> str:
 </head>
 <body>
 <img id="hover-preview" alt="">
+<div id="card-lightbox" class="lightbox" hidden>
+  <div class="lightbox-box">
+    <button type="button" class="lightbox-close" id="lightbox-close" title="Close (Esc)">&times;</button>
+    <img id="lightbox-img" alt="Card image">
+    <button type="button" class="lightbox-flip" id="lightbox-flip" title="Show the other face" hidden>&#8635; Flip</button>
+  </div>
+</div>
 <main class="builder">
   <div class="page-header">
     <div>
@@ -1717,7 +1730,7 @@ function thumbHtml(scryfallId, cssClass, layout) {{
   const full = scryfallImg(scryfallId, 'normal');
   if (!small) return `<div class="${{cssClass}}"></div>`;
   if (FLIP_LAYOUTS.includes(layout) || flippableIds.has(scryfallId)) {{
-    return `<span class="thumb-wrap${{cssClass.includes('wz-img') ? ' wide' : ''}}">`
+    return `<span class="thumb-wrap">`
       + `<img class="${{cssClass}}" src="${{small}}" data-full="${{full}}" data-front-small="${{small}}" data-front-full="${{full}}" `
       + `data-back-small="${{scryfallImg(scryfallId, 'small', 'back')}}" data-back-full="${{scryfallImg(scryfallId, 'normal', 'back')}}" alt="" loading="lazy" decoding="async">`
       + `<button type="button" class="flip-btn" title="Show the other face">&#8635;</button></span>`;
@@ -1740,6 +1753,58 @@ document.addEventListener('click', (e) => {{
   thumb.dataset.full = showingBack ? thumb.dataset.frontFull : thumb.dataset.backFull;
   thumb.dataset.showingBack = showingBack ? '0' : '1';
   if (hoverPreview && hoverPreview.classList.contains('show')) hoverPreview.src = thumb.dataset.full;
+}}, true);
+
+// Lightbox: the hover preview is too small to read a card's rules text, so
+// clicking a card image opens it large. Capture phase for the same reason as
+// the flip button -- the image sits inside tiles/rows with their own click
+// actions. Only for the collection grid and what's already in the deck (tiles,
+// deck rows, commander slot) -- not the Suggest / Quick suggest / Optimize
+// views, where an image click keeps its own meaning.
+const lightbox = document.getElementById('card-lightbox');
+const lightboxImg = document.getElementById('lightbox-img');
+const lightboxFlip = document.getElementById('lightbox-flip');
+let lightboxThumb = null;
+function largeUrl(url) {{ return url ? url.replace('/normal/', '/large/') : url; }}
+function showLightboxFace() {{
+  const back = lightboxThumb.dataset.showingBack === '1';
+  lightboxImg.src = largeUrl(back ? lightboxThumb.dataset.backFull : (lightboxThumb.dataset.frontFull || lightboxThumb.dataset.full));
+}}
+function openLightbox(thumb) {{
+  if (!thumb || !(thumb.dataset.frontFull || thumb.dataset.full)) return;
+  lightboxThumb = thumb;
+  lightboxFlip.hidden = !thumb.dataset.backFull;
+  showLightboxFace();
+  if (hoverPreview) hoverPreview.classList.remove('show');
+  lightbox.hidden = false;
+}}
+function closeLightbox() {{
+  lightbox.hidden = true;
+  lightboxImg.removeAttribute('src');
+  lightboxThumb = null;
+}}
+function flipLightbox() {{
+  if (!lightboxThumb || !lightboxThumb.dataset.backFull) return;
+  const showingBack = lightboxThumb.dataset.showingBack === '1';
+  lightboxThumb.src = showingBack ? lightboxThumb.dataset.frontSmall : lightboxThumb.dataset.backSmall;
+  lightboxThumb.dataset.full = showingBack ? lightboxThumb.dataset.frontFull : lightboxThumb.dataset.backFull;
+  lightboxThumb.dataset.showingBack = showingBack ? '0' : '1';
+  showLightboxFace();
+}}
+document.addEventListener('click', (e) => {{
+  if (!lightbox.hidden) {{
+    if (e.target.closest('#lightbox-flip') || e.target === lightboxImg) {{ e.stopPropagation(); flipLightbox(); return; }}
+    if (e.target.closest('#lightbox-close') || e.target === lightbox) {{ e.stopPropagation(); closeLightbox(); }}
+    return;
+  }}
+  const img = e.target.closest('img.card-thumb');
+  if (!img || !img.closest('.builder-tile, .deck-row, .commander-slot')) return;  // not in the Suggest / Quick suggest / Optimize views
+  e.preventDefault();
+  e.stopPropagation();
+  openLightbox(img);
+}}, true);
+document.addEventListener('keydown', (e) => {{
+  if (e.key === 'Escape' && !lightbox.hidden) {{ e.stopPropagation(); e.preventDefault(); closeLightbox(); }}
 }}, true);
 
 const hoverPreview = document.getElementById('hover-preview');
