@@ -892,6 +892,22 @@ body::after {
 .builder-tile .edhrec-badge { display:inline-flex; align-items:center; gap:4px; font-size:0.72rem; margin-top:4px; color:var(--text-dim); }
 .builder-tile .edhrec-badge.ranked { color:var(--gold); font-weight:600; }
 .builder-tile.hidden { display:none; }
+/* Foil printings get the same hover shimmer as the compare report's tiles: a
+   soft rainbow glow that follows the pointer (position set from JS). */
+.builder-tile.foil { overflow:hidden; --mx:50%; --my:50%; }
+.builder-tile.foil::before {
+  content:""; position:absolute; inset:0; z-index:0; pointer-events:none;
+  background: radial-gradient(circle at var(--mx) var(--my),
+    rgba(255,255,255,0.22) 0%, rgba(120,200,255,0.14) 25%, rgba(255,80,220,0.12) 45%, transparent 70%);
+  mix-blend-mode:soft-light; opacity:0; transition:opacity 0.7s ease;
+}
+.builder-tile.foil:hover::before { opacity:1; }
+.builder-tile.foil > * { position:relative; z-index:1; }
+.foil-tag {
+  display:inline-block; margin-left:6px; padding:1px 6px; border-radius:999px; font-size:0.65rem;
+  text-transform:uppercase; letter-spacing:0.03em; color:var(--text-dim); background:var(--card-border);
+  vertical-align:middle; font-weight:400;
+}
 .tile-corner-actions { display:flex; align-items:flex-end; gap:4px; flex-shrink:0; align-self:flex-start; }
 /* Card view: thumb | text, with the mana-cost pips on their own line under the
    text (so a long type line never has to share a row with them) and the
@@ -1819,6 +1835,16 @@ document.addEventListener('keydown', (e) => {{
   if (e.key === 'Escape' && !lightbox.hidden) {{ e.stopPropagation(); e.preventDefault(); closeLightbox(); }}
 }}, true);
 
+// Foil shimmer: move the glow's centre with the pointer (delegated, since the
+// grid's tiles are rebuilt on every filter change).
+document.getElementById('collection-grid').addEventListener('mousemove', (e) => {{
+  const tile = e.target.closest('.builder-tile.foil');
+  if (!tile) return;
+  const rect = tile.getBoundingClientRect();
+  tile.style.setProperty('--mx', ((e.clientX - rect.left) / rect.width * 100) + '%');
+  tile.style.setProperty('--my', ((e.clientY - rect.top) / rect.height * 100) + '%');
+}});
+
 const hoverPreview = document.getElementById('hover-preview');
 function setupHoverPreview(container) {{
   container.addEventListener('mousemove', (e) => {{
@@ -2347,7 +2373,7 @@ function renderGrid() {{
 
   cards.forEach(card => {{
     const tile = document.createElement('div');
-    tile.className = 'builder-tile';
+    tile.className = 'builder-tile' + (card.foil ? ' foil' : '');
     tile.dataset.full = scryfallImg(card.scryfall_id, 'normal') || '';
     const legality = legalityFor(card);
     const warnHtml = (legality && legality !== 'Legal') ? `<div class="warn">&#9888; ${{legality}} in ${{brew.format === 'commander' ? 'Commander' : brew.target_format}}</div>` : '';
@@ -2367,7 +2393,7 @@ function renderGrid() {{
     tile.innerHTML = `
       ${{thumbHtml(card.scryfall_id, 'card-thumb', card.layout)}}
       <div class="tile-body">
-        <div class="name"><span class="name-text">${{card.name}}</span></div>
+        <div class="name"><span class="name-text">${{card.name}}</span>${{card.foil ? '<span class="foil-tag">Foil</span>' : ''}}</div>
         <div class="meta">${{card.type_line || 'Unknown type'}} &middot; CMC ${{card.cmc}} &middot; own ${{card.quantity}}</div>
         ${{warnHtml}}
         ${{popularityHtml}}

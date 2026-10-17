@@ -1123,6 +1123,8 @@ def owned_collection_gameplay_view(owned: dict[str, OwnedCard], gameplay: dict[s
             "edhrec_rank": gp.get("edhrec_rank"),
             "copy_limit": card_copy_limit(gp.get("type_line"), gp.get("oracle_text")),
             "layout": gp.get("layout") or "",
+            # Whether the printing shown on the tile (and its image) is foil.
+            "foil": bool(printing and (printing.foil or printing.etched)),
         })
     view.sort(key=lambda c: c["name"])
     return view
