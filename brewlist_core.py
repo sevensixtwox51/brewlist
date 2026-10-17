@@ -18,6 +18,7 @@ import math
 import os
 import re
 import subprocess
+import threading
 import time
 import unicodedata
 import urllib.error
@@ -1476,6 +1477,43 @@ def scryfall_prices_in_index(path: str = PRICE_INDEX_PATH) -> dict[str, dict]:
         return {}
 
 
+# The price index is ~70 MB of JSON, and every accessor below used to re-read
+# and re-parse the whole file on each call (~0.35 s apiece; the Deck Builder's
+# first page load made several at once and they fought over the interpreter,
+# which is the 3-4 s "Loading your collection..." wait). The sections the
+# builder and reports read on every request are parsed ONCE per file version
+# and kept; the two bulk price sections (prices, scryfall_prices) are not
+# worth holding in memory and are still read on demand.
+_HOT_INDEX_KEYS = (
+    "gameplay", "sets", "commander_legality", "game_changers",
+    "budget_alt_tag_by_name", "budget_alt_tag_labels", "budget_alt_groups",
+)
+_hot_index_cache: dict = {"key": None, "data": {}}
+_hot_index_lock = threading.Lock()
+
+
+def _hot_index_section(name: str, path: str):
+    """One cached section of the price index, or None if the file can't be
+    read. Re-parses only when the file's mtime/size change (i.e. after a
+    rebuild); concurrent first callers wait for a single parse."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    key = (path, st.st_mtime_ns, st.st_size)
+    with _hot_index_lock:
+        if _hot_index_cache["key"] != key:
+            try:
+                with open(path, encoding="utf-8") as f:
+                    data = json.load(f)
+            except (OSError, ValueError):
+                return None
+            _hot_index_cache["data"] = {k: data.get(k) for k in _HOT_INDEX_KEYS}
+            _hot_index_cache["key"] = key
+            del data
+        return _hot_index_cache["data"].get(name)
+
+
 def budget_alt_data_in_index(path: str = PRICE_INDEX_PATH) -> dict:
     """Returns {"tag_by_name": {name: tag_id}, "tag_labels": {tag_id: label},
     "groups": {tag_id: [[name, display_name], ...]}} -- "which cards share a
@@ -1488,16 +1526,11 @@ def budget_alt_data_in_index(path: str = PRICE_INDEX_PATH) -> dict:
     have this data yet (predates this field, or the Oracle Tags download
     failed the last time the index was built -- best-effort, see
     rebuild_price_index)."""
-    try:
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-        return {
-            "tag_by_name": data.get("budget_alt_tag_by_name") or {},
-            "tag_labels": data.get("budget_alt_tag_labels") or {},
-            "groups": data.get("budget_alt_groups") or {},
-        }
-    except (OSError, ValueError):
-        return {"tag_by_name": {}, "tag_labels": {}, "groups": {}}
+    return {
+        "tag_by_name": _hot_index_section("budget_alt_tag_by_name", path) or {},
+        "tag_labels": _hot_index_section("budget_alt_tag_labels", path) or {},
+        "groups": _hot_index_section("budget_alt_groups", path) or {},
+    }
 
 
 def commander_legality_in_index(path: str = PRICE_INDEX_PATH) -> dict[str, str]:
@@ -1506,11 +1539,7 @@ def commander_legality_in_index(path: str = PRICE_INDEX_PATH) -> dict[str, str]:
     (see rebuild_price_index/ensure_price_index -- call that first to make
     sure the index is actually present/fresh). Empty dict if the index
     doesn't exist or predates this field."""
-    try:
-        with open(path, encoding="utf-8") as f:
-            return json.load(f).get("commander_legality") or {}
-    except (OSError, ValueError):
-        return {}
+    return _hot_index_section("commander_legality", path) or {}
 
 
 def game_changers_in_index(path: str = PRICE_INDEX_PATH) -> set[str]:
@@ -1519,11 +1548,7 @@ def game_changers_in_index(path: str = PRICE_INDEX_PATH) -> set[str]:
     rebuild_price_index/ensure_price_index -- call that first to make sure
     the index is actually present/fresh). Empty set if the index doesn't
     exist or predates this field."""
-    try:
-        with open(path, encoding="utf-8") as f:
-            return set(json.load(f).get("game_changers") or [])
-    except (OSError, ValueError):
-        return set()
+    return set(_hot_index_section("game_changers", path) or [])
 
 
 # --------------------------------------------------------------------------
@@ -1607,11 +1632,7 @@ def gameplay_data_in_index(path: str = PRICE_INDEX_PATH) -> dict[str, dict]:
     ai_builder.py's "Build with AI" import/improve mode reads it
     unfiltered to search/reason about cards the player doesn't own. See
     gameplay_by_name in rebuild_price_index for how this is populated."""
-    try:
-        with open(path, encoding="utf-8") as f:
-            return json.load(f).get("gameplay") or {}
-    except (OSError, ValueError):
-        return {}
+    return _hot_index_section("gameplay", path) or {}
 
 
 def prices_data_in_index(path: str = PRICE_INDEX_PATH) -> dict[str, dict]:
@@ -1638,11 +1659,7 @@ def sets_data_in_index(path: str = PRICE_INDEX_PATH) -> dict[str, dict]:
     dict if the index doesn't exist or predates this field. Used by the
     deck builder's Set Selection filter to label/sort the sets the user
     actually owns cards from."""
-    try:
-        with open(path, encoding="utf-8") as f:
-            return json.load(f).get("sets") or {}
-    except (OSError, ValueError):
-        return {}
+    return _hot_index_section("sets", path) or {}
 
 
 def ensure_price_index(path: str = PRICE_INDEX_PATH, on_progress=None, force_refresh: bool = False) -> dict[str, dict]:
