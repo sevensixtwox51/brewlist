@@ -1056,7 +1056,7 @@ a.unowned-badge { cursor:pointer; }
 a.unowned-badge:hover { background:color-mix(in srgb, var(--gold) 28%, transparent); }
 
 /* ---- Guided Suggest wizard (see openWizard in the builder script) ---- */
-.modal-box.wizard-box { max-width:min(1040px, 96vw); height:min(88vh, 860px); max-height:none; }
+.modal-box.wizard-box { max-width:min(1560px, 97vw); height:min(92vh, 1000px); max-height:none; }
 .wizard-box .modal-body { padding:10px 18px 18px; }
 .wizard-box .modal-footer { justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; }
 .wizard-box .modal-footer > .btn { margin:0; }
@@ -1076,7 +1076,7 @@ a.unowned-badge:hover { background:color-mix(in srgb, var(--gold) 28%, transpare
 .wz-warn { margin:6px 0; padding:6px 10px; border-radius:8px; font-size:0.8rem; color:var(--gold); border:1px solid color-mix(in srgb, var(--gold) 45%, var(--card-border)); background:color-mix(in srgb, var(--gold) 8%, transparent); }
 .wz-group-title { margin:16px 0 6px; font-size:0.85rem; }
 .wz-sub { margin:12px 0 6px; font-size:0.72rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.04em; }
-.wz-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(128px, 1fr)); gap:10px; }
+.wz-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(136px, 1fr)); gap:10px; }
 .wz-tile { position:relative; border:2px solid var(--card-border); border-radius:10px; padding:6px; cursor:pointer; background:var(--bg); opacity:0.62; transition:opacity .12s, border-color .12s; }
 .wz-tile:hover { opacity:1; }
 .wz-tile.selected { opacity:1; border-color:var(--owned); background:color-mix(in srgb, var(--owned) 7%, var(--bg)); }
