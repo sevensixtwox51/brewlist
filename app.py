@@ -1043,6 +1043,11 @@ body.compact .thumb-wrap { display:none; }
 .wz-badge-row .unowned-badge + .filler-badge { margin-left:4px; }
 .import-text { width:100%; min-height:240px; box-sizing:border-box; padding:10px 12px; border-radius:8px; border:1px solid var(--card-border); background:var(--bg); color:var(--text); font-family:ui-monospace, Menlo, monospace; font-size:0.8rem; resize:vertical; }
 .import-opt { display:flex; align-items:center; gap:8px; margin-top:8px; font-size:0.85rem; cursor:pointer; }
+.qty-mini { width:18px; height:18px; padding:0; border-radius:50%; border:1px solid var(--card-border); background:var(--bg-elevated); color:var(--text); font-size:0.8rem; line-height:1; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; }
+.qty-mini:hover:not(:disabled) { color:var(--accent); border-color:var(--accent); }
+.qty-mini:disabled { opacity:0.35; cursor:default; }
+.wz-copies, .row-copies { display:inline-flex; align-items:center; gap:4px; margin-left:4px; vertical-align:middle; }
+.wz-copies b, .row-copies b { min-width:16px; text-align:center; font-size:0.78rem; font-variant-numeric:tabular-nums; }
 .wz-qty { margin-left:4px; font-size:0.72rem; padding:0 5px; border-radius:6px; background:color-mix(in srgb, var(--accent) 22%, transparent); color:var(--accent); font-weight:700; }
 .wz-basics { margin:10px 0 4px; }
 .wz-basic-rows { display:flex; flex-direction:column; gap:6px; }
@@ -2834,7 +2839,7 @@ function wizardBasicsHtml(step) {{
         + '</div>';
     }}).join('') + '</div></div>';
 }}
-function wizardStepSelectedCount(step) {{ return wizardCards(step).filter(c => wizard.selected.has(wizardKey(c))).reduce((n, c) => n + (c.quantity || 1), 0) + wizardBasicCount(step); }}
+function wizardStepSelectedCount(step) {{ return wizardCards(step).filter(c => wizard.selected.has(wizardKey(c))).reduce((n, c) => n + cardQty(c), 0) + wizardBasicCount(step); }}
 function wizardTotalSelected() {{ return wizard.steps.reduce((n, s) => n + wizardStepSelectedCount(s), 0); }}
 
 function wizardLoadPools(requestId) {{
@@ -2974,6 +2979,23 @@ function fillerBadgeHtml(card) {{
   return isFiller(card) ? '<span class="filler-badge" title="' + FILLER_TIP + '">Slot filler</span>' : '';
 }}
 
+// Multi-copy cards (Nazgul, Relentless Rats, ...) are suggested at their full
+// allowed count, but you may want fewer. pickQty is the player's own number;
+// until they touch the stepper the suggested quantity stands.
+function cardQty(c) {{ return c.pickQty !== undefined ? c.pickQty : (c.quantity || 1); }}
+function adjustableCopies(c) {{ return c.owned !== false && c.basis !== 'basic' && maxCopies(c.name) > 1; }}
+function stepCopies(c, delta) {{
+  c.pickQty = Math.max(1, Math.min(maxCopies(c.name), cardQty(c) + delta));
+  return c.pickQty;
+}}
+function copiesStepperHtml(c, extraAttrs, cls) {{
+  const q = cardQty(c), max = maxCopies(c.name);
+  return '<span class="' + cls + '" title="How many copies to add (you own ' + max + ' usable)" ' + extraAttrs + '>'
+    + '<button type="button" class="qty-mini" data-copies-act="dec"' + (q <= 1 ? ' disabled' : '') + '>&minus;</button>'
+    + '<b>' + q + '</b>'
+    + '<button type="button" class="qty-mini" data-copies-act="inc"' + (q >= max ? ' disabled' : '') + '>+</button></span>';
+}}
+
 function wizardTileHtml(card) {{
   const sel = wizard.selected.has(wizardKey(card));
   const priceText = card.price != null ? ' &middot; $' + card.price.toFixed(2) : '';
@@ -2988,7 +3010,7 @@ function wizardTileHtml(card) {{
     + '<div class="wz-check" aria-hidden="true">&#10003;</div>'
     + '<button type="button" class="wz-avoid" title="Never suggest this card again for this deck" data-avoid="' + escapeHtml(wizardKey(card)) + '">&#128683;</button>'
     + thumbHtml(card.scryfall_id, 'card-thumb wz-img', card.layout)
-    + '<div class="wz-name">' + escapeHtml(card.name) + (card.quantity > 1 ? ' <span class="wz-qty" title="This card allows several copies; all of them are suggested">&times;' + card.quantity + '</span>' : '') + gc + '</div>'
+    + '<div class="wz-name">' + escapeHtml(card.name) + (adjustableCopies(card) ? ' ' + copiesStepperHtml(card, 'data-copies-key="' + escapeHtml(wizardKey(card)) + '"', 'wz-copies') : (card.quantity > 1 ? ' <span class="wz-qty" title="This card allows several copies; all of them are suggested">&times;' + card.quantity + '</span>' : '')) + gc + '</div>'
     + '<div class="wz-reason" title="' + escapeHtml(card.reason) + '">' + escapeHtml(card.reason) + '</div>'
     + (badges ? '<div class="wz-badge-row">' + badges + '</div>' : '')
     + '</div>';
@@ -3095,6 +3117,17 @@ wizardBody.addEventListener('click', (e) => {{
     wizardRefresh();
     return;
   }}
+  const copiesBtn = e.target.closest('[data-copies-act]');
+  if (copiesBtn) {{
+    const key = copiesBtn.closest('[data-copies-key]').dataset.copiesKey;
+    const card = wizardCards(wizard.steps[wizard.idx]).find(c => wizardKey(c) === key);
+    if (card) {{
+      stepCopies(card, copiesBtn.dataset.copiesAct === 'inc' ? 1 : -1);
+      wizard.selected.add(key);  // choosing a number means you want the card
+      wizardRefresh();
+    }}
+    return;
+  }}
   if (e.target.closest('a')) return; // purchase links just open
   const avoidBtn = e.target.closest('[data-avoid]');
   if (avoidBtn) {{
@@ -3156,7 +3189,7 @@ function finishWizard() {{
   wizard.steps.forEach(step => wizardCards(step).forEach(c => {{
     if (wizard.selected.has(wizardKey(c)) && !findCard(c.name)) toAdd.push(c);
   }}));
-  toAdd.forEach(c => addCard(c, c.quantity || 1));
+  toAdd.forEach(c => addCard(c, cardQty(c)));
   let basicsAdded = 0;
   wizard.steps.forEach(step => step.basics.forEach(b => {{
     const n = wizard.basicQty[b.name] || 0;
@@ -3165,7 +3198,7 @@ function finishWizard() {{
   closeWizard();
   const panel = document.getElementById('suggestions-panel');
   const unowned = toAdd.filter(c => c.owned === false);
-  const addedTotal = toAdd.reduce((n, c) => n + (c.quantity || 1), 0) + basicsAdded;
+  const addedTotal = toAdd.reduce((n, c) => n + cardQty(c), 0) + basicsAdded;
   let html = '<div class="hint" style="margin:0 0 6px;">Added ' + addedTotal + ' card' + (addedTotal === 1 ? '' : 's') + (basicsAdded ? ' (including ' + basicsAdded + ' basic lands)' : '') + ' from your guided picks. Use Optimize, Analyze or the swap button on any card to keep refining.</div>';
   if (unowned.length) {{
     const total = unowned.reduce((sum, c) => sum + (c.price || 0), 0);
@@ -3226,7 +3259,7 @@ suggestBtn.addEventListener('click', () => {{
       let remaining = data.suggestions.slice();
       const addAllBtn = Object.assign(document.createElement('button'), {{
         className: 'btn ghost small', style: 'margin-bottom:8px;margin-right:8px;',
-        onclick: () => {{ remaining.forEach(sg => addCard(sg, sg.quantity || 1)); panel.innerHTML = ''; }},
+        onclick: () => {{ remaining.forEach(sg => addCard(sg, cardQty(sg))); panel.innerHTML = ''; }},
       }});
       const dismissAllBtn = Object.assign(document.createElement('button'), {{
         className: 'btn ghost small', textContent: 'Dismiss All', style: 'margin-bottom:8px;',
@@ -3234,7 +3267,7 @@ suggestBtn.addEventListener('click', () => {{
         onclick: () => {{ panel.innerHTML = ''; }},
       }});
       function refreshAddAllBtn() {{
-        addAllBtn.textContent = `+ Add All (${{remaining.reduce((n, sg) => n + (sg.quantity || 1), 0)}})`;
+        addAllBtn.textContent = `+ Add All (${{remaining.reduce((n, sg) => n + cardQty(sg), 0)}})`;
         addAllBtn.style.display = remaining.length ? '' : 'none';
         dismissAllBtn.style.display = remaining.length ? '' : 'none';
       }}
@@ -3266,7 +3299,18 @@ suggestBtn.addEventListener('click', () => {{
                 ? `<a class="unowned-badge" href="${{s.price_url}}" target="_blank" rel="noopener" title="Buy this card">Not owned${{priceText}}</a>`
                 : `<span class="unowned-badge">Not owned${{priceText}}</span>`)
             : '';
-          row.innerHTML = `<span class="row-name">${{thumbHtml(s.scryfall_id, 'card-thumb small', s.layout)}}<span>${{s.name}}${{s.quantity > 1 ? ' <b>&times;' + s.quantity + '</b>' : ''}} ${{colorIconsHtml(s.color_identity)}}${{priceBadge}}${{fillerBadgeHtml(s)}}<div class="reason">${{s.reason}}</div></span></span>`;
+          row.innerHTML = `<span class="row-name">${{thumbHtml(s.scryfall_id, 'card-thumb small', s.layout)}}<span>${{s.name}}${{adjustableCopies(s) ? ' ' + copiesStepperHtml(s, '', 'row-copies') : (s.quantity > 1 ? ' <b>&times;' + s.quantity + '</b>' : '')}} ${{colorIconsHtml(s.color_identity)}}${{priceBadge}}${{fillerBadgeHtml(s)}}<div class="reason">${{s.reason}}</div></span></span>`;
+          row.addEventListener('click', (ev) => {{
+            const btn = ev.target.closest('[data-copies-act]');
+            if (!btn) return;
+            ev.stopPropagation();
+            stepCopies(s, btn.dataset.copiesAct === 'inc' ? 1 : -1);
+            const stepper = row.querySelector('.row-copies');
+            stepper.querySelector('b').textContent = cardQty(s);
+            stepper.querySelector('[data-copies-act="dec"]').disabled = cardQty(s) <= 1;
+            stepper.querySelector('[data-copies-act="inc"]').disabled = cardQty(s) >= maxCopies(s.name);
+            refreshAddAllBtn();
+          }});
           const dropRow = () => {{
             row.remove();
             remaining = remaining.filter(x => x !== s);
@@ -3277,7 +3321,7 @@ suggestBtn.addEventListener('click', () => {{
           const addBtn = Object.assign(document.createElement('button'), {{
             className: 'btn ghost tile-icon-btn', textContent: '+',
             title: s.owned === false ? "Add to deck (not owned -- you'll need to pick this up)" : 'Add to deck',
-            onclick: () => {{ addCard(s, s.quantity || 1); dropRow(); }},
+            onclick: () => {{ addCard(s, cardQty(s)); dropRow(); }},
           }});
           const avoidBtn = Object.assign(document.createElement('button'), {{
             className: 'btn ghost tile-icon-btn', textContent: '🚫', title: 'Never suggest this card again for this deck',
