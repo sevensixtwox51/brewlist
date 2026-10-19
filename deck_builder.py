@@ -1047,6 +1047,60 @@ def _tribe_members(candidates: list[dict], tribe: str, changelings: bool = False
     return out
 
 
+# Gap-filler fit. When a role's EDHREC-backed cards run out, the leftover slots
+# went to whichever owned cards were most popular overall, so every black deck
+# got the same Midnight Reaper / God-Eternal Bontu. Fillers are now ordered by
+# how many Oracle Tags they share with what the deck is already playing.
+_ROLE_DEFINING_TAGS = frozenset(label for labels in _ROLE_TAG_LABELS.values() for label in labels)
+_card_tag_cache: dict = {"groups_id": None, "tags": {}, "size": {}}
+
+
+def _card_tag_index(groups: dict) -> tuple[dict[str, tuple[str, ...]], dict[str, int]]:
+    """({normalized card name: tag ids it carries}, {tag id: member count}),
+    rebuilt only when the (cached) groups object changes."""
+    if _card_tag_cache["groups_id"] != id(groups):
+        tags: dict[str, list[str]] = {}
+        size: dict[str, int] = {}
+        for tag_id, entries in groups.items():
+            members = [e[0] for e in entries if e]
+            size[tag_id] = len(members)
+            for nm in members:
+                tags.setdefault(nm, []).append(tag_id)
+        _card_tag_cache.update(groups_id=id(groups), tags={k: tuple(v) for k, v in tags.items()}, size=size)
+    return _card_tag_cache["tags"], _card_tag_cache["size"]
+
+
+def _fit_weights(profile_names: list[str], commander_name: str | None, groups: dict, tag_labels: dict) -> dict[str, float]:
+    """Tag weights for what the deck is about: how many of its backed cards
+    carry the tag (the commander counts triple), scaled down for tags so common
+    they say nothing ("mana sink", "attacking matters"). Role-defining tags
+    (the Draw/Removal/Ramp ones every filler shares) are left out."""
+    tags_by_name, size = _card_tag_index(groups)
+    total = max(1, len(tags_by_name))
+    counts: dict[str, float] = {}
+    for nm in profile_names:
+        for t in tags_by_name.get(nm, ()):
+            counts[t] = counts.get(t, 0.0) + 1.0
+    if commander_name:
+        for t in tags_by_name.get(normalize_name(commander_name), ()):
+            counts[t] = counts.get(t, 0.0) + 3.0
+    return {
+        t: c * math.log(1.0 + total / max(1, size.get(t, 1)))
+        for t, c in counts.items()
+        if tag_labels.get(t, t) not in _ROLE_DEFINING_TAGS
+    }
+
+
+def _fit_score(nm: str, weights: dict[str, float], groups: dict) -> tuple[float, list[str]]:
+    """(score, strongest shared tag ids) for one card."""
+    tags_by_name, _ = _card_tag_index(groups)
+    tags = tags_by_name.get(nm, ())
+    shared = sorted((t for t in tags if t in weights), key=lambda t: -weights[t])
+    if not shared:
+        return 0.0, []
+    return sum(weights[t] for t in shared) / math.sqrt(len(tags)), shared[:2]
+
+
 def _rank_octave(c: dict) -> int:
     """Overall popularity in bands of a factor of two (#1-1, #2-3, #4-7, ...
     #2,048-4,095 is one band). Lets the "cheaper first" tiebreak decide only
@@ -1866,6 +1920,9 @@ def suggest_builder_cards(
                     if nm in _members:
                         tribal_boost.add(nm)
 
+    fit_tier: dict[str, int] = {}  # 0-3, filled once the backed picks are known (see below)
+    fit_why: dict[str, str] = {}
+
     def rank_key(c: dict):
         nm = normalize_name(c["name"])
         # EDHREC synergy sits right after combo-completion and ahead of the
@@ -1908,7 +1965,9 @@ def suggest_builder_cards(
             # (Elspeth, Sun's Champion carries it, but her -3 destroys the
             # Voltron commander too) and shouldn't override "no 6-drops".
             not (voltron_commander and nm in one_sided_wipes and not _hits_own_board(c, nm, symmetric_wipes, one_sided_wipes)),
-            _rank_octave(c),  # similar popularity first...
+            _rank_octave(c) // 2,  # popularity in coarse bands (x4) first, so a fit score can't lift an obscure card over a popular one...
+            -fit_tier.get(nm, 0),  # ...within a band, fillers that share tags with the deck's own cards first...
+            _rank_octave(c),  # ...then finer popularity...
             min(_effective_cmc(c), 6),  # ...then cheaper (usually better when nothing else separates two cards)
             _overall_rank(c),
             c["name"],
@@ -2012,6 +2071,44 @@ def suggest_builder_cards(
         role_candidates.setdefault(role_of(c["name"], c["category"]), []).append(c)
     for pool in role_candidates.values():
         pool.sort(key=rank_key)
+
+    # Gap-filler fit: profile the deck by the backed cards each role is about to
+    # pick (plus the commander), score every candidate by shared Oracle Tags, and
+    # re-sort so fillers that fit this deck come before ones that merely rank
+    # well everywhere.
+    fit_thresholds: list[float] = []
+    fit_weights: dict[str, float] = {}
+    fit_groups = budget_alt.get("groups") or {}
+    if deck_format == "commander" and fit_groups:
+        def _is_backed(nm: str) -> bool:
+            return nm in reason_by_name or nm in theme_reason_by_name or synergy_by_name.get(nm, 0.0) >= _MEANINGFUL_SYNERGY
+        profile_names: list[str] = []
+        for _role, _pool in role_candidates.items():
+            if _role == "Lands":
+                continue
+            profile_names += [normalize_name(c["name"]) for c in _pool if _is_backed(normalize_name(c["name"]))][: max(1, slots_needed.get(_role, 0))]
+        fit_weights = _fit_weights(profile_names, commander_entry.name if commander_entry else None, fit_groups, tag_labels)
+        scored = {}
+        for _role, _pool in role_candidates.items():
+            if _role == "Lands":
+                continue
+            for c in _pool:
+                nm = normalize_name(c["name"])
+                scored[nm] = _fit_score(nm, fit_weights, fit_groups)
+        positives = sorted(v[0] for v in scored.values() if v[0] > 0)
+        if len(positives) >= 3:
+            fit_thresholds = [positives[len(positives) // 2], positives[int(len(positives) * 0.85)]]
+        def _tier_of(score: float) -> int:
+            if score <= 0 or not fit_thresholds:
+                return 0
+            return 1 + (score >= fit_thresholds[0]) + (score >= fit_thresholds[1])
+        for nm, (score, shared) in scored.items():
+            t = _tier_of(score)
+            if t:
+                fit_tier[nm] = t
+                fit_why[nm] = ", ".join(tag_labels.get(x, x) for x in shared)
+        for pool in role_candidates.values():
+            pool.sort(key=rank_key)
 
     # Quality floor for the support roles (see _FILLER_RANK_FLOOR).
     too_obscure: dict[str, list[dict]] = {}
@@ -2421,6 +2518,16 @@ def suggest_builder_cards(
         )
         for c in unowned_candidates:
             unowned_by_role.setdefault(role_of(c["name"], c["category"]), []).append(c)
+        if fit_weights and fit_thresholds:
+            for pool in unowned_by_role.values():
+                for c in pool:
+                    nm = normalize_name(c["name"])
+                    if nm not in fit_tier:
+                        score, shared = _fit_score(nm, fit_weights, fit_groups)
+                        t = 0 if score <= 0 else 1 + (score >= fit_thresholds[0]) + (score >= fit_thresholds[1])
+                        if t:
+                            fit_tier[nm] = t
+                            fit_why[nm] = ", ".join(tag_labels.get(x, x) for x in shared)
         for role, pool in unowned_by_role.items():
             pool.sort(key=rank_key)
     if gameplay and has_gap:
@@ -2505,6 +2612,8 @@ def suggest_builder_cards(
             rank = c.get("edhrec_rank")
             if basis == "filler":
                 fallback_reason = f"not on EDHREC's list for your commander's decks; picked to fill {role}" + (f" (overall popularity #{rank})" if rank else "")
+                if fit_why.get(nm):
+                    fallback_reason += f"; shares {fit_why[nm]} with your picks"
             elif basis == "edhrec":
                 fallback_reason = f"played in EDHREC decks for this commander (no distinctive synergy); fills out {role}"
             out["reason"] = reason_by_name.get(nm) or synergy_reason or theme_reason_by_name.get(nm) or fallback_reason
