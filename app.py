@@ -38,6 +38,7 @@ from brewlist_core import (
     deck_is_commander_format,
     deck_key,
     ensure_price_index,
+    ensure_printing_info_async,
     extract_entries,
     fetch_deck,
     gameplay_data_in_index,
@@ -4102,6 +4103,10 @@ def builder_collection_data():
         owned = load_collection(COLLECTION_PATH)
     except ValueError as e:
         return jsonify(error=str(e)), 400
+    # Art data for printings of cards owned more than once is fetched in the
+    # background (cached forever after); the view below uses whatever is cached
+    # so far to show the nicer printing.
+    ensure_printing_info_async(p.scryfall_id for oc in owned.values() if len(oc.printings) > 1 for p in oc.printings)
     cards = owned_collection_gameplay_view(owned, gameplay_data_in_index())
     image_versions = scryfall_image_versions([(c.get("scryfall_id"), c.get("set_code")) for c in cards])
     return jsonify(cards=cards, image_versions=image_versions)

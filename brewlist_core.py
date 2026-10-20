@@ -1470,11 +1470,7 @@ def scryfall_prices_in_index(path: str = PRICE_INDEX_PATH) -> dict[str, dict]:
     ManaBox's recorded Scryfall ID to the exact printing you hold) --
     fetch_scryfall_prices_by_id() falls back to a live lookup only for IDs
     missing here (e.g. a printing too new for the last index build)."""
-    try:
-        with open(path, encoding="utf-8") as f:
-            return json.load(f).get("scryfall_prices") or {}
-    except (OSError, ValueError):
-        return {}
+    return _hot_index_section("scryfall_prices", path) or {}
 
 
 # The price index is ~70 MB of JSON, and every accessor below used to re-read
@@ -1485,7 +1481,7 @@ def scryfall_prices_in_index(path: str = PRICE_INDEX_PATH) -> dict[str, dict]:
 # and kept; the two bulk price sections (prices, scryfall_prices) are not
 # worth holding in memory and are still read on demand.
 _HOT_INDEX_KEYS = (
-    "gameplay", "sets", "commander_legality", "game_changers",
+    "gameplay", "sets", "commander_legality", "game_changers", "scryfall_prices",
     "budget_alt_tag_by_name", "budget_alt_tag_labels", "budget_alt_groups",
 )
 _hot_index_cache: dict = {"key": None, "data": {}}
@@ -1618,6 +1614,158 @@ def scryfall_image_versions(printings: list[tuple[str, str]], path: str = IMAGE_
         except OSError:
             pass
     return {sid: cache[sid]["v"] for sid in recent if (cache.get(sid) or {}).get("v")}
+
+
+# --------------------------------------------------------------------------
+# Printing art. A card owned in several printings (Vraska, Soul of Stone as the
+# regular and the borderless one) was always shown as whichever the collection
+# listed first. Scryfall says how each printing looks (border, full art, frame
+# effects, language); that never changes for a printing, so it is fetched once
+# and cached, and the "nicer" printing is shown.
+# --------------------------------------------------------------------------
+
+PRINTING_INFO_PATH = os.path.join(_CORE_DIR, "data", "printing_info.json")
+_printing_info_cache: dict = {"mtime": None, "data": {}}
+
+
+def _read_printing_info() -> dict:
+    try:
+        mtime = os.path.getmtime(PRINTING_INFO_PATH)
+    except OSError:
+        return {}
+    if _printing_info_cache["mtime"] != mtime:
+        try:
+            with open(PRINTING_INFO_PATH, encoding="utf-8") as f:
+                _printing_info_cache["data"] = json.load(f)
+            _printing_info_cache["mtime"] = mtime
+        except (OSError, ValueError):
+            return {}
+    return _printing_info_cache["data"]
+
+
+def printing_art_score(scryfall_id: str | None) -> int:
+    """How striking this printing's art treatment is, from cached Scryfall
+    data only (0 when unknown or plain): borderless and full-art frames,
+    showcase / extended-art / inverted frames; a non-English card scores low
+    so it never beats a readable one."""
+    info = _read_printing_info().get(scryfall_id or "") or {}
+    if not info:
+        return 0
+    score = 0
+    if info.get("b") == "borderless":
+        score += 4
+    if info.get("fa"):
+        score += 3
+    effects = set(info.get("fe") or [])
+    if "showcase" in effects:
+        score += 3
+    if "extendedart" in effects:
+        score += 2
+    if "inverted" in effects:
+        score += 1
+    if info.get("l") and info["l"] != "en":
+        score -= 3
+    return score
+
+
+def best_printing(printings: list, prices: dict | None = None) -> "OwnedPrinting | None":
+    """The owned printing to show: the one with the most striking art
+    treatment (borderless / full art / showcase, from cached Scryfall data), a
+    foil one next, then the pricier one -- price is a good stand-in for
+    "the nicer printing" and is what decides while the art data is still being
+    fetched -- then the collection's own order. `prices` is the per-printing
+    price table (scryfall_prices_in_index) if the caller already has it."""
+    if not printings:
+        return None
+    if len(printings) == 1:
+        return printings[0]
+    if prices is None:
+        prices = scryfall_prices_in_index()
+
+    def price(p) -> float:
+        v = price_for_printing(prices.get(p.scryfall_id) or {}, p)
+        return v if v is not None else 0.0
+
+    return max(
+        enumerate(printings),
+        key=lambda ip: (printing_art_score(ip[1].scryfall_id), 1 if (ip[1].foil or ip[1].etched) else 0, price(ip[1]), -ip[0]),
+    )[1]
+
+
+def ensure_printing_info(scryfall_ids, max_fetch: int = 450) -> int:
+    """Fetch and cache art data for printings not seen yet (Scryfall's
+    75-per-request collection endpoint). At most `max_fetch` ids per call so a
+    first load stays quick -- the rest are picked up on the next one. Network
+    failures just leave the cache as it was; never raises. Returns how many
+    ids were fetched."""
+    import time as _time
+    cache = dict(_read_printing_info())
+    need = [sid for sid in dict.fromkeys(scryfall_ids) if sid and sid not in cache][:max_fetch]
+    fetched = 0
+    for i in range(0, len(need), 75):
+        chunk = need[i:i + 75]
+        try:
+            req = urllib.request.Request(
+                "https://api.scryfall.com/cards/collection",
+                data=json.dumps({"identifiers": [{"id": sid} for sid in chunk]}).encode(),
+                headers={"User-Agent": "brewlist/1.0 (personal use)", "Accept": "application/json", "Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                found = json.loads(resp.read().decode("utf-8")).get("data") or []
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+            break
+        seen = set()
+        for card in found:
+            seen.add(card.get("id"))
+            cache[card["id"]] = {
+                "b": card.get("border_color"), "fa": bool(card.get("full_art")),
+                "fe": card.get("frame_effects") or [], "l": card.get("lang"),
+            }
+        for sid in chunk:
+            cache.setdefault(sid, {})  # not found: remember, don't ask again
+        fetched += len(chunk)
+        _time.sleep(0.11)  # Scryfall asks for <=10 requests/second
+    if fetched:
+        try:
+            os.makedirs(os.path.dirname(PRINTING_INFO_PATH), exist_ok=True)
+            tmp = f"{PRINTING_INFO_PATH}.{os.getpid()}.tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(cache, f)
+            os.replace(tmp, PRINTING_INFO_PATH)
+        except OSError:
+            pass
+    return fetched
+
+
+_printing_fetch_lock = threading.Lock()
+_printing_fetch_running = False
+
+
+def ensure_printing_info_async(scryfall_ids) -> None:
+    """Start fetching any missing printing art data on a background thread and
+    return immediately -- the first run needs ~10 Scryfall requests, which
+    must not hold up the page. Printings are picked up as the cache fills, on
+    the next load. At most one fetch runs at a time."""
+    global _printing_fetch_running
+    ids = list(scryfall_ids)
+    cache = _read_printing_info()
+    if not any(sid and sid not in cache for sid in ids):
+        return
+    with _printing_fetch_lock:
+        if _printing_fetch_running:
+            return
+        _printing_fetch_running = True
+
+    def _work():
+        global _printing_fetch_running
+        try:
+            while ensure_printing_info(ids, max_fetch=150):
+                pass
+        finally:
+            with _printing_fetch_lock:
+                _printing_fetch_running = False
+
+    threading.Thread(target=_work, daemon=True).start()
 
 
 def gameplay_data_in_index(path: str = PRICE_INDEX_PATH) -> dict[str, dict]:
@@ -1908,7 +2056,7 @@ def select_used_printings(
     go into this deck, preferring the finish the decklist wants first. Returns
     (picks, remainder) where remainder is copies not covered by any printing
     that has a Scryfall ID on file (e.g. a row that failed to match on import)."""
-    printings = sorted(owned_card.printings, key=lambda p: p.foil != prefer_foil)
+    printings = sorted(owned_card.printings, key=lambda p: (p.foil != prefer_foil, -printing_art_score(p.scryfall_id)))
     remaining = owned_used
     picks: list[tuple[OwnedPrinting, int]] = []
     for p in printings:

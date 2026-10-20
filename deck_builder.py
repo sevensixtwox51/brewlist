@@ -23,12 +23,14 @@ from brewlist_core import (
     CardEntry,
     OwnedCard,
     WOTC_BRACKET_GAME_CHANGER_MAX,
+    best_printing,
     budget_alt_data_in_index,
     categorize,
     find_deck_combos,
     game_changers_in_index,
     normalize_name,
     prices_data_in_index,
+    scryfall_prices_in_index,
 )
 from edhrec_data import commander_profile, commander_synergy_cards, commander_theme_page
 
@@ -1156,11 +1158,12 @@ def owned_collection_gameplay_view(owned: dict[str, OwnedCard], gameplay: dict[s
     through so an exported decklist can request that exact printing back
     on import instead of whatever a site defaults to."""
     view = []
+    _printing_prices = scryfall_prices_in_index()
     for name, owned_card in owned.items():
         gp = gameplay.get(name)
         if not gp:
             continue
-        printing = owned_card.printings[0] if owned_card.printings else None
+        printing = best_printing(owned_card.printings, _printing_prices)
         view.append({
             "name": gp.get("name") or name,
             "quantity": owned_card.total,
