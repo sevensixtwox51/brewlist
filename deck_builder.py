@@ -774,6 +774,7 @@ _DRAW_VARIABLE_RE = re.compile(r"\bdraws? (?:a card for each|cards? equal to|x c
 _EXILE_PLAY_RE = re.compile(r"exile the top (a|one|two|three|four|five|x|\d+)? ?cards? of (?:your|their) library")
 _DISCARD_RE = re.compile(r"discard (a|an|one|two|three|four|x|\d+) cards?\b")
 _PUT_BACK_RE = re.compile(r"put (a|an|one|two|three|four|\d+) cards? from your hand (?:on top of|into) (?:your|their) library")
+_LATER_DISCARD_RE = re.compile(r"^(?:then |if you do, |and )?(?:you )?discard (a|an|one|two|three|four|x|\d+) cards?\b")
 _SELF_PUT_BACK_RE = re.compile(r"put [^.]*? on top of (?:its owner's|your) library")
 _REPEATABLE_RE = re.compile(r"whenever|at the beginning of|\{t\}|each (?:upkeep|turn|end step)|\bdies\b|\bleaves the battlefield\b")
 
@@ -796,7 +797,8 @@ def _net_cards_drawn(c: dict) -> tuple[int, bool] | None:
       # hand. If you do, draw four cards." (Sauron) counts as one repeatable
       # effect even though the draw is in a later sentence.
       line_repeatable = (not is_spell) and bool(_REPEATABLE_RE.search(line))
-      for sentence in re.split(r"(?<=[.])\s+", line):
+      sentences = re.split(r"(?<=[.])\s+", line)
+      for sent_idx, sentence in enumerate(sentences):
         if "would draw" in sentence:
             continue  # replacement effect (Teferi's Ageless Insight), not card draw
         if _DRAW_VARIABLE_RE.search(sentence):
@@ -820,6 +822,15 @@ def _net_cards_drawn(c: dict) -> tuple[int, bool] | None:
             if dm:
                 put_back = put_back or rx is _PUT_BACK_RE
                 g = dm.group(1)
+                net -= _NUM_WORDS.get(g) or (3 if g == "x" else (int(g) if g.isdigit() else 1))
+        # A discard in a LATER sentence of the same ability still belongs to the
+        # draw ("Draw two cards. Then discard a card unless ..."): Chart a Course,
+        # Thirst for Knowledge. Only your own discard counts -- one before the draw
+        # (Sauron's "discard your hand. If you do, draw four cards") is a cost.
+        for later in sentences[sent_idx + 1:]:
+            lm = _LATER_DISCARD_RE.match(later)
+            if lm:
+                g = lm.group(1)
                 net -= _NUM_WORDS.get(g) or (3 if g == "x" else (int(g) if g.isdigit() else 1))
         if not put_back and _SELF_PUT_BACK_RE.search(sentence):
             net -= 1  # e.g. Sensei's Divining Top: draws, then puts itself back on top
