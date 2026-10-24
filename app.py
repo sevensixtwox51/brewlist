@@ -1446,11 +1446,11 @@ def render_builder_page(deck_id: str | None = None) -> str:
         <details class="mix-targets-field" id="mix-targets-field">
           <summary>Deck mix targets</summary>
           <div class="mix-targets-grid">
-            <label title="Standard is the default shape. Commander Challenge (38 lands, 12 ramp, 13 card draw, 12 interaction) follows that YouTube channel&#39;s seven-step process and suits value-heavy decks; Command Zone (38/10/12/18) follows the Command Zone podcast template; Low-Curve Aggro (36/6/8/10) is a lean creature-heavy shape modelled on a real Edgar Markov Vampires list. Presets just fill the numbers below.">Template
+            <label title="Command Zone (38 lands, 10 ramp, 12 card draw, 18 interaction) follows the Command Zone podcast template and is the default; Classic (37/10/10/15) is the previous default; Commander Challenge (38/12/13/12) follows that YouTube channel&#39;s seven-step process and suits value-heavy decks; Low-Curve Aggro (36/6/8/10) is a lean creature-heavy shape modelled on a real Edgar Markov Vampires list. Presets just fill the numbers below.">Template
               <select id="mix-template">
-                <option value="standard">Standard</option>
+                <option value="commandzone">Command Zone (default)</option>
+                <option value="standard">Classic</option>
                 <option value="commanderchallenge">Commander Challenge</option>
-                <option value="commandzone">Command Zone</option>
                 <option value="lowcurveaggro">Low-Curve Aggro</option>
                 <option value="custom" hidden>Custom</option>
               </select>

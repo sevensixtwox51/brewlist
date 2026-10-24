@@ -563,25 +563,25 @@ def commander_deck_shape_targets(deck_format: str, target_size: int) -> dict[str
     11-Interaction default while Analyze displayed 15), which is exactly
     why every auto-built deck looked "light on interaction": Suggest was
     hitting the number it was told to hit, just not the number shown next
-    to it. For a 100-card Commander deck: ~37 lands, ~10 ramp, ~10 card
-    draw, ~15 removal + board wipes combined (the player's own 10 removal
-    + 5 wipes), and the rest as win conditions/synergy -- scaled
+    to it. For a 100-card Commander deck the default is the Command Zone
+    template: 38 lands (Karsten's formula lands at 36-40 for typical average
+    mana values), 10 ramp, 12 card draw, 18 interaction (targeted removal +
+    mass disruption), and the rest as win conditions/synergy -- scaled
     proportionally for a different target size. Non-Commander just gets a
     lands target (CONSTRUCTED_LAND_FRACTION) -- constructed archetypes
     vary too much for a single generic ramp/draw/interaction split to mean
     anything."""
     if deck_format == "commander":
-        lands = round(target_size * 0.37)
-        ramp = round(target_size * 0.10)
-        draw = round(target_size * 0.10)
-        interaction = round(target_size * 0.15)
+        f = TEMPLATE_FRACTIONS["commandzone"]
+        lands, ramp, draw, interaction = (round(target_size * f[r]) for r in ("Lands", "Ramp", "Draw", "Interaction"))
         return {"Lands": lands, "Ramp": ramp, "Draw": draw, "Interaction": interaction, "Synergy": target_size - lands - ramp - draw - interaction}
     lands = round(target_size * CONSTRUCTED_LAND_FRACTION)
     return {"Lands": lands, "Ramp": None, "Draw": None, "Interaction": None, "Synergy": target_size - lands}
 
 
-# Named presets for the Deck mix targets box. "standard" IS the default
-# (commander_deck_shape_targets) and is never redefined here. The others come
+# Named presets for the Deck mix targets box. "commandzone" IS the default
+# (commander_deck_shape_targets); "standard" is the previous default (37/10/10/15).
+# The others come
 # from two public deck-building walkthroughs that agree on the big numbers
 # (38 lands; 10-12 ramp; 12+ real card advantage) and differ on the rest.
 # Counts are for a 100-card deck; Synergy is always the remainder of the 99.
@@ -602,6 +602,8 @@ _CURVE_LOOKAHEAD = 60
 _MIN_CARDS_FOR_SOURCE_FLOOR = 6
 
 TEMPLATE_FRACTIONS = {
+    # The old default (37/10/10/15), kept as a preset now that Command Zone is the default.
+    "standard": {"Lands": 0.37, "Ramp": 0.10, "Draw": 0.10, "Interaction": 0.15},
     "commanderchallenge": {"Lands": 0.38, "Ramp": 0.12, "Draw": 0.13, "Interaction": 0.12},
     "commandzone": {"Lands": 0.38, "Ramp": 0.10, "Draw": 0.12, "Interaction": 0.18},
     # Built from a real Edgar Markov Vampires list: 33 cards at MV 1-2, 4 ramp,
@@ -613,7 +615,7 @@ TEMPLATE_FRACTIONS = {
 def deck_templates(target_size: int = 100) -> dict[str, dict[str, int]]:
     """{template_key: {"Lands","Ramp","Draw","Interaction"}} for the mix-targets
     preset menu. Synergy is always the remainder."""
-    templates = {"standard": {k: v for k, v in commander_deck_shape_targets("commander", target_size).items() if k != "Synergy"}}
+    templates = {}
     for key, fractions in TEMPLATE_FRACTIONS.items():
         templates[key] = {role: round(target_size * frac) for role, frac in fractions.items()}
     return templates
