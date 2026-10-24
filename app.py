@@ -3397,8 +3397,11 @@ suggestBtn.addEventListener('click', () => {{
         const header = document.createElement('div');
         header.className = 'hint';
         header.style.cssText = 'margin:10px 0 4px;font-weight:600;';
-        let catRemaining = byCategory[cat].length;
-        header.textContent = `${{cat}} (${{catRemaining}})`;
+        // Counted in cards, not rows: a basic-land row or a Nazgul row stands for several copies
+        // (the header used to say "Lands (24)" for a batch that added 37 lands).
+        let catRows = byCategory[cat].slice();
+        const updateCatHeader = () => {{ header.textContent = `${{cat}} (${{catRows.reduce((n, sg) => n + cardQty(sg), 0)}})`; }};
+        updateCatHeader();
         panel.appendChild(header);
         byCategory[cat].forEach(s => {{
           const row = document.createElement('div');
@@ -3432,13 +3435,14 @@ suggestBtn.addEventListener('click', () => {{
             stepper.querySelector('[data-copies-act="dec"]').disabled = cardQty(s) <= 1;
             stepper.querySelector('[data-copies-act="inc"]').disabled = cardQty(s) >= maxCopies(s.name);
             refreshAddAllBtn();
+            updateCatHeader();
           }});
           const dropRow = () => {{
             row.remove();
             remaining = remaining.filter(x => x !== s);
             refreshAddAllBtn();
-            catRemaining -= 1;
-            if (catRemaining <= 0) header.remove(); else header.textContent = `${{cat}} (${{catRemaining}})`;
+            catRows = catRows.filter(x => x !== s);
+            if (!catRows.length) header.remove(); else updateCatHeader();
           }};
           const addBtn = Object.assign(document.createElement('button'), {{
             className: 'btn ghost tile-icon-btn', textContent: '+',
