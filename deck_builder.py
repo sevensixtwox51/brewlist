@@ -334,6 +334,10 @@ _INCIDENTAL_BURN_KEY = "_incidental_burn"
 _PERMANENT_CATEGORIES = ("Creatures", "Artifacts", "Enchantments")
 
 
+_OTHER_PLAYER_SEARCH_RE = re.compile(r"(?:its controller|its owner|that player|target player|that creature's controller|defending player) may search")
+_OWN_RAMP_RE = re.compile(r"\byou may search\b|search your library|each player may search|add \{|mana of any|\btreasure\b")
+
+
 def _role_member_names(groups: dict, tag_labels: dict) -> dict[str, frozenset[str]]:
     """{role: {normalized_card_name, ...}} -- the real, full membership of
     every _ROLE_TAG_LABELS tag for each role, from budget_alt_data_in_
@@ -385,19 +389,31 @@ def _role_member_names(groups: dict, tag_labels: dict) -> dict[str, frozenset[st
     # Bitterblossom, the Form of the ... enchantments) and were being picked to
     # complete the Draw role. Keep such a card as Draw only if its text actually
     # draws or impulse-draws.
+    gameplay = gameplay_data_in_index()
     dwd_id = label_to_id.get("deal with the devil")
     if dwd_id:
         dwd = {e[0] for e in (groups.get(dwd_id) or []) if e}
         other_draw: set[str] = set()
         for label in _ROLE_TAG_LABELS["Draw"] - {"deal with the devil"}:
             other_draw |= {e[0] for e in (groups.get(label_to_id.get(label)) or []) if e}
-        gameplay = gameplay_data_in_index()
         not_draw = {
             nm for nm in dwd - other_draw
             if _net_cards_drawn({"oracle_text": (gameplay.get(nm) or {}).get("oracle_text", ""), "type_line": (gameplay.get(nm) or {}).get("type_line", "")}) is None
         }
         if not_draw:
             result["Draw"] = frozenset(result["Draw"] - not_draw)
+    # Land-fetch removal that gives the land to the OTHER player (Path to Exile:
+    # "its controller may search their library for a basic land") carries the land
+    # ramp tags but ramps you not at all -- it sat in a Kaalia deck as one of the
+    # ten Ramp cards. A card is only dropped when the text names someone else as
+    # the searcher and gives you no search or mana of your own.
+    elsewhere = {
+        nm for nm in result["Ramp"]
+        if _OTHER_PLAYER_SEARCH_RE.search((gameplay.get(nm) or {}).get("oracle_text", "").lower())
+        and not _OWN_RAMP_RE.search((gameplay.get(nm) or {}).get("oracle_text", "").lower())
+    }
+    if elsewhere:
+        result["Ramp"] = frozenset(result["Ramp"] - elsewhere)
     return result
 
 
