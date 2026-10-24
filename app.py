@@ -54,7 +54,12 @@ from brewlist_core import (
     update_from_git,
 )
 from deck_builder import (
+    KARSTEN_BASE,
+    KARSTEN_PER_CHEAP,
+    KARSTEN_PER_MV,
+    LANDS_MATTER_TYPES,
     auto_deck_mix,
+    karsten_correction,
     deck_karsten,
     commander_deck_shape_targets,
     deck_shape_targets_with_mix,
@@ -1695,6 +1700,14 @@ function setMixTargets(values) {{
     document.getElementById('mix-' + role.toLowerCase()).value = values[role];
   }});
 }}
+// The server rebuilds once with a corrected Lands number when Karsten's formula on
+// the deck it just built disagrees with the estimate by 2+ lands; show that here.
+function applyMixCorrection(fix) {{
+  if (!fix || !mixAuto) return;
+  setMixTargets({{ ...brew.mix_targets, Lands: fix.Lands }});
+  document.getElementById('mix-auto-explain').textContent = fix.explain || '';
+  updateSynergyReadout();
+}}
 let autoMixRequest = 0;
 function refreshAutoMix() {{
   if (!mixAuto) return;
@@ -2896,7 +2909,7 @@ function wizardLoadPools(requestId) {{
     method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
     body: JSON.stringify({{
       cards: brew.cards, commander: brew.commander, format: brew.format, target_format: brew.target_format,
-      mix_targets: brew.mix_targets, intended_bracket: brew.intended_bracket,
+      mix_targets: brew.mix_targets, mix_auto: mixAuto, intended_bracket: brew.intended_bracket,
       preferred_theme_tag_ids: brew.preferred_theme_tag_ids, preferred_theme_label: brew.preferred_theme_label,
       edhrec_theme: brew.edhrec_theme,
       excluded_set_codes: brew.excluded_set_codes, excluded_card_names: brew.excluded_card_names,
@@ -2906,6 +2919,7 @@ function wizardLoadPools(requestId) {{
     .then(data => {{
       if (requestId !== wizard.requestId || !wizardModal.classList.contains('show')) return; // closed/reopened while loading
       if (data.error) {{ closeWizard(); showError(data.error); return; }}
+      applyMixCorrection(data.mix_correction);
       startWizard(data);
     }})
     .catch(() => {{
@@ -3315,7 +3329,7 @@ suggestBtn.addEventListener('click', () => {{
   document.getElementById('suggestions-panel').innerHTML = '<div class="hint" style="margin:0;">Finding suggestions...</div>';
   const batchBody = JSON.stringify({{
     cards: brew.cards, commander: brew.commander, format: brew.format, target_format: brew.target_format,
-    mix_targets: brew.mix_targets, intended_bracket: brew.intended_bracket,
+    mix_targets: brew.mix_targets, mix_auto: mixAuto, intended_bracket: brew.intended_bracket,
     preferred_theme_tag_ids: brew.preferred_theme_tag_ids, preferred_theme_label: brew.preferred_theme_label,
     edhrec_theme: brew.edhrec_theme,
     excluded_set_codes: brew.excluded_set_codes, excluded_card_names: brew.excluded_card_names,
@@ -3334,6 +3348,7 @@ suggestBtn.addEventListener('click', () => {{
     .then(r => r.json())
     .then(data => {{
       if (data.error) {{ showError(data.error); return; }}
+      applyMixCorrection(data.mix_correction);
       const panel = document.getElementById('suggestions-panel');
       panel.innerHTML = '<h4 style="font-size:0.8rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.03em;">Suggestions</h4>';
       if (!data.suggestions.length) {{
@@ -4377,27 +4392,67 @@ def _run_suggest(body: dict, pools_out: dict | None = None, meta_out: dict | Non
         if role in raw_mix and isinstance(raw_mix[role], (int, float))
     } or None
     target_size = 100 if deck_format == "commander" else 60
-    suggestions = suggest_builder_cards(
-        wip_entries, owned_view, deck_format, body.get("target_format"),
-        target_size=target_size,
-        commander_color_identity=commander.get("color_identity") if deck_format == "commander" else None,
-        # Request everything still needed in one go (suggest_builder_cards
-        # caps this to however many slots are actually left) rather than
-        # the function's own small per-call default -- a fresh deck should
-        # get one big reviewable batch, not require clicking Suggest ~7
-        # times to reach a full 99/100 or 60/60.
-        max_suggestions=target_size,
-        mix_targets=mix_targets,
-        intended_bracket=body.get("intended_bracket") or None,
-        preferred_theme_tag_ids=body.get("preferred_theme_tag_ids") or None,
-        preferred_theme_label=body.get("preferred_theme_label") or None,
-        excluded_set_codes=_excluded_set_codes(body),
-        gameplay=gameplay,
-        excluded_card_names=_excluded_card_names(body),
-        pools_out=pools_out,
-        edhrec_theme=body.get("edhrec_theme") or None,
-        meta_out=meta_out,
-    )
+
+    def _build(mix):
+        return suggest_builder_cards(
+            wip_entries, owned_view, deck_format, body.get("target_format"),
+            target_size=target_size,
+            commander_color_identity=commander.get("color_identity") if deck_format == "commander" else None,
+            # Request everything still needed in one go (suggest_builder_cards
+            # caps this to however many slots are actually left) rather than
+            # the function's own small per-call default -- a fresh deck should
+            # get one big reviewable batch, not require clicking Suggest ~7
+            # times to reach a full 99/100 or 60/60.
+            max_suggestions=target_size,
+            mix_targets=mix,
+            intended_bracket=body.get("intended_bracket") or None,
+            preferred_theme_tag_ids=body.get("preferred_theme_tag_ids") or None,
+            preferred_theme_label=body.get("preferred_theme_label") or None,
+            excluded_set_codes=_excluded_set_codes(body),
+            gameplay=gameplay,
+            excluded_card_names=_excluded_card_names(body),
+            pools_out=pools_out,
+            edhrec_theme=body.get("edhrec_theme") or None,
+            meta_out=meta_out,
+        )
+
+    suggestions = _build(mix_targets)
+    # Auto (Karsten) mix: the Lands number was estimated before any cards were
+    # picked. Check it against the deck that actually came out (real average mana
+    # value, real cheap ramp/draw) and, if it is off by 2+ lands, rebuild once with
+    # the corrected number. The caller is told, so it can update the mix shown.
+    if body.get("mix_auto") and deck_format == "commander" and mix_targets and suggestions:
+        built = list(wip_entries) + [
+            CardEntry(name=s["name"], quantity=s.get("quantity", 1), type_line=s["type_line"], is_foil=False,
+                      section="mainboard", cmc=s.get("cmc") or 0)
+            for s in suggestions
+        ]
+        for e in built:
+            if not e.cmc and e.section != "commander":
+                e.cmc = (gameplay.get(normalize_name(e.name)) or {}).get("cmc") or 0
+        deck_label = (((meta_out or {}).get("deck_type")) or {}).get("value") or ""
+        adjust = 2 if deck_label.strip().lower() in LANDS_MATTER_TYPES else 0
+        fix = karsten_correction(built, mix_targets.get("Lands", 0), adjust)
+        if fix:
+            first_lands = mix_targets.get("Lands", 0)
+            if pools_out is not None:
+                pools_out.clear()
+            if meta_out is not None:
+                meta_out.clear()
+            mix_targets = {**mix_targets, "Lands": fix["Lands"]}
+            suggestions = _build(mix_targets)
+            if meta_out is not None:
+                meta_out["mix_correction"] = {
+                    "Lands": fix["Lands"], "was": first_lands,
+                    "explain": (
+                        f"Rebuilt with {fix['Lands']} lands instead of {first_lands}: the first pass came out at average mana value "
+                        f"{fix['avg_mv']} with {fix['cheap']} cheap ramp/draw cards, which Karsten's formula "
+                        f"({KARSTEN_BASE} + {KARSTEN_PER_MV} x {fix['avg_mv']} - {KARSTEN_PER_CHEAP} x {fix['cheap']} = {fix['formula']}"
+                        f"{' +' + str(adjust) + ' lands-matter' if adjust else ''}) puts at {fix['Lands']}."
+                    ),
+                }
+                if pools_out is not None:
+                    pools_out["mix_correction"] = meta_out["mix_correction"]
     return suggestions, None
 
 
@@ -4408,7 +4463,7 @@ def builder_suggest():
     suggestions, err = _run_suggest(body, meta_out=meta)
     if err:
         return jsonify(error=err[0]), err[1]
-    return jsonify(suggestions=suggestions, deck_type=meta.get("deck_type"))
+    return jsonify(suggestions=suggestions, deck_type=meta.get("deck_type"), mix_correction=meta.get("mix_correction"))
 
 
 @app.route("/builder/suggest-pools", methods=["POST"])

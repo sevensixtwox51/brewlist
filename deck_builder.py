@@ -631,7 +631,7 @@ def deck_templates(target_size: int = 100) -> dict[str, dict[str, int]]:
 KARSTEN_BASE, KARSTEN_PER_MV, KARSTEN_PER_CHEAP = 31.42, 3.13, 0.28
 CHEAP_SHARE_OF_RAMP_DRAW = 0.43
 AUTO_LANDS_MIN, AUTO_LANDS_MAX = 34, 41
-_LANDS_MATTER_TYPES = {"lands matter", "landfall", "lands", "land"}
+LANDS_MATTER_TYPES = {"lands matter", "landfall", "lands", "land"}
 
 
 def karsten_lands(avg_mv: float, cheap_count: float) -> float:
@@ -663,6 +663,21 @@ def deck_karsten(entries: list[CardEntry], role_members: dict[str, frozenset[str
     return {"lands_formula": round(karsten_lands(avg_mv, cheap), 1), "avg_mv": round(avg_mv, 2), "cheap": cheap, "lands_actual": lands}
 
 
+def karsten_correction(entries: list[CardEntry], current_lands: int, adjust: int = 0, threshold: int = 2) -> dict | None:
+    """The Auto preset's second look: Karsten's formula on the deck a build actually
+    produced (its real average mana value and cheap ramp/draw count). Returns
+    {"Lands": n, "formula": x, "avg_mv": ..., "cheap": ...} when the corrected
+    land count (with the same clamp and +adjust as the estimate) differs from
+    `current_lands` by at least `threshold`; None otherwise."""
+    k = deck_karsten(entries)
+    if not k:
+        return None
+    corrected = max(AUTO_LANDS_MIN, min(AUTO_LANDS_MAX, round(k["lands_formula"] + adjust)))
+    if abs(corrected - current_lands) < threshold:
+        return None
+    return {"Lands": corrected, "formula": k["lands_formula"], "avg_mv": k["avg_mv"], "cheap": k["cheap"]}
+
+
 def auto_deck_mix(commander_name: str | None, commander_card: dict | None, edhrec_theme: str | None = None, target_size: int = 100) -> dict:
     """The "Auto" preset: the Command Zone shape with Lands from Karsten's formula
     for this commander and deck type. Returns {"mix": {Lands, Ramp, Draw,
@@ -684,7 +699,7 @@ def auto_deck_mix(commander_name: str | None, commander_card: dict | None, edhre
     cheap = CHEAP_SHARE_OF_RAMP_DRAW * (base["Ramp"] + draw)
     raw = karsten_lands(emv, cheap)
     adjust, why = 0, []
-    if (deck_label or "").strip().lower() in _LANDS_MATTER_TYPES:
+    if (deck_label or "").strip().lower() in LANDS_MATTER_TYPES:
         adjust += 2
         why.append("+2 for a lands-matter deck")
     lands = max(AUTO_LANDS_MIN, min(AUTO_LANDS_MAX, round(raw + adjust)))
