@@ -334,6 +334,39 @@ _INCIDENTAL_BURN_KEY = "_incidental_burn"
 _PERMANENT_CATEGORIES = ("Creatures", "Artifacts", "Enchantments")
 
 
+
+# Text evidence per role. The Oracle Tags behind the roles say a card CAN do
+# something ("land ramp", "removal-sacrifice"), and several tags are broader than
+# the role they feed: Sun Titan, Agent of Treachery and Tergrid carry land-ramp
+# tags (they can return/steal a land) and were picked as Ramp, Ugin as Ramp,
+# Mabel as Interaction. A card stays in Ramp/Draw/Interaction only if its rules
+# text actually does that job. Multi-face cards are exempt: the card database
+# holds only the front face's text for them (Smaug's removal is on its back).
+_RAMP_EVIDENCE_RE = re.compile(
+    r"\badds? [^.]*mana|\badds? \{|\badds? an (?:amount|additional)|treasure"
+    r"|search (?:your|their) library for [^.]*(?:land|forest|island|swamp|mountain|plains)"
+    r"|(?:put|return)s? [^.]*\b(?:lands?|forest|island|swamp|mountain|plains)\b[^.]*(?:onto|to) the battlefield"
+    r"|\b(?:lands?|forest|island|swamp|mountain|plains)\b[^.]*\bput[s]? [^.]*onto the battlefield"
+    r"|until you reveal an? (?:basic )?land card|creates? [^.]*\blands?\b|(?:are|is) (?:an? )?(?:forest|island|swamp|mountain|plains|lands?)\b[^.]*in addition"
+    r"|additional lands?|untaps? [^.]*\b(?:lands?|forest|island|swamp|mountain|plains|artifacts?)\b|untap target permanent|untaps? up to \w+ target permanents"
+    r"|less to cast|landfall|mana abilit|lands? you control (?:have|gain)|you don't lose [^.]*mana"
+    r"|\{t\}: untap another target"
+)
+_DRAW_EVIDENCE_RE = re.compile(
+    r"\bdraws?\b|exile[sd]? the top|look at the top [^.]*hand|reveal the top [^.]*hand"
+    r"|you may (?:play|cast) (?:those|that|the|it|them|cards|lands)|put [^.]*into your hand"
+)
+_INTERACTION_EVIDENCE_RE = re.compile(
+    r"destroy|exile|counter target|counter (?:it|that|the|each)|deals? [^.]*damage|gets? [+−-]?x?/[−-]"
+    r"|gets? [−-]|[−-]x/[−-]x|[−-]\d/[−-]\d counters?|sacrifices the rest|counter all|put all [^.]*librar|controller sacrifices|return[s]? [^.]*to (?:its|their) owner|puts? it (?:into|on) [^.]*library|owner of target [^.]*puts"
+    r"|sacrifices? [^.]*(?:creatures?|permanents?|artifacts?|enchantments?|lands?)|annihilator|tap target|doesn.t untap"
+    r"|phase[s]? out|fights?|bite|can.t (?:attack|block)|put [^.]* (?:on (?:the )?(?:top|bottom) of|into) (?:its|their|your|a) [^.]*library"
+    r"|shuffles? it into|loses? all abilities|becomes? a|(?:is|are) a (?:colorless )?(?:\w+ )?(?:land|creature)|base power and toughness"
+    r"|can.t be (?:cast|activated)|target (?:spell|ability)|gain control|goad|stun|detain"
+)
+_ROLE_EVIDENCE = {"Ramp": _RAMP_EVIDENCE_RE, "Draw": _DRAW_EVIDENCE_RE, "Interaction": _INTERACTION_EVIDENCE_RE}
+_ROLE_EVIDENCE_ENABLED = True
+
 _OTHER_PLAYER_SEARCH_RE = re.compile(r"(?:its controller|its owner|that player|target player|that creature's controller|defending player) may search")
 _OWN_RAMP_RE = re.compile(r"\byou may search\b|search your library|each player may search|add \{|mana of any|\btreasure\b")
 
@@ -414,6 +447,19 @@ def _role_member_names(groups: dict, tag_labels: dict) -> dict[str, frozenset[st
     }
     if elsewhere:
         result["Ramp"] = frozenset(result["Ramp"] - elsewhere)
+    if _ROLE_EVIDENCE_ENABLED:
+        multi_face = {
+            normalize_name(face) for key in gameplay if "//" in key for face in key.split("//") if face.strip()
+        } | {key for key in gameplay if "//" in key}
+        for role, rx in _ROLE_EVIDENCE.items():
+            unproven = set()
+            for nm in result[role]:
+                card = gameplay.get(nm)
+                text = ((card or {}).get("oracle_text") or "").lower()
+                if card and text and nm not in multi_face and not rx.search(text):
+                    unproven.add(nm)
+            if unproven:
+                result[role] = frozenset(result[role] - unproven)
     return result
 
 
