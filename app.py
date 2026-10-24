@@ -1044,6 +1044,15 @@ body.compact .thumb-wrap { display:none; }
 .wz-badge-row .unowned-badge + .filler-badge { margin-left:4px; }
 .import-text { width:100%; min-height:240px; box-sizing:border-box; padding:10px 12px; border-radius:8px; border:1px solid var(--card-border); background:var(--bg); color:var(--text); font-family:ui-monospace, Menlo, monospace; font-size:0.8rem; resize:vertical; }
 .import-opt { display:flex; align-items:center; gap:8px; margin-top:8px; font-size:0.85rem; cursor:pointer; }
+.filler-link { cursor:pointer; text-decoration:underline dotted; text-underline-offset:2px; }
+.filler-link:hover { filter:brightness(1.2); }
+.buy-popup { position:fixed; z-index:270; width:360px; max-height:300px; overflow-y:auto; background:var(--bg-elevated); border:1px solid var(--card-border); border-radius:10px; box-shadow:var(--shadow); padding:8px; font-size:0.82rem; }
+.buy-head { padding:2px 4px 6px; font-size:0.72rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.03em; }
+.buy-item { display:flex; align-items:center; gap:8px; padding:6px 4px; border-top:1px solid var(--card-border); }
+.buy-item .buy-text { flex:1; min-width:0; display:flex; flex-direction:column; }
+.buy-item .reason { color:var(--text-dim); font-size:0.7rem; margin-top:1px; }
+.buy-item .buy-price { flex-shrink:0; font-weight:600; color:var(--gold); text-decoration:none; white-space:nowrap; }
+.buy-item a.buy-price:hover { text-decoration:underline; }
 .qty-mini { width:18px; height:18px; padding:0; border-radius:50%; border:1px solid var(--card-border); background:var(--bg-elevated); color:var(--text); font-size:0.8rem; line-height:1; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; }
 .qty-mini:hover:not(:disabled) { color:var(--accent); border-color:var(--accent); }
 .qty-mini:disabled { opacity:0.35; cursor:default; }
@@ -2976,6 +2985,48 @@ function setWizardFooter(opts) {{
 
 const FILLER_TIP = 'This card is not on EDHREC&#39;s list for this commander&#39;s decks (and has no combo or theme link here) -- it was picked only to fill a slot, ranked by overall popularity. It can still be a popular card elsewhere.';
 function isFiller(card) {{ return card.basis === 'filler'; }}
+// "Cards to buy instead" popup for a Slot filler pill in the Quick suggest list:
+// the best cards you don't own for the same role, from the same role pools the
+// guided wizard uses.
+let buyPopup = null;
+function closeBuyPopup() {{ if (buyPopup) {{ buyPopup.remove(); buyPopup = null; }} }}
+function openBuyPopup(anchor, suggestion, getPools) {{
+  closeBuyPopup();
+  const pop = document.createElement('div');
+  pop.className = 'buy-popup';
+  pop.innerHTML = '<div class="buy-head">Cards to buy instead &middot; ' + escapeHtml(suggestion.role) + '</div><div class="buy-body hint" style="margin:0;">Looking up cards to buy&hellip;</div>';
+  document.body.appendChild(pop);
+  buyPopup = pop;
+  const r = anchor.getBoundingClientRect();
+  const w = 360;
+  pop.style.left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8)) + 'px';
+  const below = r.bottom + 6;
+  pop.style.top = (below + 300 > window.innerHeight ? Math.max(8, r.top - 6 - 300) : below) + 'px';
+  getPools().then(pools => {{
+    if (buyPopup !== pop) return;
+    const step = (pools.steps || []).find(s => s.role === suggestion.role);
+    const options = ((step && step.unowned_alternates) || []).filter(c => !findCard(c.name)).slice(0, 12);
+    const body = pop.querySelector('.buy-body');
+    body.classList.remove('hint');
+    if (!options.length) {{ body.innerHTML = '<div class="hint" style="margin:0;">No purchase suggestions for this role.</div>'; return; }}
+    body.innerHTML = options.map(c => {{
+      const price = c.price != null ? '$' + c.price.toFixed(2) : '';
+      const buy = c.price_url
+        ? '<a class="buy-price" href="' + escapeHtml(c.price_url) + '" target="_blank" rel="noopener" title="Buy this card">' + price + ' &rarr;</a>'
+        : '<span class="buy-price">' + price + '</span>';
+      return '<div class="buy-item" data-full="' + (scryfallImg(c.scryfall_id, 'normal') || '') + '">'
+        + thumbHtml(c.scryfall_id, 'card-thumb small', c.layout)
+        + '<span class="buy-text"><b>' + escapeHtml(c.name) + '</b><span class="reason">' + escapeHtml(c.reason || '') + '</span></span>'
+        + buy + '</div>';
+    }}).join('');
+  }}).catch(() => {{
+    if (buyPopup === pop) pop.querySelector('.buy-body').textContent = 'Could not look up cards to buy.';
+  }});
+}}
+document.addEventListener('click', (e) => {{ if (buyPopup && !e.target.closest('.buy-popup')) closeBuyPopup(); }});
+document.addEventListener('keydown', (e) => {{ if (e.key === 'Escape') closeBuyPopup(); }});
+window.addEventListener('resize', closeBuyPopup);
+
 function fillerBadgeHtml(card) {{
   return isFiller(card) ? '<span class="filler-badge" title="' + FILLER_TIP + '">Slot filler</span>' : '';
 }}
@@ -3226,15 +3277,23 @@ suggestBtn.addEventListener('click', () => {{
   // commander whose EDHREC synergy data isn't cached yet costs a real
   // live fetch first.
   document.getElementById('suggestions-panel').innerHTML = '<div class="hint" style="margin:0;">Finding suggestions...</div>';
+  const batchBody = JSON.stringify({{
+    cards: brew.cards, commander: brew.commander, format: brew.format, target_format: brew.target_format,
+    mix_targets: brew.mix_targets, intended_bracket: brew.intended_bracket,
+    preferred_theme_tag_ids: brew.preferred_theme_tag_ids, preferred_theme_label: brew.preferred_theme_label,
+    edhrec_theme: brew.edhrec_theme,
+    excluded_set_codes: brew.excluded_set_codes, excluded_card_names: brew.excluded_card_names,
+  }});
+  // The "cards to buy instead" popup on a Slot filler pill needs the role pools
+  // (/builder/suggest-pools, ~1 s more than a plain suggest), so it is fetched
+  // the first time a pill is clicked, for this batch only.
+  let batchPools = null;
+  const getBatchPools = () => batchPools || (batchPools = fetch('/builder/suggest-pools', {{
+    method: 'POST', headers: {{ 'Content-Type': 'application/json' }}, body: batchBody,
+  }}).then(r => r.json()));
   fetch('/builder/suggest', {{
     method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
-    body: JSON.stringify({{
-      cards: brew.cards, commander: brew.commander, format: brew.format, target_format: brew.target_format,
-      mix_targets: brew.mix_targets, intended_bracket: brew.intended_bracket,
-      preferred_theme_tag_ids: brew.preferred_theme_tag_ids, preferred_theme_label: brew.preferred_theme_label,
-      edhrec_theme: brew.edhrec_theme,
-      excluded_set_codes: brew.excluded_set_codes, excluded_card_names: brew.excluded_card_names,
-    }}),
+    body: batchBody,
   }})
     .then(r => r.json())
     .then(data => {{
@@ -3301,6 +3360,17 @@ suggestBtn.addEventListener('click', () => {{
                 : `<span class="unowned-badge">Not owned${{priceText}}</span>`)
             : '';
           row.innerHTML = `<span class="row-name">${{thumbHtml(s.scryfall_id, 'card-thumb small', s.layout)}}<span>${{s.name}}${{adjustableCopies(s) ? ' ' + copiesStepperHtml(s, '', 'row-copies') : (s.quantity > 1 ? ' <b>&times;' + s.quantity + '</b>' : '')}} ${{colorIconsHtml(s.color_identity)}}${{priceBadge}}${{fillerBadgeHtml(s)}}<div class="reason">${{s.reason}}</div></span></span>`;
+          const fillerPill = row.querySelector('.filler-badge');
+          if (fillerPill) {{
+            fillerPill.classList.add('filler-link');
+            fillerPill.setAttribute('role', 'button');
+            fillerPill.tabIndex = 0;
+            fillerPill.title = 'Slot filler -- click to see cards you could buy for this slot instead';
+            fillerPill.textContent = 'Slot filler \u25BE';
+            const open = (ev) => {{ ev.stopPropagation(); openBuyPopup(fillerPill, s, getBatchPools); }};
+            fillerPill.addEventListener('click', open);
+            fillerPill.addEventListener('keydown', (ev) => {{ if (ev.key === 'Enter' || ev.key === ' ') {{ ev.preventDefault(); open(ev); }} }});
+          }}
           row.addEventListener('click', (ev) => {{
             const btn = ev.target.closest('[data-copies-act]');
             if (!btn) return;
