@@ -28,6 +28,7 @@ from brewlist_core import (
     categorize,
     find_deck_combos,
     game_changers_in_index,
+    gameplay_data_in_index,
     normalize_name,
     prices_data_in_index,
     scryfall_prices_in_index,
@@ -379,6 +380,24 @@ def _role_member_names(groups: dict, tag_labels: dict) -> dict[str, frozenset[st
             if label.startswith(("removal", "sweeper", "burn", "multi removal", "swap removal", "one-sided fight")):
                 real |= {e[0] for e in (groups.get(label_to_id.get(label)) or []) if e}
         result["Interaction"] = frozenset(result["Interaction"] - (end_turn - real))
+    # "deal with the devil" is "pay life for a benefit", not "draws cards": of the
+    # 35 cards whose only Draw tag it is, 26 draw nothing (Dreadhorde Invasion,
+    # Bitterblossom, the Form of the ... enchantments) and were being picked to
+    # complete the Draw role. Keep such a card as Draw only if its text actually
+    # draws or impulse-draws.
+    dwd_id = label_to_id.get("deal with the devil")
+    if dwd_id:
+        dwd = {e[0] for e in (groups.get(dwd_id) or []) if e}
+        other_draw: set[str] = set()
+        for label in _ROLE_TAG_LABELS["Draw"] - {"deal with the devil"}:
+            other_draw |= {e[0] for e in (groups.get(label_to_id.get(label)) or []) if e}
+        gameplay = gameplay_data_in_index()
+        not_draw = {
+            nm for nm in dwd - other_draw
+            if _net_cards_drawn({"oracle_text": (gameplay.get(nm) or {}).get("oracle_text", ""), "type_line": (gameplay.get(nm) or {}).get("type_line", "")}) is None
+        }
+        if not_draw:
+            result["Draw"] = frozenset(result["Draw"] - not_draw)
     return result
 
 
