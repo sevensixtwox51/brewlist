@@ -54,6 +54,8 @@ from brewlist_core import (
     update_from_git,
 )
 from deck_builder import (
+    auto_deck_mix,
+    deck_karsten,
     commander_deck_shape_targets,
     deck_shape_targets_with_mix,
     deck_templates,
@@ -1446,12 +1448,13 @@ def render_builder_page(deck_id: str | None = None) -> str:
         <details class="mix-targets-field" id="mix-targets-field">
           <summary>Deck mix targets</summary>
           <div class="mix-targets-grid">
-            <label title="Command Zone (38 lands, 10 ramp, 12 card draw, 18 interaction) follows the Command Zone podcast template and is the default; Classic (37/10/10/15) is the previous default; Commander Challenge (38/12/13/12) follows that YouTube channel&#39;s seven-step process and suits value-heavy decks; Low-Curve Aggro (36/6/8/10) is a lean creature-heavy shape modelled on a real Edgar Markov Vampires list. Presets just fill the numbers below.">Template
+            <label title="Command Zone (38 lands, 10 ramp, 12 card draw, 18 interaction) follows the Command Zone podcast template and is the default; Classic (37/10/10/15) is the previous default; Commander Challenge (38/12/13/12) follows that YouTube channel&#39;s seven-step process and suits value-heavy decks; Low-Curve Aggro (36/6/8/10) is a lean creature-heavy shape modelled on a real Edgar Markov Vampires list; Auto keeps the Command Zone shape but sets Lands from Karsten&#39;s formula for your commander and deck type. Presets just fill the numbers below.">Template
               <select id="mix-template">
                 <option value="commandzone">Command Zone (default)</option>
                 <option value="standard">Classic</option>
                 <option value="commanderchallenge">Commander Challenge</option>
                 <option value="lowcurveaggro">Low-Curve Aggro</option>
+                <option value="auto">Auto (Karsten)</option>
                 <option value="custom" hidden>Custom</option>
               </select>
             </label>
@@ -1460,6 +1463,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
             <label>Draw <input type="number" id="mix-draw" min="0" max="100"></label>
             <label>Interaction <input type="number" id="mix-interaction" min="0" max="100"></label>
             <span class="hint" id="mix-synergy-readout" style="margin:0;"></span>
+            <span class="hint" id="mix-auto-explain" style="margin:0; flex-basis:100%; display:none;"></span>
           </div>
         </details>
         <div class="set-selection-field">
@@ -1672,20 +1676,49 @@ function currentTemplateKey() {{
   }}
   return 'custom';
 }}
+// "Auto (Karsten)": the Command Zone shape with Lands from Karsten's formula for
+// the current commander and deck type (server: /builder/auto-mix). While it is
+// selected the numbers follow the commander / deck type; touching any number or
+// choosing another preset switches it off. Not saved -- the numbers are.
+let mixAuto = false;
 function updateSynergyReadout() {{
   const t = brew.mix_targets;
   const synergy = Math.max(0, 100 - (t.Lands + t.Ramp + t.Draw + t.Interaction));
   document.getElementById('mix-synergy-readout').textContent = `Synergy (remainder): ${{synergy}}`;
-  document.getElementById('mix-template').value = currentTemplateKey();
+  document.getElementById('mix-template').value = mixAuto ? 'auto' : currentTemplateKey();
+  document.getElementById('mix-auto-explain').style.display = mixAuto ? 'block' : 'none';
 }}
 updateSynergyReadout();
+function setMixTargets(values) {{
+  ['Lands', 'Ramp', 'Draw', 'Interaction'].forEach(role => {{
+    brew.mix_targets[role] = values[role];
+    document.getElementById('mix-' + role.toLowerCase()).value = values[role];
+  }});
+}}
+let autoMixRequest = 0;
+function refreshAutoMix() {{
+  if (!mixAuto) return;
+  const mine = ++autoMixRequest;
+  document.getElementById('mix-auto-explain').textContent = 'Working out lands from Karsten\u2019s formula\u2026';
+  fetch('/builder/auto-mix', {{
+    method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
+    body: JSON.stringify({{ commander: brew.commander, edhrec_theme: brew.edhrec_theme }}),
+  }})
+    .then(r => r.json())
+    .then(data => {{
+      if (mine !== autoMixRequest || !mixAuto || !data.mix) return;
+      setMixTargets(data.mix);
+      document.getElementById('mix-auto-explain').textContent = data.explain || '';
+      updateSynergyReadout();
+    }})
+    .catch(() => {{ if (mine === autoMixRequest) document.getElementById('mix-auto-explain').textContent = 'Could not reach the server.'; }});
+}}
 document.getElementById('mix-template').addEventListener('change', (e) => {{
+  if (e.target.value === 'auto') {{ mixAuto = true; updateSynergyReadout(); refreshAutoMix(); return; }}
+  mixAuto = false;
   const preset = DECK_TEMPLATES[e.target.value];
   if (!preset) return;
-  ['Lands', 'Ramp', 'Draw', 'Interaction'].forEach(role => {{
-    brew.mix_targets[role] = preset[role];
-    document.getElementById('mix-' + role.toLowerCase()).value = preset[role];
-  }});
+  setMixTargets(preset);
   updateSynergyReadout();
 }});
 
@@ -1713,6 +1746,7 @@ document.getElementById('deck-name').addEventListener('input', (e) => {{ brew.de
   document.getElementById('mix-' + role).addEventListener('input', (e) => {{
     const key = role.charAt(0).toUpperCase() + role.slice(1);
     brew.mix_targets[key] = Math.max(0, parseInt(e.target.value, 10) || 0);
+    mixAuto = false;
     updateSynergyReadout();
   }});
 }});
@@ -1950,9 +1984,10 @@ function setCommander(card) {{
   renderAll();
   loadThemeOptions();
   loadDeckTypes();
+  refreshAutoMix();
 }}
 
-function clearCommander() {{ brew.commander = null; brew.edhrec_theme = ''; renderAll(); loadThemeOptions(); loadDeckTypes(); }}
+function clearCommander() {{ brew.commander = null; brew.edhrec_theme = ''; renderAll(); loadThemeOptions(); loadDeckTypes(); refreshAutoMix(); }}
 
 function addCard(card, qty) {{
   const existing = findCard(card.name);
@@ -2143,7 +2178,7 @@ function loadDeckTypes() {{
     }})
     .catch(() => {{}});
 }}
-deckTypeSelect.addEventListener('change', () => {{ brew.edhrec_theme = deckTypeSelect.value; }});
+deckTypeSelect.addEventListener('change', () => {{ brew.edhrec_theme = deckTypeSelect.value; refreshAutoMix(); }});
 loadDeckTypes();
 
 let themeOptionsList = [];
@@ -2934,6 +2969,7 @@ function renderDeckTypeChoice() {{
 function confirmDeckType() {{
   const auto = wizard.deckTypes[0].slug;
   brew.edhrec_theme = wizard.pickedType === auto ? '' : wizard.pickedType;
+  refreshAutoMix();
   renderDeckTypeSelect();
   wizardLoadPools(wizard.requestId);
 }}
@@ -3989,7 +4025,20 @@ function renderDeckShape(data) {{
         <div class="shape-bar-track"><div class="shape-bar ${{cls}}" style="width:${{widthPct}}%"></div></div>
         <span class="shape-count">${{actual}} / ~${{target}}</span>
       </div>`;
-  }}).join('');
+  }}).join('') + karstenLineHtml(data);
+}}
+
+// Karsten's land formula on the deck as built (real average mana value and real
+// cheap ramp/draw count), next to the number of lands it actually has.
+function karstenLineHtml(data) {{
+  const k = data.karsten;
+  if (!k) return '';
+  const diff = k.lands_actual - k.lands_formula;
+  const verdict = Math.abs(diff) < 1.5 ? 'about right' : (diff < 0 ? 'light on lands' : 'heavy on lands');
+  const mv = k.avg_mv.toFixed(2);
+  return `<div class="hint karsten-note" style="margin:10px 0 0;" title="Frank Karsten's Commander formula: 31.42 + 3.13 x average mana value - 0.28 x cheap (MV 2 or less) ramp and card draw spells">`
+    + `<b>Karsten's land formula:</b> 31.42 + 3.13 &times; ${{mv}} &minus; 0.28 &times; ${{k.cheap}} &asymp; <b>${{k.lands_formula}}</b> lands `
+    + `(you have ${{k.lands_actual}} &mdash; ${{verdict}}). Rules of thumb add 2&ndash;3 for a lands-matter plan.</div>`;
 }}
 
 // Delegated (badges are re-rendered wholesale on every Analyze click, so
@@ -4379,6 +4428,16 @@ def builder_suggest_pools():
     return jsonify(pools)
 
 
+@app.route("/builder/auto-mix", methods=["POST"])
+def builder_auto_mix():
+    """The Auto deck-mix preset: Command Zone shape with Lands from Karsten's
+    formula for the chosen commander and deck type (see deck_builder.auto_deck_mix)."""
+    body = request.get_json(silent=True) or {}
+    name = (body.get("commander") or {}).get("name")
+    card = gameplay_data_in_index().get(normalize_name(name)) if name else None
+    return jsonify(auto_deck_mix(name, card, body.get("edhrec_theme") or None))
+
+
 @app.route("/builder/deck-types", methods=["POST"])
 def builder_deck_types():
     """The ways EDHREC says the chosen commander is built (its "tags":
@@ -4558,6 +4617,7 @@ def builder_stats():
         extra_turn_count=totals.get("extra_turn_count") or 0,
         is_commander_format=is_commander_format,
         role_counts=role_counts_for_entries(entries),
+        karsten=deck_karsten(entries) if is_commander_format else None,
         role_targets=deck_shape_targets_with_mix(
             deck_format, target_size, _mix_targets_from(body),
             commander_card=gameplay_data_in_index().get(normalize_name((body.get("commander") or {}).get("name") or "")),

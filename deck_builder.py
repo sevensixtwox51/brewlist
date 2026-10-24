@@ -621,6 +621,82 @@ def deck_templates(target_size: int = 100) -> dict[str, dict[str, int]]:
     return templates
 
 
+# Frank Karsten's Commander land formula: lands = 31.42 + 3.13 x (average mana
+# value of the nonland cards) - 0.28 x (number of cheap -- MV 2 or less -- mana
+# ramp and card draw spells). The mix can't know the finished deck's numbers up
+# front, so the Auto preset estimates them (EDHREC's average mana value for the
+# deck type; ~43% of the Ramp+Draw slots cheap, measured on 13 real builds,
+# where the estimate lands within ~1 land on average) and Analyze later checks
+# the real deck against the same formula.
+KARSTEN_BASE, KARSTEN_PER_MV, KARSTEN_PER_CHEAP = 31.42, 3.13, 0.28
+CHEAP_SHARE_OF_RAMP_DRAW = 0.43
+AUTO_LANDS_MIN, AUTO_LANDS_MAX = 34, 41
+_LANDS_MATTER_TYPES = {"lands matter", "landfall", "lands", "land"}
+
+
+def karsten_lands(avg_mv: float, cheap_count: float) -> float:
+    return KARSTEN_BASE + KARSTEN_PER_MV * avg_mv - KARSTEN_PER_CHEAP * cheap_count
+
+
+def deck_karsten(entries: list[CardEntry], role_members: dict[str, frozenset[str]] | None = None) -> dict | None:
+    """Karsten's number for a finished (or partial) commander deck, from its real
+    average mana value and cheap ramp/draw count: {lands_formula, avg_mv, cheap,
+    lands_actual}. None when the deck has no nonland cards."""
+    if role_members is None:
+        budget_alt = budget_alt_data_in_index()
+        role_members = _role_member_names(budget_alt["groups"], budget_alt["tag_labels"])
+    total = mv_sum = cheap = lands = 0
+    for e in entries:
+        if e.section == "commander":
+            continue
+        category = categorize(e.type_line)
+        if category in ("Lands", "Basic Lands"):
+            lands += e.quantity
+            continue
+        total += e.quantity
+        mv_sum += (e.cmc or 0) * e.quantity
+        if (e.cmc or 0) <= 2 and _card_role(e.name, category, role_members) in ("Ramp", "Draw"):
+            cheap += e.quantity
+    if not total:
+        return None
+    avg_mv = mv_sum / total
+    return {"lands_formula": round(karsten_lands(avg_mv, cheap), 1), "avg_mv": round(avg_mv, 2), "cheap": cheap, "lands_actual": lands}
+
+
+def auto_deck_mix(commander_name: str | None, commander_card: dict | None, edhrec_theme: str | None = None, target_size: int = 100) -> dict:
+    """The "Auto" preset: the Command Zone shape with Lands from Karsten's formula
+    for this commander and deck type. Returns {"mix": {Lands, Ramp, Draw,
+    Interaction}, "explain": str}."""
+    base = {role: round(target_size * f) for role, f in TEMPLATE_FRACTIONS["commandzone"].items()}
+    draw = draw_target_for_commander(commander_card, base["Draw"], base["Draw"]) or base["Draw"]
+    emv, deck_label = 3.0, None
+    note = "No commander chosen yet -- using a typical 3.0 average mana value"
+    if commander_name:
+        view = edhrec_commander_view(commander_name, edhrec_theme)
+        curve = view.get("mana_curve") or {}
+        total = sum(curve.values())
+        deck_label = (view.get("deck_type") or {}).get("value")
+        if total:
+            emv = sum(k * c for k, c in curve.items()) / total
+            note = f"Estimated from EDHREC's average mana value for {deck_label or 'this commander'} decks"
+        else:
+            note = "EDHREC has no curve for this commander -- using a typical 3.0 average mana value"
+    cheap = CHEAP_SHARE_OF_RAMP_DRAW * (base["Ramp"] + draw)
+    raw = karsten_lands(emv, cheap)
+    adjust, why = 0, []
+    if (deck_label or "").strip().lower() in _LANDS_MATTER_TYPES:
+        adjust += 2
+        why.append("+2 for a lands-matter deck")
+    lands = max(AUTO_LANDS_MIN, min(AUTO_LANDS_MAX, round(raw + adjust)))
+    explain = (
+        f"Karsten: {KARSTEN_BASE} + {KARSTEN_PER_MV} x {emv:.2f} - {KARSTEN_PER_CHEAP} x {cheap:.1f} = {raw:.1f}"
+        + (f" ({', '.join(why)})" if why else "")
+        + f" -> {lands} lands. {note}; about {round(CHEAP_SHARE_OF_RAMP_DRAW * 100)}% of Ramp and Draw assumed cheap. "
+        "Analyze checks the finished deck against the same formula."
+    )
+    return {"mix": {"Lands": lands, "Ramp": base["Ramp"], "Draw": base["Draw"], "Interaction": base["Interaction"]}, "explain": explain}
+
+
 def draw_target_for_commander(commander_card: dict | None, current_draw: int | None, default_draw: int | None) -> int | None:
     """A commander that is itself a repeatable card-draw engine (Sauron: draw
     four whenever the Ring tempts you) needs fewer Draw slots. Only applied
