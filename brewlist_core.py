@@ -2687,7 +2687,7 @@ body::before {{
   background-size: cover;
   background-position: center top;
   background-repeat: no-repeat;
-  filter: blur(16px);
+  filter: blur(6px);
   z-index: -2;
   pointer-events: none;
 }}

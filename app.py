@@ -840,7 +840,7 @@ body::before {
   content: ""; position: fixed; inset: -40px;
   background-image: var(--commander-bg-url, none);
   background-size: cover; background-position: center top; background-repeat: no-repeat;
-  filter: blur(16px); z-index: -2; pointer-events: none;
+  filter: blur(6px); z-index: -2; pointer-events: none;
 }
 body::after {
   content: ""; position: fixed; inset: 0;
