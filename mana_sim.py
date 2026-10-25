@@ -167,6 +167,10 @@ class Table:
         )
         return sources[self.produced - self.pool:]
 
+    def lands_seen(self) -> int:
+        """Lands drawn so far: in hand or on the battlefield."""
+        return sum(1 for c in self.hand if c["kind"] == "land") + sum(1 for p in self.battlefield if p["land"])
+
     def colors_ready(self, turn: int) -> set[str]:
         return {col for p in self.battlefield if p["ready_turn"] <= turn for col in p["makes"]}
 
@@ -187,7 +191,7 @@ def _play(deck: list[dict], commander: dict | None, deck_colors: set[str], rng: 
                 commander_cast_turn = turn
     return {
         "mulligans": table.mulligans, "opening_lands": table.opening_lands, "mana": mana_by_turn, "colors": colors_by_turn,
-        "commander_turn": commander_cast_turn,
+        "commander_turn": commander_cast_turn, "lands_seen": table.lands_seen(),
     }
 
 
@@ -239,3 +243,64 @@ def simulate_mana(entries: list[CardEntry], games: int = GAMES_DEFAULT) -> dict 
             "within_two": pct(sum(1 for r in runs if r["commander_turn"] is not None and r["commander_turn"] <= mv + 2)),
         }
     return out
+
+
+def _deck_and_commander(entries: list[CardEntry]):
+    gameplay = gameplay_data_in_index()
+    deck: list[dict] = []
+    commander = None
+    deck_colors: set[str] = set()
+    for e in entries:
+        info = gameplay.get(normalize_name(e.name)) or {}
+        if e.section == "commander":
+            if commander is None:
+                commander = {"mv": int(e.cmc or info.get("cmc") or 0), "mana_cost": e.mana_cost or info.get("mana_cost") or "", "name": e.name}
+            deck_colors |= set(_color_pips(e.mana_cost or info.get("mana_cost")))
+            continue
+        card = _classify(e, info)
+        deck_colors |= set(_color_pips(e.mana_cost or info.get("mana_cost")))
+        deck.extend([card] * e.quantity)
+    return deck, commander, deck_colors
+
+
+def _with_land_count(deck: list[dict], target_lands: int) -> list[dict]:
+    """The same deck with more or fewer lands: extra lands copy the deck's own land mix, cut lands are the
+    basics first; the swapped-out or swapped-in cards are plain spells, so the deck stays at 99."""
+    deck = list(deck)
+    lands = [c for c in deck if c["kind"] == "land"]
+    while len(lands) > target_lands:
+        victim = next((c for c in reversed(lands) if not c["tapped"] and len(c["makes"]) == 1), lands[-1])
+        lands.remove(victim)
+        deck.remove(victim)
+        deck.append({"kind": "spell", "mv": 3, "makes": set(), "amount": 0, "tapped": False})
+    i = 0
+    while len(lands) < target_lands and lands:
+        deck.remove(next(c for c in reversed(deck) if c["kind"] == "spell" and c["mv"] >= 3)) if any(
+            c["kind"] == "spell" and c["mv"] >= 3 for c in deck) else deck.pop()
+        copy = dict(lands[i % len(lands)])
+        deck.append(copy)
+        lands.append(copy)
+        i += 1
+    return deck
+
+
+def land_count_curve(entries: list[CardEntry], games: int = 1500, span: int = 5) -> dict | None:
+    """How the deck's mana changes with the number of lands, from `span` fewer to `span` more than it has:
+    chance of four mana on turn 4, five on turn 5, and of flooding (8+ lands in the first 14 cards).
+   """
+    deck, commander, deck_colors = _deck_and_commander(entries)
+    if len(deck) < 40:
+        return None
+    current = sum(1 for c in deck if c["kind"] == "land")
+    rows = []
+    for lands in range(max(28, current - span), min(46, current + span) + 1):
+        variant = _with_land_count(deck, lands)
+        rng = random.Random(SEED)
+        runs = [_play(variant, commander, deck_colors, rng) for _ in range(games)]
+        rows.append({
+            "lands": lands,
+            "four_on_four": round(100.0 * sum(1 for r in runs if r["mana"][3] >= 4) / games, 1),
+            "five_on_five": round(100.0 * sum(1 for r in runs if r["mana"][4] >= 5) / games, 1),
+            "flood": round(100.0 * sum(1 for r in runs if r["lands_seen"] >= 8) / games, 1),
+        })
+    return {"current": current, "rows": rows, "games": games}

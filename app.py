@@ -53,7 +53,7 @@ from brewlist_core import (
     sets_data_in_index,
     update_from_git,
 )
-from mana_sim import simulate_mana
+from mana_sim import land_count_curve, simulate_mana
 from turn_clock import simulate_turn_clock
 from deck_builder import (
     deck_pitch_draft,
@@ -65,6 +65,7 @@ from deck_builder import (
     auto_deck_mix,
     karsten_correction,
     deck_color_sources,
+    mana_fixes,
     deck_karsten,
     commander_deck_shape_targets,
     deck_shape_targets_with_mix,
@@ -4348,6 +4349,29 @@ function runManaSim(requestSeq) {{
     .then(sim => {{
       if (requestSeq !== analyzeRequestSeq || !sim || sim.error) return;
       renderManaSim(sim);
+      loadLandCurve(requestSeq);
+    }})
+    .catch(() => {{}});
+}}
+function loadLandCurve(requestSeq) {{
+  fetch('/builder/land-curve', {{
+    method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
+    body: JSON.stringify({{ cards: brew.cards, commander: brew.commander }}),
+  }})
+    .then(r => r.json())
+    .then(curve => {{
+      if (requestSeq !== analyzeRequestSeq || !curve || curve.error) return;
+      const wanted = new Set([curve.current - 4, curve.current - 2, curve.current, curve.current + 2, curve.current + 4]);
+      const rows = curve.rows.filter(r => wanted.has(r.lands)).map(r =>
+        `<tr><td>${{r.lands}} lands${{r.lands === curve.current ? ' <span class="hint" style="margin:0;">(yours)</span>' : ''}}</td><td>${{r.four_on_four}}%</td><td>${{r.five_on_five}}%</td><td>${{r.flood}}%</td></tr>`).join('');
+      const lo = curve.rows.find(r => r.lands === curve.current - 4) || curve.rows[0];
+      const hi = curve.rows.find(r => r.lands === curve.current + 4) || curve.rows[curve.rows.length - 1];
+      const span = (hi.lands - lo.lands) || 1;
+      const gain = ((hi.four_on_four - lo.four_on_four) / span).toFixed(1);
+      const cost = ((hi.flood - lo.flood) / span).toFixed(1);
+      document.getElementById('mana-sim').insertAdjacentHTML('beforeend',
+        `<p class="hint" style="margin:12px 0 4px;"><b>Land count</b> &mdash; the same deck with more or fewer lands (${{curve.games.toLocaleString()}} games each). Around ${{curve.current}} lands, each extra land adds about <b>${{gain}}</b> points of four-mana-on-turn-4 odds and about <b>${{cost}}</b> points of flood odds.</p>`
+        + `<table class="land-curve" style="width:100%;font-size:13px;border-collapse:collapse;"><thead><tr style="text-align:left;"><th>Lands</th><th title="Chance of at least four mana on turn 4">4 on T4</th><th title="Chance of at least five mana on turn 5">5 on T5</th><th title="Chance of 8 or more lands in your first 14 cards">Flood</th></tr></thead><tbody>${{rows}}</tbody></table>`);
     }})
     .catch(() => {{}});
 }}
@@ -4431,8 +4455,40 @@ function colorSourcesHtml(data) {{
       + `<div class="shape-bar-track"><div class="shape-bar ${{cls}}" style="width:${{pct}}%"></div></div>`
       + `<span class="shape-count" style="white-space:nowrap;min-width:150px;">${{r.have}} / ~${{r.need}} &middot; ${{verdict}}</span></div>`;
   }}).join('');
-  return `<div class="hint" style="margin:12px 0 4px;"><b>Colored sources</b> vs. Karsten&rsquo;s requirement (90&ndash;96% on-curve odds). A dual or tri-land counts toward every colour it makes, so one land can close several gaps:</div>` + body;
+  return `<div class="hint" style="margin:12px 0 4px;"><b>Colored sources</b> vs. Karsten&rsquo;s requirement (90&ndash;96% on-curve odds). A dual or tri-land counts toward every colour it makes, so one land can close several gaps:</div>` + body + manaFixesHtml(data);
 }}
+
+// Land swaps (deck_builder.mana_fixes): a basic for an owned dual/tri/fetch land that makes the short colors.
+function manaFixesHtml(data) {{
+  const fixes = data.mana_fixes || [];
+  if (!fixes.length) return '';
+  const rows = fixes.map((f, i) => {{
+    const makes = f.makes.map(c => '+' + c).join(' ');
+    return `<div class="shape-row" style="align-items:center;gap:8px;">`
+      + `<span style="flex:1;font-size:13px;">Swap a <b>${{escapeHtml(f.remove)}}</b> for <b>${{escapeHtml(f.add.name)}}</b> `
+      + `<span class="hint" style="margin:0;">(${{makes}}${{f.tapped ? ' &middot; enters tapped' : ''}})</span></span>`
+      + `<button type="button" class="btn ghost small" data-mana-fix="${{i}}">Apply</button></div>`;
+  }}).join('');
+  return `<div class="hint" style="margin:12px 0 4px;"><b>Land swaps from your collection</b> that close those gaps `
+    + `<button type="button" class="btn ghost small" data-mana-fix="all" style="margin-left:8px;">Apply all</button></div>` + rows;
+}}
+function applyManaFix(fix) {{
+  const nn = normalizeName(fix.remove);
+  const basic = brew.cards.find(c => normalizeName(c.name) === nn);
+  if (!basic) return false;
+  if (basic.quantity > 1) basic.quantity -= 1; else brew.cards = brew.cards.filter(c => c !== basic);
+  addCard(fix.add, 1);
+  return true;
+}}
+document.getElementById('deck-shape-breakdown').addEventListener('click', (e) => {{
+  const btn = e.target.closest('[data-mana-fix]');
+  if (!btn || !lastAnalyzeData) return;
+  const fixes = lastAnalyzeData.mana_fixes || [];
+  const which = btn.dataset.manaFix === 'all' ? fixes : [fixes[Number(btn.dataset.manaFix)]];
+  let done = 0;
+  which.forEach(f => {{ if (f && applyManaFix(f)) done++; }});
+  if (done) analyzeBtn.click();
+}});
 
 // Karsten's land formula on the deck as built (real average mana value and real
 // cheap ramp/draw count), next to the number of lands it actually has.
@@ -5083,6 +5139,15 @@ def builder_stats():
     # "how close is this to the template" comparison, not a second,
     # differently-tuned one.
     target_size = 100 if is_commander_format else 60
+    color_sources = deck_color_sources(entries) if is_commander_format else None
+    mana_fixes_list = []
+    if color_sources and body.get("commander"):
+        try:
+            identity = set(((gameplay_data_in_index().get(normalize_name(body["commander"].get("name") or "")) or {}).get("color_identity")) or [])
+            lands = [r for r in owned_collection_gameplay_view(owned, gameplay_data_in_index()) if r["category"] == "Lands"]
+            mana_fixes_list = mana_fixes(entries, lands, color_sources, identity)
+        except Exception:  # noqa: BLE001 -- a suggestion nicety; never fail Analyze over it
+            mana_fixes_list = []
     return jsonify(
         deck_value=totals["deck_value"],
         game_changers=totals["game_changers"],
@@ -5104,7 +5169,8 @@ def builder_stats():
         is_commander_format=is_commander_format,
         role_counts=role_counts_for_entries(entries),
         karsten=deck_karsten(entries) if is_commander_format else None,
-        color_sources=deck_color_sources(entries) if is_commander_format else None,
+        color_sources=color_sources,
+        mana_fixes=mana_fixes_list,
         pitch_draft=_pitch_draft_for(body, entries, totals) if is_commander_format else None,
         role_targets=deck_shape_targets_with_mix(
             deck_format, target_size, _mix_targets_from(body),
@@ -5122,6 +5188,18 @@ def builder_mana_sim():
     if not result:
         return jsonify(error="Not enough cards to simulate yet.")
     return jsonify(result)
+
+
+@app.route("/builder/land-curve", methods=["POST"])
+def builder_land_curve():
+    """How the deck's mana changes with its land count (see mana_sim.land_count_curve)."""
+    body = request.get_json(silent=True) or {}
+    entries = brew_to_card_entries({"commander": body.get("commander"), "cards": body.get("cards") or []})
+    try:
+        result = land_count_curve(entries) if entries else None
+    except Exception:  # noqa: BLE001
+        result = None
+    return jsonify(result or {"error": "Not enough cards to simulate yet."})
 
 
 @app.route("/builder/turn-clock", methods=["POST"])

@@ -909,6 +909,93 @@ def deck_color_sources(entries: list[CardEntry]) -> list[dict] | None:
     return result or None
 
 
+_CONDITIONAL_LINE_RE = re.compile(r"unless|if you control|if you don't|you may pay|if an opponent|if you have|if you reveal|if a player")
+
+
+def _reliable_land(row: dict) -> tuple[set[str], bool]:
+    """(colors it makes dependably, enters tapped): colors from its basic land types, from "{T}: Add ..." lines
+    with no extra cost or condition, and from fetchlands that sacrifice for a basic. Filter-style lands
+    ("{1}, {T}: Add any color"), opponent-dependent lands (Exotic Orchard) and restricted mana don't count
+    -- they aren't the fixing a mana base can lean on."""
+    type_line, text = row.get("type_line") or "", (row.get("oracle_text") or "")
+    colors = {col for sub, col in _BASIC_SUBTYPE_COLOR.items() if sub in type_line}
+    tapped = False
+    for line in text.lower().split("\n"):
+        line = re.sub(r"\(.*?\)", "", line).strip()
+        if re.search(r"enters(?: the battlefield)? tapped", line) and not _CONDITIONAL_LINE_RE.search(line):
+            tapped = True
+        if line.startswith("{t}: add") and "opponent" not in line and "spend this mana only" not in line and " only " not in line:
+            if "any color" in line or "any one color" in line:
+                if re.match(r"\{t\}: add one mana of any (?:one )?color(?: in your commander's color identity)?\.?(?: |$)", line) and "instead" not in line:
+                    colors |= set(_BASIC_FOR_COLOR)
+            else:
+                colors |= {col for col in _BASIC_FOR_COLOR if "{" + col.lower() + "}" in line}
+        elif line.startswith("{t},") and "sacrifice" in line and "search your library for" in line and "basic" in line and not re.search(r"\{\d+\},", line):
+            named = {col for sub, col in _BASIC_SUBTYPE_COLOR.items() if sub.lower() in line}
+            colors |= named or set(_BASIC_FOR_COLOR)
+            tapped = tapped or "tapped" in line
+    return colors, tapped
+
+
+def mana_fixes(
+    entries: list[CardEntry], owned_lands: list[dict], color_sources: list[dict] | None,
+    commander_identity: set[str], max_swaps: int = 6,
+) -> list[dict]:
+    """Land swaps that close the colored-source gaps deck_color_sources reports: trade a basic the deck
+    doesn't need for an owned dual/tri/fetch land (in the commander's colors) that makes the short colors.
+    Greedy, one swap at a time, taking the swap that cuts the total shortfall the most and preferring lands
+    that enter untapped. `owned_lands`: owned_collection_gameplay_view rows for lands. Returns
+    [{"add": row, "remove": basic name, "makes": [colors], "tapped": bool}]."""
+    if not color_sources:
+        return []
+    need = {r["color"]: r["need"] for r in color_sources}
+    have = {r["color"]: r["have"] for r in color_sources}
+    if not any(need[c] > have[c] for c in need):
+        return []
+    in_deck = {normalize_name(e.name) for e in entries}
+    basics: dict[str, dict] = {}  # color -> {"name", "qty"}
+    for e in entries:
+        if e.section != "commander" and "Basic" in e.type_line and "Land" in e.type_line:
+            for col in _land_produces({"type_line": e.type_line, "oracle_text": ""}):
+                slot = basics.setdefault(col, {"name": e.name, "qty": 0})
+                slot["qty"] += e.quantity
+    candidates = []
+    for row in owned_lands:
+        if normalize_name(row["name"]) in in_deck or not set(row.get("color_identity") or []) <= commander_identity:
+            continue
+        reliable, tapped = _reliable_land(row)
+        makes = reliable & set(need)
+        if len(makes) < 2:
+            continue
+        candidates.append({"row": row, "makes": makes, "tapped": tapped})
+
+    def shortfall(h: dict[str, int]) -> int:
+        return sum(max(0, need[c] - h[c]) for c in need)
+
+    swaps = []
+    while len(swaps) < max_swaps and shortfall(have) > 0:
+        best = None
+        for cand in candidates:
+            for color, slot in basics.items():
+                if slot["qty"] <= 0 or color not in need:
+                    continue
+                after = dict(have)
+                for col in cand["makes"]:
+                    after[col] += 1
+                after[color] -= 1
+                gain = shortfall(have) - shortfall(after) - (0.3 if cand["tapped"] else 0)
+                if gain >= 1 and (best is None or gain > best[0]):
+                    best = (gain, cand, color, after)
+        if best is None:
+            break
+        _, cand, color, after = best
+        candidates.remove(cand)
+        basics[color]["qty"] -= 1
+        have = after
+        swaps.append({"add": cand["row"], "remove": basics[color]["name"], "makes": sorted(cand["makes"]), "tapped": cand["tapped"]})
+    return swaps
+
+
 def karsten_correction(entries: list[CardEntry], current_lands: int, adjust: int = 0, threshold: int = 2) -> dict | None:
     """The Auto preset's second look: Karsten's formula on the deck a build actually
     produced (its real average mana value and cheap ramp/draw count). Returns
