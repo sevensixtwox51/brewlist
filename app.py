@@ -2543,6 +2543,17 @@ function renderDeckList() {{
         ? `<span class="filler-badge" title="${{FILLER_TIP}}${{escapeHtml(c.fill_note ? ' ' + c.fill_note : (c.fill_role ? ' Picked to fill ' + c.fill_role + '.' : ''))}}">Slot filler</span>`
         : '';
       row.innerHTML = `<span class="row-name">${{thumbHtml(c.scryfall_id, 'card-thumb small')}}<span>${{c.name}}</span>${{colorIconsHtml(c.color_identity)}}${{deckFillerBadge}}</span>`;
+      const deckPill = row.querySelector('.filler-badge');
+      if (deckPill && c.fill_role) {{
+        deckPill.classList.add('filler-link');
+        deckPill.setAttribute('role', 'button');
+        deckPill.tabIndex = 0;
+        deckPill.title = 'Slot filler -- click to see cards you could buy for this slot instead';
+        deckPill.textContent = 'Slot filler \u25BE';
+        const openDeckBuy = (ev) => {{ ev.stopPropagation(); openBuyPopup(deckPill, {{ role: c.fill_role }}, () => getDeckPoolsWithout(c)); }};
+        deckPill.addEventListener('click', openDeckBuy);
+        deckPill.addEventListener('keydown', (ev) => {{ if (ev.key === 'Enter' || ev.key === ' ') {{ ev.preventDefault(); openDeckBuy(ev); }} }});
+      }}
       const controls = document.createElement('div');
       controls.className = 'qty-controls';
       if (brew.format !== 'commander' || maxCopies(c.name) > 1) {{
@@ -3049,6 +3060,28 @@ function setWizardFooter(opts) {{
 
 const FILLER_TIP = 'This card is not on EDHREC&#39;s list for this commander&#39;s decks (and has no combo or theme link here) -- it was picked only to fill a slot, ranked by overall popularity. It can still be a popular card elsewhere.';
 function isFiller(card) {{ return card.basis === 'filler'; }}
+// Role pools for a card that is already IN the deck: a full deck has no open slots,
+// so the server would return nothing -- ask with that card taken out (one open
+// slot), which still gives the best cards you don't own for its role. Cached until
+// the deck changes.
+let deckPoolsCache = {{ sig: null, promise: null }};
+function getDeckPoolsWithout(card) {{
+  const sig = card.name + '|' + brew.cards.map(x => x.name + x.quantity).join(',');
+  if (deckPoolsCache.sig !== sig) {{
+    deckPoolsCache = {{ sig, promise: fetch('/builder/suggest-pools', {{
+      method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
+      body: JSON.stringify({{
+        cards: brew.cards.filter(x => x.name !== card.name), commander: brew.commander, format: brew.format,
+        target_format: brew.target_format, mix_targets: brew.mix_targets, intended_bracket: brew.intended_bracket,
+        preferred_theme_tag_ids: brew.preferred_theme_tag_ids, preferred_theme_label: brew.preferred_theme_label,
+        edhrec_theme: brew.edhrec_theme,
+        excluded_set_codes: brew.excluded_set_codes, excluded_card_names: brew.excluded_card_names,
+      }}),
+    }}).then(r => r.json()) }};
+  }}
+  return deckPoolsCache.promise;
+}}
+
 // "Cards to buy instead" popup for a Slot filler pill in the Quick suggest list:
 // the best cards you don't own for the same role, from the same role pools the
 // guided wizard uses.
