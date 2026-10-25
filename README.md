@@ -176,8 +176,9 @@ page).
   **mana simulation** (thousands of shuffled games of just lands and ramp:
   on-curve odds by turn, mulligans, how often the commander lands on curve)
   and a **Turn Clock** (how soon the deck kills one opponent who does
-  nothing; it reads creatures, tokens, team boosts and direct damage, so
-  combo and drain-engine decks look slower than they are). A **Print Battle
+  nothing; it reads creature combat, tokens, equipment and auras, team
+  boosts, extra combats, board-scaling drain, and the combos you've already
+  assembled, but not planeswalkers, tutors or repeatable activated abilities). A **Print Battle
   Card** button turns all of that into a clean, printable one-page summary
   for talking through the deck with the table
 - **Save** remembers the brew as a project, same as a compared deck — it

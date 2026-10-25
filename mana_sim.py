@@ -113,8 +113,14 @@ class Table:
         self.hand, self.library, self.mulligans = _opening_hand(deck, rng)
         self.opening_lands = sum(1 for c in self.hand if c["kind"] == "land")
         self.battlefield: list[dict] = []  # {"makes", "amount", "ready_turn", "land"}
+        self.played: set[str] = set()  # normalized names of lands and ramp already on the battlefield
         self.produced = 0   # mana the table can make this turn
         self.pool = 0       # ...of which is still unspent after ramp
+
+    def _mark_played(self, card: dict) -> None:
+        name = card.get("name")
+        if name:
+            self.played.update({normalize_name(name), normalize_name(name.split(" // ")[0])})
 
     def begin_turn(self, turn: int) -> int:
         hand, battlefield, deck_colors = self.hand, self.battlefield, self.deck_colors
@@ -127,6 +133,7 @@ class Table:
             lands_in_hand.sort(key=lambda c: (c["tapped"], -len((c["makes"] & deck_colors) - have_colors), -len(c["makes"])))
             land = lands_in_hand[0]
             hand.remove(land)
+            self._mark_played(land)
             battlefield.append({"makes": land["makes"], "amount": 1, "ready_turn": turn + (1 if land["tapped"] else 0), "land": True})
         produced = sum(p["amount"] for p in battlefield if p["ready_turn"] <= turn)
         pool = produced
@@ -136,6 +143,7 @@ class Table:
                 continue
             pool -= c["mv"]
             hand.remove(c)
+            self._mark_played(c)
             if c["kind"] == "landramp":
                 missing = sorted(deck_colors - {col for p in battlefield for col in p["makes"]})
                 makes = {missing[0]} if missing else (set(sorted(deck_colors)[:1]) if deck_colors else set())

@@ -733,7 +733,7 @@ def deck_pitch_draft(
             fast_mana += e.quantity
     # A rough turn window, from how fast the curve is and whether it can combo or tutor to it.
     clock = facts.get("clock") or {}
-    if (combos or tutors >= 5) and pace != "top-heavy":
+    if (tutors >= 5 or (combos and not clock)) and pace != "top-heavy":  # the clock reads combos but not tutors
         window = "4-7"
     elif clock.get("kill_rate", 0) >= 60 and clock.get("median_turn"):
         # the Turn Clock goldfish (turn_clock.py): from the fast tenth to the typical kill turn

@@ -4379,7 +4379,7 @@ function runTurnClock(requestSeq) {{
   if (brew.format === 'constructed') return;
   fetch('/builder/turn-clock', {{
     method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
-    body: JSON.stringify({{ cards: brew.cards, commander: brew.commander }}),
+    body: JSON.stringify({{ cards: brew.cards, commander: brew.commander, combos: (lastAnalyzeData && lastAnalyzeData.combos_included_list) || [] }}),
   }})
     .then(r => r.json())
     .then(clock => {{
@@ -4406,8 +4406,9 @@ function renderTurnClock(clock) {{
   document.getElementById('turn-clock').innerHTML =
     `<p class="hint" style="margin:0 0 8px;">${{headline}} ${{clock.games.toLocaleString()}} simulated games against one opponent at ${{clock.life}} life who blocks nothing and removes nothing.</p>`
     + bars
-    + (never ? `<p class="hint" style="margin:8px 0 0;"><b>Most games never kill.</b> The clock only reads creature combat, tokens, team boosts and direct life loss, so a deck that wins by combo, drain engines or alternate win conditions looks slower than it is.</p>` : '')
-    + `<p class="hint" style="margin:6px 0 0;">A ruler for comparing builds, not a prediction: it ignores equipment, auras, extra combats and damage that scales with the board.</p>`;
+    + (never ? `<p class="hint" style="margin:8px 0 0;"><b>Most games never kill.</b> The clock reads combat, tokens, equipment and auras, team boosts, extra combats, damage that scales with the board, direct life loss and the combos you've already assembled, so a deck that wins another way looks slower than it is.</p>` : '')
+    + (clock.combos ? `<p class="hint" style="margin:8px 0 0;">${{clock.combos}} assembled game-ending combo${{clock.combos === 1 ? '' : 's'}} counted: ${{clock.combo_kill_rate}}% of games end by combo.</p>` : '')
+    + `<p class="hint" style="margin:6px 0 0;">A ruler for comparing builds, not a prediction: it can't read repeatable activated abilities, planeswalkers, tutors or choices and targeting.</p>`;
 }}
 
 // Per-color mana sources against Karsten's requirement (deck_builder.deck_color_sources):
@@ -4896,7 +4897,7 @@ def _pitch_draft_for(body: dict, entries, totals: dict):
             deck_label = None
     combos = totals.get("combos") or {}
     try:
-        clock = simulate_turn_clock(entries, games=600)
+        clock = simulate_turn_clock(entries, games=600, combos_included=combos.get("included") or [])
     except Exception:  # noqa: BLE001
         clock = None
     facts = {
@@ -5129,7 +5130,7 @@ def builder_turn_clock():
     body = request.get_json(silent=True) or {}
     entries = brew_to_card_entries({"commander": body.get("commander"), "cards": body.get("cards") or []})
     try:
-        result = simulate_turn_clock(entries) if entries else None
+        result = simulate_turn_clock(entries, combos_included=body.get("combos") or []) if entries else None
     except Exception:  # noqa: BLE001 -- a nicety panel; never break Analyze over it
         result = None
     if not result:
