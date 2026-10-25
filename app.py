@@ -1888,7 +1888,7 @@ document.addEventListener('click', (e) => {{
     return;
   }}
   const img = e.target.closest('img.card-thumb');
-  if (!img || !img.closest('.builder-tile, .deck-row, .commander-slot, #suggestions-panel')) return;  // not in the guided wizard, where an image click selects the card
+  if (!img || !img.closest('.builder-tile, .deck-row, .commander-slot, #suggestions-panel, .buy-popup')) return;  // not in the guided wizard, where an image click selects the card
   e.preventDefault();
   e.stopPropagation();
   openLightbox(img);
@@ -3096,6 +3096,7 @@ function openBuyPopup(anchor, suggestion, getPools) {{
   pop.className = 'buy-popup';
   pop.innerHTML = '<div class="buy-head">Cards to buy instead &middot; ' + escapeHtml(suggestion.role) + '</div><div class="buy-body hint" style="margin:0;">Looking up cards to buy&hellip;</div>';
   document.body.appendChild(pop);
+  setupHoverPreview(pop);  // the popup lives on <body>, outside every container that already has hover previews
   buyPopup = pop;
   const r = anchor.getBoundingClientRect();
   const w = 360;
