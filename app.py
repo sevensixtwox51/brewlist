@@ -1197,6 +1197,7 @@ body.compact .deck-row .card-thumb { display:none; }
 /* The Auto explanation is a long sentence; width:0 + min-width:100% lets it wrap to the
    width the numbers already need instead of stretching the whole panel to fit it. */
 #mix-auto-explain { flex:0 0 100%; width:0; min-width:100%; line-height:1.4; }
+.kv { border-bottom:1px dotted var(--text-dim); cursor:help; }
 .mix-targets-grid label { display:flex; flex-direction:column; gap:3px; font-size:0.78rem; color:var(--text-dim); }
 .mix-targets-grid select { padding:6px 8px; border-radius:6px; border:1px solid var(--card-border); background:var(--bg); color:var(--text); font-size:0.85rem; margin:0; }
 .mix-targets-grid input[type=number] {
@@ -1720,12 +1721,38 @@ function setMixTargets(values) {{
     document.getElementById('mix-' + role.toLowerCase()).value = values[role];
   }});
 }}
+// Karsten's formula as text where every number explains itself on hover. `f` is the
+// piece-by-piece version of the sentence the server sends (auto-mix / mix_correction) or
+// built from Analyze's numbers.
+function kv(text, title) {{ return `<span class="kv" title="${{escapeHtml(title)}}">${{text}}</span>`; }}
+function karstenFormulaHtml(f) {{
+  const mvTip = 'Average mana value of the nonland cards. ' + (f.estimated
+    ? (f.mv_source ? f.mv_source + '.' : 'Estimated from EDHREC for this deck type.')
+    : 'Measured on the deck that was just built.');
+  const cheapTip = 'Cheap ramp and card-draw cards (mana value 2 or less) -- each one helps you make land drops, so it lets the deck run fewer lands. '
+    + (f.estimated ? 'Before any cards are picked this is estimated as about ' + (f.cheap_share || 43) + '% of the Ramp and Draw slots.' : 'Counted from the deck itself.');
+  const landsTip = 'The land count it recommends: rounded' + (f.adjust ? ', plus ' + f.adjust + ' for a lands-matter deck,' : '') + ' and kept between 34 and 41.';
+  return kv('31.42', 'Karsten\u2019s starting point: a fixed constant in his Commander formula.')
+    + ' + ' + kv('3.13', 'Lands added for every point of average mana value -- a heavier curve needs more lands.')
+    + ' &times; ' + kv(Number(f.mv).toFixed(2), mvTip)
+    + ' &minus; ' + kv('0.28', 'Lands the deck can cut for each cheap ramp or card-draw spell.')
+    + ' &times; ' + kv(f.cheap, cheapTip)
+    + ' = ' + kv(f.raw, 'Karsten\u2019s answer before rounding.')
+    + (f.lands !== undefined ? ' &rarr; ' + kv(f.lands + ' lands', landsTip) : '');
+}}
+
 // The server rebuilds once with a corrected Lands number when Karsten's formula on
 // the deck it just built disagrees with the estimate by 2+ lands; show that here.
 function applyMixCorrection(fix) {{
   if (!fix || !mixAuto) return;
   setMixTargets({{ ...brew.mix_targets, Lands: fix.Lands }});
-  document.getElementById('mix-auto-explain').textContent = fix.explain || '';
+  const box = document.getElementById('mix-auto-explain');
+  if (fix.formula) {{
+    box.innerHTML = 'Rebuilt with ' + fix.Lands + ' lands instead of ' + fix.was + ': the first pass came out at an average mana value of '
+      + Number(fix.formula.mv).toFixed(2) + ' with ' + fix.formula.cheap + ' cheap ramp/draw cards, so Karsten\u2019s formula gives ' + karstenFormulaHtml(fix.formula) + '.';
+  }} else {{
+    box.textContent = fix.explain || '';
+  }}
   updateSynergyReadout();
 }}
 let autoMixRequest = 0;
@@ -1741,7 +1768,13 @@ function refreshAutoMix() {{
     .then(data => {{
       if (mine !== autoMixRequest || !mixAuto || !data.mix) return;
       setMixTargets(data.mix);
-      document.getElementById('mix-auto-explain').textContent = data.explain || '';
+      const box = document.getElementById('mix-auto-explain');
+      if (data.formula) {{
+        box.innerHTML = 'Karsten: ' + karstenFormulaHtml(data.formula) + '. '
+          + escapeHtml((data.formula.mv_source || '') + '; about ' + (data.formula.cheap_share || 43) + '% of Ramp and Draw assumed cheap. Analyze checks the finished deck against the same formula.');
+      }} else {{
+        box.textContent = data.explain || '';
+      }}
       updateSynergyReadout();
     }})
     .catch(() => {{ if (mine === autoMixRequest) document.getElementById('mix-auto-explain').textContent = 'Could not reach the server.'; }});
@@ -4140,8 +4173,9 @@ function karstenLineHtml(data) {{
   const diff = k.lands_actual - k.lands_formula;
   const verdict = Math.abs(diff) < 1.5 ? 'about right' : (diff < 0 ? 'light on lands' : 'heavy on lands');
   const mv = k.avg_mv.toFixed(2);
-  return `<div class="hint karsten-note" style="margin:10px 0 0;" title="Frank Karsten's Commander formula: 31.42 + 3.13 x average mana value - 0.28 x cheap (MV 2 or less) ramp and card draw spells">`
-    + `<b>Karsten's land formula:</b> 31.42 + 3.13 &times; ${{mv}} &minus; 0.28 &times; ${{k.cheap}} &asymp; <b>${{k.lands_formula}}</b> lands `
+  const formula = karstenFormulaHtml({{ mv: k.avg_mv, cheap: k.cheap, raw: k.lands_formula, estimated: false }});
+  return `<div class="hint karsten-note" style="margin:10px 0 0;" title="Frank Karsten's Commander formula for how many lands a deck needs">`
+    + `<b>Karsten's land formula:</b> ${{formula}} lands `
     + `(you have ${{k.lands_actual}} &mdash; ${{verdict}}). Rules of thumb add 2&ndash;3 for a lands-matter plan.</div>`;
 }}
 
@@ -4533,6 +4567,8 @@ def _run_suggest(body: dict, pools_out: dict | None = None, meta_out: dict | Non
             if meta_out is not None:
                 meta_out["mix_correction"] = {
                     "Lands": fix["Lands"], "was": first_lands,
+                    "formula": {"mv": fix["avg_mv"], "cheap": fix["cheap"], "raw": fix["formula"], "adjust": adjust,
+                                "why": ["lands-matter deck"] if adjust else [], "lands": fix["Lands"], "estimated": False},
                     "explain": (
                         f"Rebuilt with {fix['Lands']} lands instead of {first_lands}: the first pass came out at average mana value "
                         f"{fix['avg_mv']} with {fix['cheap']} cheap ramp/draw cards, which Karsten's formula "

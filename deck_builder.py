@@ -709,7 +709,16 @@ def auto_deck_mix(commander_name: str | None, commander_card: dict | None, edhre
         + f" -> {lands} lands. {note}; about {round(CHEAP_SHARE_OF_RAMP_DRAW * 100)}% of Ramp and Draw assumed cheap. "
         "Analyze checks the finished deck against the same formula."
     )
-    return {"mix": {"Lands": lands, "Ramp": base["Ramp"], "Draw": base["Draw"], "Interaction": base["Interaction"]}, "explain": explain}
+    return {
+        "mix": {"Lands": lands, "Ramp": base["Ramp"], "Draw": base["Draw"], "Interaction": base["Interaction"]},
+        "explain": explain,
+        # The pieces of the sentence, so the UI can explain each number on hover.
+        "formula": {
+            "mv": round(emv, 2), "cheap": round(cheap, 1), "raw": round(raw, 1), "adjust": adjust, "why": why,
+            "lands": lands, "mv_source": note, "estimated": True,
+            "cheap_share": round(CHEAP_SHARE_OF_RAMP_DRAW * 100), "ramp_draw": base["Ramp"] + draw,
+        },
+    }
 
 
 def draw_target_for_commander(commander_card: dict | None, current_draw: int | None, default_draw: int | None) -> int | None:
