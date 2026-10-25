@@ -732,8 +732,13 @@ def deck_pitch_draft(
         if e.section != "commander" and categorize(e.type_line) in ("Lands", "Basic Lands") and normalize_name(e.name) in game_changers:
             fast_mana += e.quantity
     # A rough turn window, from how fast the curve is and whether it can combo or tutor to it.
+    clock = facts.get("clock") or {}
     if (combos or tutors >= 5) and pace != "top-heavy":
         window = "4-7"
+    elif clock.get("kill_rate", 0) >= 60 and clock.get("median_turn"):
+        # the Turn Clock goldfish (turn_clock.py): from the fast tenth to the typical kill turn
+        fast = min(clock.get("fast_turn") or clock["median_turn"], clock["median_turn"])
+        window = str(fast) if fast == clock["median_turn"] else f"{fast}-{clock['median_turn']}"
     else:
         window = {"fast": "5-8", "midrange": "7-10", "top-heavy": "9-12"}[pace]
     interaction_n = interaction_spells

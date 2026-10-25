@@ -104,18 +104,22 @@ def _opening_hand(deck: list[dict], rng: random.Random) -> tuple[list[dict], lis
         mulligans += 1
 
 
-def _play(deck: list[dict], commander: dict | None, deck_colors: set[str], rng: random.Random) -> dict:
-    hand, library, mulligans = _opening_hand(deck, rng)
-    opening_lands = sum(1 for c in hand if c["kind"] == "land")
-    battlefield: list[dict] = []   # {"makes", "amount", "tapped_until", "sick_until"}
-    lands_played = 0
-    mana_by_turn: list[int] = []
-    colors_by_turn: list[set[str]] = []
-    commander_cast_turn = None
-    cmd_pips = {col: int(round(n)) for col, n in _color_pips(commander["mana_cost"]).items()} if commander else {}
-    for turn in range(1, TURNS + 1):
-        if library:
-            hand.append(library.pop(0))
+class Table:
+    """One game's mana state: hand, library and the permanents that make mana. `begin_turn` does the
+    draw, the land drop and the ramp casting for a turn; the Turn Clock then spends what's left."""
+
+    def __init__(self, deck: list[dict], deck_colors: set[str], rng: random.Random):
+        self.deck_colors = deck_colors
+        self.hand, self.library, self.mulligans = _opening_hand(deck, rng)
+        self.opening_lands = sum(1 for c in self.hand if c["kind"] == "land")
+        self.battlefield: list[dict] = []  # {"makes", "amount", "ready_turn", "land"}
+        self.produced = 0   # mana the table can make this turn
+        self.pool = 0       # ...of which is still unspent after ramp
+
+    def begin_turn(self, turn: int) -> int:
+        hand, battlefield, deck_colors = self.hand, self.battlefield, self.deck_colors
+        if self.library:
+            hand.append(self.library.pop(0))
         lands_in_hand = [c for c in hand if c["kind"] == "land"]
         if lands_in_hand:
             have_colors = {col for p in battlefield for col in p["makes"]}
@@ -124,12 +128,7 @@ def _play(deck: list[dict], commander: dict | None, deck_colors: set[str], rng: 
             land = lands_in_hand[0]
             hand.remove(land)
             battlefield.append({"makes": land["makes"], "amount": 1, "ready_turn": turn + (1 if land["tapped"] else 0), "land": True})
-            lands_played += 1
-
-        def pool_now() -> int:
-            return sum(p["amount"] for p in battlefield if p["ready_turn"] <= turn)
-
-        produced = pool_now()
+        produced = sum(p["amount"] for p in battlefield if p["ready_turn"] <= turn)
         pool = produced
         ramp = sorted((c for c in hand if c["kind"] in ("rock", "dork", "landramp")), key=lambda c: c["mv"])
         for c in ramp:
@@ -141,7 +140,7 @@ def _play(deck: list[dict], commander: dict | None, deck_colors: set[str], rng: 
                 missing = sorted(deck_colors - {col for p in battlefield for col in p["makes"]})
                 makes = {missing[0]} if missing else (set(sorted(deck_colors)[:1]) if deck_colors else set())
                 battlefield.append({"makes": makes, "amount": 1, "ready_turn": turn + 1, "land": True})
-                if c.get("extra_land_to_hand") and library:
+                if c.get("extra_land_to_hand") and self.library:
                     hand.append({"kind": "land", "mv": 0, "makes": set(deck_colors), "amount": 1, "tapped": True})
             else:
                 ready = turn + (1 if (c["tapped"] or c["kind"] == "dork") else 0)
@@ -149,15 +148,38 @@ def _play(deck: list[dict], commander: dict | None, deck_colors: set[str], rng: 
                 if ready <= turn:
                     pool += c["amount"]
                     produced += c["amount"]
+        self.produced, self.pool = produced, pool
+        return produced
+
+    def mana_sources(self, turn: int) -> list[set[str]]:
+        """The colors of each unspent mana this turn (the ramp's cost taken from the least colorful first)."""
+        sources = sorted(
+            (set(p["makes"]) for p in self.battlefield if p["ready_turn"] <= turn for _ in range(p["amount"])),
+            key=len,
+        )
+        return sources[self.produced - self.pool:]
+
+    def colors_ready(self, turn: int) -> set[str]:
+        return {col for p in self.battlefield if p["ready_turn"] <= turn for col in p["makes"]}
+
+
+def _play(deck: list[dict], commander: dict | None, deck_colors: set[str], rng: random.Random) -> dict:
+    table = Table(deck, deck_colors, rng)
+    mana_by_turn: list[int] = []
+    colors_by_turn: list[set[str]] = []
+    commander_cast_turn = None
+    cmd_pips = {col: int(round(n)) for col, n in _color_pips(commander["mana_cost"]).items()} if commander else {}
+    for turn in range(1, TURNS + 1):
+        produced = table.begin_turn(turn)
         mana_by_turn.append(produced)
-        colors_by_turn.append({col for p in battlefield if p["ready_turn"] <= turn for col in p["makes"]})
+        colors_by_turn.append(table.colors_ready(turn))
         if commander and commander_cast_turn is None and produced >= commander["mv"]:
-            sources = [p["makes"] for p in battlefield if p["ready_turn"] <= turn for _ in range(p["amount"])]
+            sources = [p["makes"] for p in table.battlefield if p["ready_turn"] <= turn for _ in range(p["amount"])]
             if _can_pay_pips(cmd_pips, sources):
                 commander_cast_turn = turn
     return {
-        "mulligans": mulligans, "opening_lands": opening_lands, "mana": mana_by_turn, "colors": colors_by_turn,
-        "commander_turn": commander_cast_turn, "lands_played": lands_played,
+        "mulligans": table.mulligans, "opening_lands": table.opening_lands, "mana": mana_by_turn, "colors": colors_by_turn,
+        "commander_turn": commander_cast_turn,
     }
 
 

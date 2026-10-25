@@ -54,6 +54,7 @@ from brewlist_core import (
     update_from_git,
 )
 from mana_sim import simulate_mana
+from turn_clock import simulate_turn_clock
 from deck_builder import (
     deck_pitch_draft,
     edhrec_commander_view,
@@ -1647,6 +1648,9 @@ def render_builder_page(deck_id: str | None = None) -> str:
 
       <h4 class="analysis-heading" id="mana-sim-heading" style="display:none;">&#127922; Mana Simulation</h4>
       <div id="mana-sim"></div>
+
+      <h4 class="analysis-heading" id="turn-clock-heading" style="display:none;">&#9201;&#65039; Turn Clock</h4>
+      <div id="turn-clock"></div>
 
       <h4 class="analysis-heading">&#128202; Mana Curve &amp; Colors</h4>
       <div class="analysis-stat-line" id="analysis-stat-line"></div>
@@ -4265,6 +4269,8 @@ analyzeBtn.addEventListener('click', () => {{
   // until the new response lands (this is what you saw).
   document.getElementById('deck-shape-breakdown').innerHTML = '';
   document.getElementById('mana-sim').innerHTML = '';
+  document.getElementById('turn-clock').innerHTML = '';
+  document.getElementById('turn-clock-heading').style.display = 'none';
   document.getElementById('mana-sim-heading').style.display = 'none';
   document.getElementById('analyze-loading').style.display = 'block';
   printBattleCardBtn.disabled = true;
@@ -4287,6 +4293,7 @@ analyzeBtn.addEventListener('click', () => {{
       renderDeckShape(data);
       renderComboReference(data);
       runManaSim(requestSeq);
+      runTurnClock(requestSeq);
       printBattleCardBtn.disabled = false;
     }})
     .catch(() => {{
@@ -4365,6 +4372,42 @@ function renderManaSim(sim) {{
     + `<li>Opening hands average <b>${{sim.avg_opening_lands}}</b> lands; <b>${{sim.mulligan_rate}}%</b> of games mulligan (the first one is free); <b>${{sim.stuck_on_two_turn_4}}%</b> are stuck on two mana or less on turn 4.</li>`
     + `<li>Chance each colour is available by turn 4: ${{colors}}</li></ul>`
     + `<p class="hint" style="margin:6px 0 0;">Mana only &mdash; no spells are cast but ramp. It plays lands that enter tapped as tapped, so it reads a few points harsher than Karsten&rsquo;s land-only tables.</p>`;
+}}
+
+// Turn Clock (turn_clock.simulate_turn_clock): how soon the deck kills one opponent who does nothing.
+function runTurnClock(requestSeq) {{
+  if (brew.format === 'constructed') return;
+  fetch('/builder/turn-clock', {{
+    method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
+    body: JSON.stringify({{ cards: brew.cards, commander: brew.commander }}),
+  }})
+    .then(r => r.json())
+    .then(clock => {{
+      if (requestSeq !== analyzeRequestSeq || !clock || clock.error) return;
+      renderTurnClock(clock);
+    }})
+    .catch(() => {{}});
+}}
+function renderTurnClock(clock) {{
+  const turns = [];
+  for (let t = 5; t <= clock.max_turn; t++) turns.push(t);
+  const bars = turns.map(t => {{
+    const pct = clock.by_turn[t];
+    const tip = 'In ' + pct + '% of ' + clock.games + ' simulated games the deck has dealt ' + clock.life + ' damage to one do-nothing opponent by turn ' + t + '.';
+    return `<div class="shape-row" title="${{escapeHtml(tip)}}"><span class="shape-label">By turn ${{t}}</span>`
+      + `<div class="shape-bar-track"><div class="shape-bar near" style="width:${{pct}}%"></div></div>`
+      + `<span class="shape-count" style="white-space:nowrap;min-width:150px;">${{pct}}%</span></div>`;
+  }}).join('');
+  const never = clock.kill_rate < 60;
+  const headline = clock.median_turn
+    ? `Kills one opponent on turn <b>${{clock.median_turn}}</b> in half of games` + (clock.fast_turn ? ` (the fastest tenth by turn <b>${{clock.fast_turn}}</b>` + (clock.slow_turn ? `, the slowest tenth by turn <b>${{clock.slow_turn}}</b>` : '') + ')' : '') + '.'
+    : `Fewer than half of games kill an opponent by turn ${{clock.max_turn}}.`;
+  document.getElementById('turn-clock-heading').style.display = '';
+  document.getElementById('turn-clock').innerHTML =
+    `<p class="hint" style="margin:0 0 8px;">${{headline}} ${{clock.games.toLocaleString()}} simulated games against one opponent at ${{clock.life}} life who blocks nothing and removes nothing.</p>`
+    + bars
+    + (never ? `<p class="hint" style="margin:8px 0 0;"><b>Most games never kill.</b> The clock only reads creature combat, tokens, team boosts and direct life loss, so a deck that wins by combo, drain engines or alternate win conditions looks slower than it is.</p>` : '')
+    + `<p class="hint" style="margin:6px 0 0;">A ruler for comparing builds, not a prediction: it ignores equipment, auras, extra combats and damage that scales with the board.</p>`;
 }}
 
 // Per-color mana sources against Karsten's requirement (deck_builder.deck_color_sources):
@@ -4852,7 +4895,12 @@ def _pitch_draft_for(body: dict, entries, totals: dict):
         except Exception:  # noqa: BLE001 -- the pitch is a nicety; never fail Analyze over it
             deck_label = None
     combos = totals.get("combos") or {}
+    try:
+        clock = simulate_turn_clock(entries, games=600)
+    except Exception:  # noqa: BLE001
+        clock = None
     facts = {
+        "clock": clock,
         "combos_included": len(combos.get("included") or []),
         "wotc_bracket": totals.get("wotc_bracket"),
         "game_changers": totals.get("game_changers"),
@@ -5070,6 +5118,20 @@ def builder_mana_sim():
     body = request.get_json(silent=True) or {}
     entries = brew_to_card_entries({"commander": body.get("commander"), "cards": body.get("cards") or []})
     result = simulate_mana(entries) if entries else None
+    if not result:
+        return jsonify(error="Not enough cards to simulate yet.")
+    return jsonify(result)
+
+
+@app.route("/builder/turn-clock", methods=["POST"])
+def builder_turn_clock():
+    """The Turn Clock goldfish for the Analyze modal (see turn_clock.simulate_turn_clock)."""
+    body = request.get_json(silent=True) or {}
+    entries = brew_to_card_entries({"commander": body.get("commander"), "cards": body.get("cards") or []})
+    try:
+        result = simulate_turn_clock(entries) if entries else None
+    except Exception:  # noqa: BLE001 -- a nicety panel; never break Analyze over it
+        result = None
     if not result:
         return jsonify(error="Not enough cards to simulate yet.")
     return jsonify(result)
