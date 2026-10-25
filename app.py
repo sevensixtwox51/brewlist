@@ -53,6 +53,7 @@ from brewlist_core import (
     sets_data_in_index,
     update_from_git,
 )
+from mana_sim import simulate_mana
 from deck_builder import (
     deck_pitch_draft,
     edhrec_commander_view,
@@ -1643,6 +1644,9 @@ def render_builder_page(deck_id: str | None = None) -> str:
       <h4 class="analysis-heading">&#9878;&#65039; Deck Shape</h4>
       <p class="hint" style="margin:0 0 8px;">Actual card counts against your Deck mix targets (the template you picked; Command Zone by default) &mdash; guidelines, not hard walls.</p>
       <div id="deck-shape-breakdown"></div>
+
+      <h4 class="analysis-heading" id="mana-sim-heading" style="display:none;">&#127922; Mana Simulation</h4>
+      <div id="mana-sim"></div>
 
       <h4 class="analysis-heading">&#128202; Mana Curve &amp; Colors</h4>
       <div class="analysis-stat-line" id="analysis-stat-line"></div>
@@ -4260,6 +4264,8 @@ analyzeBtn.addEventListener('click', () => {{
   // modal on a changed deck briefly re-shows the PREVIOUS deck's bars
   // until the new response lands (this is what you saw).
   document.getElementById('deck-shape-breakdown').innerHTML = '';
+  document.getElementById('mana-sim').innerHTML = '';
+  document.getElementById('mana-sim-heading').style.display = 'none';
   document.getElementById('analyze-loading').style.display = 'block';
   printBattleCardBtn.disabled = true;
   const requestSeq = ++analyzeRequestSeq;
@@ -4280,6 +4286,7 @@ analyzeBtn.addEventListener('click', () => {{
       showPitchFor(data);
       renderDeckShape(data);
       renderComboReference(data);
+      runManaSim(requestSeq);
       printBattleCardBtn.disabled = false;
     }})
     .catch(() => {{
@@ -4319,6 +4326,45 @@ function renderDeckShape(data) {{
         <span class="shape-count">${{actual}} / ~${{target}}</span>
       </div>`;
   }}).join('') + karstenLineHtml(data) + colorSourcesHtml(data);
+}}
+
+// Mana goldfish (mana_sim.simulate_mana): thousands of shuffled games of just the mana game,
+// run on the server right after Analyze and shown as on-curve odds per turn.
+const MANA_SIM_GOOD = {{ 2: 95, 3: 88, 4: 78, 5: 66, 6: 55 }};
+function runManaSim(requestSeq) {{
+  if (brew.format === 'constructed') return;
+  fetch('/builder/mana-sim', {{
+    method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
+    body: JSON.stringify({{ cards: brew.cards, commander: brew.commander }}),
+  }})
+    .then(r => r.json())
+    .then(sim => {{
+      if (requestSeq !== analyzeRequestSeq || !sim || sim.error) return;
+      renderManaSim(sim);
+    }})
+    .catch(() => {{}});
+}}
+function renderManaSim(sim) {{
+  const row = (label, pct, good, tip) => {{
+    const cls = pct >= good ? 'near' : (pct >= good - 8 ? 'over' : 'under');
+    return `<div class="shape-row" title="${{escapeHtml(tip)}}"><span class="shape-label">${{label}}</span>`
+      + `<div class="shape-bar-track"><div class="shape-bar ${{cls}}" style="width:${{pct}}%"></div></div>`
+      + `<span class="shape-count" style="white-space:nowrap;min-width:150px;">${{pct}}%</span></div>`;
+  }};
+  const curve = [2, 3, 4, 5, 6].map(t => row('Turn ' + t, sim.on_curve[t], MANA_SIM_GOOD[t],
+    'In ' + sim.on_curve[t] + '% of ' + sim.games + ' games you have at least ' + t + ' mana available on turn ' + t
+    + ' (average ' + sim.avg_mana[t] + '). Counts land drops, tapped lands, and the mana rocks, dorks and land-fetching spells cast along the way.')).join('');
+  const colors = Object.entries(sim.color_by_turn_4).map(([c, p]) => (SOURCE_COLOR_HEX[c] ? `<span style="color:${{SOURCE_COLOR_HEX[c]}}">&#9679;</span> ${{p}}%` : '')).join(' &nbsp; ');
+  const cmd = sim.commander
+    ? `<li><b>${{escapeHtml(sim.commander.name)}}</b> (mana value ${{sim.commander.mv}}) can be cast on curve in <b>${{sim.commander.on_curve}}%</b> of games, and within two turns of that in <b>${{sim.commander.within_two}}%</b>.</li>` : '';
+  document.getElementById('mana-sim-heading').style.display = '';
+  document.getElementById('mana-sim').innerHTML =
+    `<p class="hint" style="margin:0 0 8px;">${{sim.games.toLocaleString()}} simulated games of just the mana game (${{sim.lands}} lands, ${{sim.ramp}} mana rocks, dorks and land-fetching spells): chance of having at least as much mana as the turn number.</p>`
+    + curve
+    + `<ul class="rule0-list" style="margin-top:10px;">${{cmd}}`
+    + `<li>Opening hands average <b>${{sim.avg_opening_lands}}</b> lands; <b>${{sim.mulligan_rate}}%</b> of games mulligan (the first one is free); <b>${{sim.stuck_on_two_turn_4}}%</b> are stuck on two mana or less on turn 4.</li>`
+    + `<li>Chance each colour is available by turn 4: ${{colors}}</li></ul>`
+    + `<p class="hint" style="margin:6px 0 0;">Mana only &mdash; no spells are cast but ramp. It plays lands that enter tapped as tapped, so it reads a few points harsher than Karsten&rsquo;s land-only tables.</p>`;
 }}
 
 // Per-color mana sources against Karsten's requirement (deck_builder.deck_color_sources):
@@ -5016,6 +5062,17 @@ def builder_stats():
             commander_card=gameplay_data_in_index().get(normalize_name((body.get("commander") or {}).get("name") or "")),
         ),
     )
+
+
+@app.route("/builder/mana-sim", methods=["POST"])
+def builder_mana_sim():
+    """The mana goldfish for the Analyze modal (see mana_sim.simulate_mana)."""
+    body = request.get_json(silent=True) or {}
+    entries = brew_to_card_entries({"commander": body.get("commander"), "cards": body.get("cards") or []})
+    result = simulate_mana(entries) if entries else None
+    if not result:
+        return jsonify(error="Not enough cards to simulate yet.")
+    return jsonify(result)
 
 
 @app.route("/builder/report/start", methods=["POST"])
