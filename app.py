@@ -4432,7 +4432,7 @@ function renderTurnClock(clock) {{
     + bars
     + (never ? `<p class="hint" style="margin:8px 0 0;"><b>Most games never kill.</b> The clock reads combat, tokens, equipment and auras, team boosts, extra combats, damage that scales with the board, direct life loss and the combos you've already assembled, so a deck that wins another way looks slower than it is.</p>` : '')
     + (clock.combos ? `<p class="hint" style="margin:8px 0 0;">${{clock.combos}} assembled game-ending combo${{clock.combos === 1 ? '' : 's'}} counted: ${{clock.combo_kill_rate}}% of games end by combo.</p>` : '')
-    + `<p class="hint" style="margin:6px 0 0;">A ruler for comparing builds, not a prediction: it can't read repeatable activated abilities, planeswalkers, tutors or choices and targeting.</p>`;
+    + `<p class="hint" style="margin:6px 0 0;">A ruler for comparing builds, not a prediction: it can't read repeatable activated abilities, planeswalkers, or choices and targeting.</p>`;
 }}
 
 // Per-color mana sources against Karsten's requirement (deck_builder.deck_color_sources):

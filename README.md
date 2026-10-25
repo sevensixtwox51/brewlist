@@ -177,8 +177,8 @@ page).
   on-curve odds by turn, mulligans, how often the commander lands on curve)
   and a **Turn Clock** (how soon the deck kills one opponent who does
   nothing; it reads creature combat, tokens, equipment and auras, team
-  boosts, extra combats, board-scaling drain, and the combos you've already
-  assembled, but not planeswalkers, tutors or repeatable activated abilities). A **Print Battle
+  boosts, extra combats, board-scaling drain, tutors, and the combos you've
+  already assembled, but not planeswalkers or repeatable activated abilities). A **Print Battle
   Card** button turns all of that into a clean, printable one-page summary
   for talking through the deck with the table
 - **Save** remembers the brew as a project, same as a compared deck — it

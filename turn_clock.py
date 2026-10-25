@@ -19,7 +19,8 @@ builds, not a prediction of a real table. What it understands:
     from your hand onto the battlefield attacking" cheat (Kaalia)
   - combos the deck has already assembled (Commander Spellbook's "included" list) that win the game --
     infinite damage or life loss, an outright win, infinite combat -- once every piece is castable
-What it ignores: repeatable activated abilities, planeswalkers, tutors, choices and targeting, and combos
+  - tutors: cast for their mana, fetching the one missing piece of the nearest combo, else the best damage card
+What it ignores: repeatable activated abilities, planeswalkers, choices and targeting, and combos
 that need a card the deck can't find on its own. A deck that wins in a way it can't read shows a slow or
 missing clock -- the panel says so when most games never kill.
 """
@@ -33,7 +34,8 @@ import urllib.error
 import urllib.request
 
 from brewlist_core import CardEntry, categorize, gameplay_data_in_index, normalize_name
-from deck_builder import _color_pips
+from deck_builder import _card_tag_index, _color_pips
+from brewlist_core import budget_alt_data_in_index
 from mana_sim import SEED, Table, _classify, _opening_hand  # noqa: F401 -- _opening_hand re-exported for tests
 
 _CORE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -66,6 +68,7 @@ _COLOR_WORDS = {"white": "W", "blue": "U", "black": "B", "red": "R", "green": "G
 _ADDITIONAL_COMBAT_RE = re.compile(r"additional combat phase")
 _PING_RE = re.compile(r"^whenever a creature you control attacks, ~ deals (\d+) damage to (?:the player|defending player|that player)")
 _ETB_PING_RE = re.compile(r"^whenever (?:a|another) (?:other )?creature (?:you control )?enters(?: the battlefield)?(?: under your control)?, ~ (?:deals (\d+) damage to each opponent|causes each opponent to lose (\d+) life)")
+_TUTOR_LABELS = {"tutor-to-hand", "tutor-card", "tutor-creature", "tutor-artifact", "tutor-mv", "tutor-to-top"}
 _WIN_FEATURES = ("win the game", "loses the game", "infinite damage", "infinite lifeloss", "infinite combat")
 _EACH_TURN_RE = re.compile(r"^at the beginning of (?:your|each) (?:upkeep|end step|combat|precombat main phase|postcombat main phase)", re.I)
 
@@ -469,32 +472,74 @@ def _play(deck: list[dict], commander: dict | None, deck_colors: set[str], combo
                 new_creature(power, set(), False, token_ready(turn))
         # a known combo that wins the game: cast whatever pieces are missing and it goes off (next turn if a
         # creature piece needs to lose summoning sickness first)
-        for combo in combos:
-            found = combo_pieces(combo, turn, sources)
-            if found is None:
-                continue
-            casts, sources = found
-            sick = False
-            for card in casts:
-                if card is commander:
-                    commander_cast = turn
+        def try_combos() -> bool:
+            nonlocal sources, commander_cast, damage, cast_count, combo_fired, combo_turn, kill_turn
+            for combo in combos:
+                found = combo_pieces(combo, turn, sources)
+                if found is None:
+                    continue
+                casts, sources = found
+                sick = False
+                for card in casts:
+                    if card is commander:
+                        commander_cast = turn
+                    else:
+                        table.hand.remove(card)
+                        if card["kind"] == "land":
+                            table.played.update(_name_keys(card.get("name", "")))
+                    on_battlefield.update(_name_keys(card.get("name", "") if card is not commander else commander["name"]))
+                    sick = sick or (card.get("creature") and not (card.get("profile") or {}).get("haste") and not global_haste)
+                    if card.get("profile"):
+                        damage += resolve(card, turn)
+                    cast_count += 1
+                combo_fired = True
+                if sick:
+                    combo_turn = turn + 1
                 else:
-                    table.hand.remove(card)
-                    if card["kind"] == "land":
-                        table.played.update(_name_keys(card.get("name", "")))
-                on_battlefield.update(_name_keys(card.get("name", "") if card is not commander else commander["name"]))
-                sick = sick or (card.get("creature") and not (card.get("profile") or {}).get("haste") and not global_haste)
-                if card.get("profile"):
-                    damage += resolve(card, turn)
+                    kill_turn = turn
+                return True
+            return False
+
+        def missing_pieces(combo: dict) -> list[str]:
+            return [p for p in combo["pieces"] if p not in on_battlefield and p not in table.played
+                    and not any(p in _name_keys(c.get("name", "")) for c in table.hand)
+                    and not (commander and commander_cast is None and p in commander["keys"])]
+
+        def tutor_target(card: dict):
+            """What a tutor would fetch: the one missing piece of the nearest combo, else the best damage card."""
+            allowed = card["tutor"]["types"]
+            for combo in combos:
+                missing = missing_pieces(combo)
+                if len(missing) == 1:
+                    hit = next((c for c in table.library if missing[0] in _name_keys(c.get("name", ""))), None)
+                    if hit is not None:
+                        return hit
+            pool = [c for c in table.library if c.get("profile") and (allowed is None or any(t in c["type_line"] for t in allowed))]
+            return max(pool, key=castable_value, default=None)
+
+        def cast_tutors() -> None:
+            nonlocal sources, cast_count
+            for card in sorted((c for c in table.hand if c.get("tutor")), key=lambda c: c["mv"]):
+                target = tutor_target(card)
+                if target is None:
+                    continue
+                paid = _pay(sources, card["pips"], card["mv"])
+                if paid is None:
+                    continue
+                sources = paid
+                table.hand.remove(card)
+                table.library.remove(target)
+                table.hand.append(target)
                 cast_count += 1
-            combo_fired = True
-            if sick:
-                combo_turn = turn + 1
-            else:
-                kill_turn = turn
-            break
+
+        try_combos()
         if kill_turn:
             break
+        if combos or any(c.get("tutor") for c in table.hand):
+            cast_tutors()
+            try_combos()
+            if kill_turn:
+                break
         # commander first, then the best damage per mana
         if commander and commander_cast is None and commander["profile"]:
             paid = _pay(sources, commander["pips"], commander["mv"])
@@ -577,6 +622,9 @@ def simulate_turn_clock(entries: list[CardEntry], games: int = GAMES_DEFAULT, co
     gameplay = gameplay_data_in_index()
     creature_names = [e.name for e in entries if "Creature" in (e.type_line or "")]
     stats = ensure_card_stats(creature_names)
+    budget_alt = budget_alt_data_in_index()
+    tags_by_name, _ = _card_tag_index(budget_alt["groups"])
+    labels = budget_alt["tag_labels"]
     deck: list[dict] = []
     commander = None
     deck_colors: set[str] = set()
@@ -598,7 +646,13 @@ def simulate_turn_clock(entries: list[CardEntry], games: int = GAMES_DEFAULT, co
             continue
         card = _classify(e, info)
         card.update(base)
+        card["type_line"] = type_line
         card["profile"] = profile if card["kind"] == "spell" else None
+        labels_here = {labels.get(t, t) for t in tags_by_name.get(normalize_name(e.name), ())} & _TUTOR_LABELS
+        card["tutor"] = None
+        if labels_here and card["kind"] == "spell" and "Creature" not in type_line:
+            types = {"Creature"} if labels_here == {"tutor-creature"} else {"Artifact"} if labels_here == {"tutor-artifact"} else None
+            card["tutor"] = {"types": types}
         deck.extend([dict(card) for _ in range(e.quantity)])
     if len(deck) < 40:
         return None
