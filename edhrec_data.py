@@ -59,6 +59,9 @@ _MAX_PAGES = 150  # real depth is 45-68 pages (verified live) -- this is a safet
 # window name -> EDHREC's own URL path suffix. "2years" is the site's
 # default /commanders page; the other two are literal sub-paths of it.
 WINDOWS = {"2years": "", "month": "/month", "week": "/week"}
+# Where each window lives in EDHREC's JSON feed (the default "past 2 years" page is
+# commanders/year there; plain "commanders" is not served as JSON).
+_JSON_WINDOW_PATHS = {"2years": "commanders/year", "month": "commanders/month", "week": "commanders/week"}
 
 # Deliberately NOT time-based auto-refresh -- per direct user request, this
 # cache is refreshed only when the user clicks the refresh control (or on
@@ -100,6 +103,25 @@ def _fetch_json_page(path: str) -> dict | None:
         with urllib.request.urlopen(req, timeout=_REQUEST_TIMEOUT) as resp:
             return json.loads(resp.read().decode("utf-8", errors="replace"))
     except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        return None
+
+
+def _fetch_page_data(path: str) -> dict | None:
+    """EDHREC's data for a page path like "commanders/edgar-markov" or
+    "commanders/edgar-markov/vampires" -- the dict the website used to embed as
+    props.pageProps.data (cardlists in container.json_dict, tag_counts,
+    planeswalker/creature/basic/nonbasic averages, panels.mana_curve). The site
+    has since dropped that embedded blob (its pages carry no __NEXT_DATA__ any
+    more, so every commander not already cached came back empty), but the same
+    data is served as JSON at json.edhrec.com/pages/<path>.json, which is tried
+    first; the old page scrape stays as a fallback."""
+    page = _fetch_json_page(f"{path}.json")
+    if page and ((page.get("container") or {}).get("json_dict") or {}).get("cardlists") is not None:
+        return page
+    data = _fetch_next_data(f"https://edhrec.com/{path}")
+    try:
+        return data["props"]["pageProps"]["data"]
+    except (KeyError, TypeError):
         return None
 
 
@@ -153,11 +175,11 @@ def _fetch_full_top_list(window: str) -> list[dict] | None:
     page fails, returns whatever pages were already collected rather than
     discarding all of it."""
     suffix = WINDOWS[window]
-    data = _fetch_next_data(f"https://edhrec.com/commanders{suffix}")
+    data = _fetch_page_data(_JSON_WINDOW_PATHS[window]) or _fetch_page_data(f"commanders{suffix}")
     if not data:
         return None
     try:
-        cardlist = data["props"]["pageProps"]["data"]["container"]["json_dict"]["cardlists"][0]
+        cardlist = data["container"]["json_dict"]["cardlists"][0]
     except (KeyError, IndexError, TypeError):
         return None
     entries = _cardviews_to_entries(cardlist.get("cardviews") or [])
@@ -402,15 +424,14 @@ def commander_synergy_cards(commander_name: str) -> dict[str, dict]:
     avg_planeswalkers = None
     found = False
     for slug in candidates:
-        data = _fetch_next_data(f"https://edhrec.com/commanders/{slug}")
-        if not data:
+        page_data = _fetch_page_data(f"commanders/{slug}")
+        if not page_data:
             continue
         try:
-            cardlists = data["props"]["pageProps"]["data"]["container"]["json_dict"]["cardlists"]
+            cardlists = page_data["container"]["json_dict"]["cardlists"]
         except (KeyError, TypeError):
             continue
         found = True
-        page_data = data["props"]["pageProps"].get("data") or {}
         # EDHREC's own labels for what players build this commander as
         # (e.g. Cloud, Ex-SOLDIER: Equipment 3108, Voltron 1800 decks),
         # most-played first, and the average number of planeswalkers in
@@ -498,11 +519,10 @@ def commander_theme_page(commander_name: str, theme_slug: str) -> dict:
     candidates.append(_slugify(commander_name))
 
     for slug in candidates:
-        data = _fetch_next_data(f"https://edhrec.com/commanders/{slug}/{theme_slug}")
-        if not data:
+        page = _fetch_page_data(f"commanders/{slug}/{theme_slug}")
+        if not page:
             continue
         try:
-            page = data["props"]["pageProps"]["data"]
             cardlists = page["container"]["json_dict"]["cardlists"]
             num_decks = page["container"]["json_dict"]["card"].get("num_decks")
         except (KeyError, TypeError):
