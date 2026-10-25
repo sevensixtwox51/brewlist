@@ -1888,7 +1888,7 @@ document.addEventListener('click', (e) => {{
     return;
   }}
   const img = e.target.closest('img.card-thumb');
-  if (!img || !img.closest('.builder-tile, .deck-row, .commander-slot, #suggestions-panel, .buy-popup')) return;  // not in the guided wizard, where an image click selects the card
+  if (!img || !img.closest('.builder-tile, .deck-row, .commander-slot, #suggestions-panel, .buy-popup, #replace-popup')) return;  // not in the guided wizard, where an image click selects the card
   e.preventDefault();
   e.stopPropagation();
   openLightbox(img);
