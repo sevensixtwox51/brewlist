@@ -224,7 +224,7 @@ def _run_compare_job(job_id, entries, owned, break_out_basics, reserved,
                 job["error"] = str(e)
 
 
-def _run_brew_report_job(job_id, entries, owned, deck_id, deck_name, is_commander_format, ai_summary="", further_optimizations=None, maybeboard=None, pitch=""):
+def _run_brew_report_job(job_id, entries, owned, deck_id, deck_name, is_commander_format, ai_summary="", further_optimizations=None, maybeboard=None, pitch="", house_rules=""):
     """Same job shape as _run_compare_job, for the deck builder's "View
     full report" button -- reuses the exact same /compare/progress and
     /compare/result polling routes, so a brew's report is a saved decklist
@@ -246,7 +246,7 @@ def _run_brew_report_job(job_id, entries, owned, deck_id, deck_name, is_commande
         html_report = render_html(
             deck_name, "", deck_id, bucket_names, buckets, totals,
             overrides_endpoint=f"/api/overrides/{deck_id}",
-            is_commander_format=is_commander_format, ai_summary=ai_summary, pitch=pitch,
+            is_commander_format=is_commander_format, ai_summary=ai_summary, pitch=pitch, house_rules=house_rules,
             further_optimizations=further_optimizations, maybeboard=maybeboard,
         )
         with _JOBS_LOCK:
@@ -1436,6 +1436,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
         "further_optimizations": brew.get("further_optimizations") or [],
         "maybeboard": brew.get("maybeboard") or [],
         "pitch": brew.get("pitch") or "",
+        "house_rules": brew.get("house_rules") or "",
     }
 
     category_options = "".join(f'<option value="{_esc(b)}">{_esc(b)}</option>' for b in BUCKET_ORDER)
@@ -1642,6 +1643,9 @@ def render_builder_page(deck_id: str | None = None) -> str:
           <button type="button" class="btn ghost small" id="rule0-pitch-draft-btn" title="Writes a first draft from this deck's curve, creature count, EDHREC deck type, win routes, interaction and bracket facts -- then edit it into your own words.">&#9998; Write a draft</button>
           <span class="hint" id="rule0-pitch-note" style="margin:0;"></span>
         </div>
+      
+        <label for="rule0-house-rules" class="hint" style="margin:10px 0 4px;display:block;">House rules and asks &mdash; what you'd like the table to know or agree to (no mass land denial, ban a card, no combo before turn 8...). Saved with the deck.</label>
+        <textarea id="rule0-house-rules" rows="2" placeholder="e.g. &ldquo;Happy to skip extra turns. Please don't Rhystic me on turn 1.&rdquo;" style="width:100%;box-sizing:border-box;padding:8px 10px;border-radius:8px;border:1px solid var(--card-border);background:var(--bg);color:var(--text);font:inherit;font-size:0.85rem;line-height:1.45;resize:vertical;"></textarea>
       </div>
       <ul class="rule0-list" id="rule0-list"></ul>
 
@@ -4209,6 +4213,8 @@ let lastPitchDraft = '';
 const pitchBox = document.getElementById('rule0-pitch');
 const pitchNote = document.getElementById('rule0-pitch-note');
 pitchBox.addEventListener('input', () => {{ brew.pitch = pitchBox.value; }});
+const houseRulesBox = document.getElementById('rule0-house-rules');
+houseRulesBox.addEventListener('input', () => {{ brew.house_rules = houseRulesBox.value; }});
 document.getElementById('rule0-pitch-draft-btn').addEventListener('click', () => {{
   if (!lastPitchDraft) {{ pitchNote.textContent = 'The draft is written once the deck check below finishes.'; return; }}
   const current = pitchBox.value.trim();
@@ -4275,6 +4281,7 @@ analyzeBtn.addEventListener('click', () => {{
   }}
   lastAnalyzeData = null;
   pitchBox.value = brew.pitch || '';
+  houseRulesBox.value = brew.house_rules || '';
   lastPitchDraft = '';
   analyzeModal.classList.add('show');
   document.getElementById('analyze-modal-title').textContent = brew.deck_name || document.getElementById('deck-name').value || 'Analyze Deck';
@@ -4583,6 +4590,7 @@ function buildBattleCardHtml(data) {{
     <div class="bc-sub">${{commanderLine}}</div>
     <div class="bc-badges">${{badges.map(b => `<span>${{b}}</span>`).join('')}}</div>
     ${{brew.pitch && brew.pitch.trim() ? `<h2>The pitch</h2><p>${{escapeHtml(brew.pitch.trim()).replace(/\\n/g, '<br>')}}</p>` : ''}}
+    ${{brew.house_rules && brew.house_rules.trim() ? `<h2>House rules &amp; asks</h2><p>${{escapeHtml(brew.house_rules.trim()).replace(/\\n/g, '<br>')}}</p>` : ''}}
     <h2>Rule 0 Summary</h2>
     <ul>${{rule0Items(data).map(t => `<li>${{t}}</li>`).join('')}}</ul>
     <h2>Game Changers</h2>
@@ -4821,6 +4829,7 @@ def builder_save():
         further_optimizations=body.get("further_optimizations") or [],
         maybeboard=body.get("maybeboard") or [],
         pitch=body.get("pitch") or "",
+        house_rules=body.get("house_rules") or "",
     )
     return jsonify(deck_id=deck_id)
 
@@ -5284,6 +5293,7 @@ def builder_report_start():
         kwargs={
             "ai_summary": brew.get("ai_summary") or "", "further_optimizations": brew.get("further_optimizations") or [],
             "maybeboard": brew.get("maybeboard") or [], "pitch": brew.get("pitch") or "",
+            "house_rules": brew.get("house_rules") or "",
         },
         daemon=True,
     ).start()

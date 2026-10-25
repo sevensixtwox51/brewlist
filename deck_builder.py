@@ -2740,6 +2740,26 @@ def suggest_builder_cards(
             role_candidates["Lands"] = [c for c in lands_pool if not _is_basic_land_card(c)]
             use_basics = bool(basics_available)
 
+    # Colorless commanders have no basics to split by color, but Wastes are their basic: when the player owns
+    # some, they fill the land slots that earned nonbasics don't (instead of 36 random utility lands).
+    wastes_card = None
+    wastes_avail = 0
+    if deck_format == "commander" and not deck_colors:
+        wastes_card = next((c for c in owned_view if c["name"] == "Wastes"), None)
+        if wastes_card:
+            have_wastes = sum(e.quantity for e in wip_entries if normalize_name(e.name) == "wastes")
+            wastes_avail = max(0, wastes_card["quantity"] - have_wastes)
+            pool = [c for c in (role_candidates.get("Lands") or []) if not _is_basic_land_card(c)]
+            earned = [c for c in pool if normalize_name(c["name"]) in edhrec_tracked_names
+                      or normalize_name(c["name"]) in reason_by_name or normalize_name(c["name"]) in theme_reason_by_name]
+            avg_nonbasic = edhrec_view.get("avg_nonbasic_lands")
+            if avg_nonbasic is not None:
+                earned = earned[:max(0, round(avg_nonbasic))]
+            # Earned nonbasics first, then the Wastes, and only as many other nonbasics as are still needed after those.
+            others = [c for c in pool if c not in earned]
+            room = max(0, role_needed.get("Lands", 0) - len(earned) - wastes_avail)
+            role_candidates["Lands"] = earned + others[:room]
+
     # Slot allocation: split the batch across roles proportional to how
     # much each still needs, so a Suggest click always reflects the
     # target deck shape instead of whichever single category happens to
@@ -3012,6 +3032,14 @@ def suggest_builder_cards(
         basic_picks = [(basics_by_color[col], n) for col, n in alloc.items() if n > 0]
         placed_per_role["Lands"] = placed_per_role.get("Lands", 0) + sum(n for _, n in basic_picks)
 
+    wastes_pick = None
+    if wastes_card and wastes_avail:
+        gap = max(0, role_needed.get("Lands", 0) - placed_per_role.get("Lands", 0))
+        n_wastes = min(wastes_avail, gap)
+        if n_wastes > 0:
+            wastes_pick = (wastes_card, n_wastes)
+            placed_per_role["Lands"] = placed_per_role.get("Lands", 0) + n_wastes
+
     # Cards that allow several copies in Commander ("A deck can have up to nine
     # cards named Nazgul"): when one is genuinely backed (EDHREC synergy, theme
     # or combo), suggest its legal copies (capped by what you own, and at 4 for
@@ -3235,6 +3263,11 @@ def suggest_builder_cards(
             quantity=n, basis="basic", owned_quantity=basics_available.get(col, 0),
             reason=f"{n} basic {c['name']} to cover your {_COLOR_NAME[col]} mana ({pips_by_color.get(col, 0):g} {_COLOR_NAME[col]} pips in the deck)",
         )
+        suggestions.append(sg)
+    if wastes_pick:
+        c, n = wastes_pick
+        sg = make_suggestion(c, "Lands", True)
+        sg.update(quantity=n, basis="basic", owned_quantity=wastes_avail, reason=f"{n} Wastes: the basic land for a colorless commander")
         suggestions.append(sg)
     suggestions += [make_suggestion(c, role, False) for c, role in unowned_picks]
 
