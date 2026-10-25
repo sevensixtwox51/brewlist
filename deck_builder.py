@@ -685,23 +685,52 @@ def deck_pitch_draft(
         subs.append("sacrifice")
     sub = f", with {subs[0]} as a sub-theme" if subs else ""
 
+    combos = int(facts.get("combos_included") or 0)
+    alt_win = tag_counts["alternate win condition"]
     routes = []
     if creature_share >= 0.3:
         routes.append("combat and commander damage" if "Creature" in (commander_type_line or "") else "combat damage")
     if drain >= 6:
         routes.append("incremental life drain")
-    combos = int(facts.get("combos_included") or 0)
+    if tag_counts["mill-opponent"] >= 4:
+        routes.append("milling opponents")
+    if alt_win:
+        routes.append("an alternate win condition")
     if combos:
         routes.append(f"{_plural(combos, 'known combo')} that can close the game early")
     if not routes:
         routes.append("steady value and board presence")
     routes_text = routes[0] if len(routes) == 1 else ", ".join(routes[:-1]) + " and " + routes[-1]
 
+    # Speed signals the Rule 0 guides ask for: how many tutors and how much fast mana.
+    tutor_labels = {"tutor-to-hand", "tutor-card", "tutor-creature", "tutor-artifact", "tutor-mv", "tutors by name", "tutor-to-top"}
+    game_changers = game_changers_in_index()
+    tutors = fast_mana = 0
+    for e in spells:
+        nm = normalize_name(e.name)
+        tag_labels_here = {labels.get(t, t) for t in tags_by_name.get(nm, ())}
+        if tag_labels_here & tutor_labels:
+            tutors += e.quantity
+        if (e.cmc or 0) <= 1 and "Creature" not in e.type_line and (
+            tag_labels_here & {"mana rock", "utility mana rock", "ritual", "mana rock with set's mechanic"}
+        ):
+            fast_mana += e.quantity
+    for e in entries:  # fast-mana lands (Ancient Tomb, City of Traitors...) are on the Game Changers list
+        if e.section != "commander" and categorize(e.type_line) in ("Lands", "Basic Lands") and normalize_name(e.name) in game_changers:
+            fast_mana += e.quantity
+    # A rough turn window, from how fast the curve is and whether it can combo or tutor to it.
+    if (combos or tutors >= 5) and pace != "top-heavy":
+        window = "4-7"
+    else:
+        window = {"fast": "5-8", "midrange": "7-10", "top-heavy": "9-12"}[pace]
+    interaction_n = roles["Interaction"]
+    level = "light" if interaction_n < 10 else ("moderate" if interaction_n < 17 else "heavy")
+
     parts = [
         f"Today I'm bringing a {pace} {style} {theme}{sub}.",
-        f"It looks to win through {routes_text}.",
+        f"It looks to win through {routes_text}, usually threatening it around turns {window}.",
     ]
-    inter = f"It runs {_plural(roles['Interaction'], 'piece')} of interaction"
+    inter = f"Interaction is {level}: {_plural(interaction_n, 'piece')}"
     extras = []
     if wipes:
         extras.append(_plural(wipes, "board wipe"))
@@ -709,22 +738,38 @@ def deck_pitch_draft(
         extras.append(_plural(counters, "counterspell"))
     if extras:
         inter += " (including " + " and ".join(extras) + ")"
-    parts.append(f"{inter}, {roles['Ramp']} ramp and {roles['Draw']} card draw, at an average mana value of {avg_mv:.1f}.")
+    parts.append(f"{inter}, plus {roles['Ramp']} ramp and {roles['Draw']} card draw, at an average mana value of {avg_mv:.1f}.")
+    parts.append(f"It runs {_plural(tutors, 'tutor') if tutors else 'no tutors'} and {_plural(fast_mana, 'piece') + ' of fast mana' if fast_mana else 'no fast mana'}.")
+    theft = sum(n for label, n in tag_counts.items() if label.startswith("theft-"))
+    xt = int(facts.get("extra_turn_count") or 0)
+    flags = []
+    if facts.get("mass_land_denial"):
+        flags.append("mass land denial")
+    if xt:
+        flags.append(_plural(xt, "extra-turn effect"))
+    if theft >= 2:
+        flags.append(_plural(theft, "steal effect"))
+    if alt_win:
+        flags.append("an alternate win condition")
+    if combos:
+        flags.append(f"{_plural(combos, 'combo')} already assembled")
+    parts.append(
+        "Cards that might bother a table: " + ", ".join(flags) + "." if flags
+        else "No mass land denial, extra turns or steal effects."
+    )
     bracket = facts.get("wotc_bracket")
     power = []
     if bracket:
         power.append(f"Estimated Bracket {bracket[0]} ({bracket[1]})")
     gc = int(facts.get("game_changers") or 0)
     power.append(f"{_plural(gc, 'Game Changer')}" if gc else "no Game Changers")
-    power.append("mass land denial" if facts.get("mass_land_denial") else "no mass land denial")
-    xt = int(facts.get("extra_turn_count") or 0)
-    power.append(f"{_plural(xt, 'extra-turn effect')}" if xt else "no extra turns")
     power_text = ", ".join(power)
     parts.append(power_text[0].upper() + power_text[1:] + ".")
     signals = {
         "avg_mv": round(avg_mv, 2), "cheap_share": round(cheap_share, 2), "creature_share": round(creature_share, 2),
         "interaction": roles["Interaction"], "ramp": roles["Ramp"], "draw": roles["Draw"], "wipes": wipes,
         "counterspells": counters, "drain": drain, "sacrifice": sacrifice, "pace": pace, "style": style,
+        "tutors": tutors, "fast_mana": fast_mana, "window": window, "interaction_level": level, "theft": theft,
     }
     return {"text": " ".join(parts), "signals": signals}
 

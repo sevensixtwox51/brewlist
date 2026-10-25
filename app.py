@@ -4392,6 +4392,12 @@ function buildBattleCardHtml(data) {{
     ${{included.length ? included.map(c => `<div class="bc-combo">&#10003; ${{comboLine(c)}}</div>`).join('') : ''}}
     ${{almost.length ? almost.map(c => `<div class="bc-combo">&#9675; ${{comboLine(c)}} (needs: ${{(c.missing || []).join(', ')}})</div>`).join('') : ''}}
     ${{!included.length && !almost.length ? '<div class="bc-combo">No known combos detected.</div>' : ''}}
+    <h2>Ask the table</h2>
+    <ul>
+      <li>How long do you want this game to last?</li>
+      <li>How does your deck usually close out the game?</li>
+      <li>Is there anything &mdash; a card or a strategy &mdash; that would take the fun out of the game for you?</li>
+    </ul>
   `;
 }}
 
