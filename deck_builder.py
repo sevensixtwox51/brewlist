@@ -33,7 +33,7 @@ from brewlist_core import (
     prices_data_in_index,
     scryfall_prices_in_index,
 )
-from edhrec_data import commander_profile, commander_synergy_cards, commander_theme_page
+from edhrec_data import commander_data_problem, commander_profile, commander_synergy_cards, commander_theme_page
 
 # WOTC_BRACKET_GAME_CHANGER_MAX is keyed 1/2/3 (brackets 1-2 share a cap
 # of 0 per WotC's own rules; 4-5 have no cap at all -- see its definition
@@ -827,6 +827,8 @@ def edhrec_commander_view(commander_name: str, edhrec_theme: str | None = None) 
         "avg_nonbasic_lands": avg_nonbasic,
         "avg_big_cards": avg_big,
         "mana_curve": mana_curve,
+        # Why EDHREC data is missing (None when it is in hand) -- shown to the player.
+        "problem": None if synergy_data else commander_data_problem(commander_name),
     }
 
 
@@ -1925,6 +1927,7 @@ def suggest_builder_cards(
         edhrec_view["synergy_data"] = _alias_dfc_synergy(edhrec_view["synergy_data"], (c["name"] for c in owned_view))
         if meta_out is not None:
             meta_out["deck_type"] = edhrec_view["deck_type"]
+            meta_out["edhrec_problem"] = edhrec_view.get("problem")
         synergy_data = edhrec_view["synergy_data"]
         edhrec_tracked_names = set(synergy_data.keys())
         for nm, info in synergy_data.items():

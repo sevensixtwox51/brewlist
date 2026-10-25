@@ -73,7 +73,7 @@ from deck_builder import (
     suggest_builder_cards,
     suggest_replacements,
 )
-from edhrec_data import bulk_commander_popularity, commander_profile, commander_theme_page
+from edhrec_data import bulk_commander_popularity, commander_data_problem, commander_profile, commander_theme_page
 from edhrec_data import refresh_all as edhrec_refresh_all
 from edhrec_data import top_list_status as edhrec_top_list_status
 
@@ -1197,6 +1197,9 @@ body.compact .deck-row .card-thumb { display:none; }
 /* The Auto explanation is a long sentence; width:0 + min-width:100% lets it wrap to the
    width the numbers already need instead of stretching the whole panel to fit it. */
 #mix-auto-explain { flex:0 0 100%; width:0; min-width:100%; line-height:1.4; }
+.edhrec-warning { color:var(--missing); font-size:0.78rem; line-height:1.35; max-width:420px; }
+.edhrec-banner { margin:0 0 8px; padding:7px 10px; border-radius:8px; border:1px solid color-mix(in srgb, var(--missing) 55%, var(--card-border));
+  background:color-mix(in srgb, var(--missing) 10%, transparent); color:var(--text); font-size:0.8rem; line-height:1.4; }
 #fast-tip { position:fixed; z-index:500; display:none; max-width:340px; width:max-content; padding:7px 10px; border-radius:8px;
   background:var(--bg-elevated); border:1px solid var(--card-border); color:var(--text); font-size:0.78rem; line-height:1.4;
   box-shadow:var(--shadow); pointer-events:none; }
@@ -1454,6 +1457,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
         <button type="button" class="btn ghost" id="guided-suggest-btn" title="Review the autopicker's choices one deck role at a time, and swap any you disagree with">Suggest cards</button>
         <button type="button" class="btn ghost small" id="suggest-btn" title="One click: drop the autopicker's suggestions into a list below, no review step">Quick suggest</button>
         <select id="deck-type-select" style="display:none;" title="Which way of building this commander EDHREC's synergy data comes from (its tags on EDHREC). Each has its own card synergies, so this changes which cards are suggested. Separate from Preferred theme, which boosts cards you own that carry a theme's tags."></select>
+      <span class="edhrec-warning" id="deck-type-warning" style="display:none;"></span>
         <div class="theme-picker">
           <input type="text" id="theme-input" placeholder="Preferred theme (optional)" autocomplete="off">
           <div class="theme-dropdown" id="theme-dropdown"></div>
@@ -2272,9 +2276,20 @@ function renderDeckTypeSelect() {{
   deckTypeSelect.value = (brew.edhrec_theme && deckTypeList.some(t => t.slug === brew.edhrec_theme)) ? brew.edhrec_theme : '';
   deckTypeSelect.style.display = '';
 }}
+// When EDHREC data can't be had for the chosen commander (offline, no page for it, or the
+// site changed), say so and why, instead of quietly showing an empty deck-type list.
+function edhrecProblemText(msg) {{ return msg ? msg + ' \u2014 builds will use your collection only, with no EDHREC synergy data.' : ''; }}
+function showEdhrecProblem(msg) {{
+  const el = document.getElementById('deck-type-warning');
+  if (!el) return;
+  el.textContent = msg ? '\u26A0 ' + edhrecProblemText(msg) : '';
+  el.style.display = msg ? 'inline' : 'none';
+}}
+function edhrecBannerHtml(msg) {{ return msg ? '<div class="edhrec-banner">\u26A0 ' + escapeHtml(edhrecProblemText(msg)) + '</div>' : ''; }}
+
 function loadDeckTypes() {{
   const requestId = ++deckTypeRequestId;
-  if (brew.format !== 'commander' || !brew.commander) {{ deckTypeList = []; renderDeckTypeSelect(); return; }}
+  if (brew.format !== 'commander' || !brew.commander) {{ deckTypeList = []; renderDeckTypeSelect(); showEdhrecProblem(null); return; }}
   fetch('/builder/deck-types', {{
     method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
     body: JSON.stringify({{ commander: brew.commander }}),
@@ -2285,6 +2300,7 @@ function loadDeckTypes() {{
       deckTypeList = data.deck_types || [];
       if (brew.edhrec_theme && !deckTypeList.some(t => t.slug === brew.edhrec_theme)) brew.edhrec_theme = '';
       renderDeckTypeSelect();
+      showEdhrecProblem(data.edhrec_problem);
     }})
     .catch(() => {{}});
 }}
@@ -2890,6 +2906,12 @@ function updateEdhrecStatus(data) {{
   btn.disabled = false;
   const win = (data.windows || {{}})[document.getElementById('edhrec-window').value];
   const when = win ? formatRelativeTime(win.fetched_at) : null;
+  if (win && win.failed_at && (!win.fetched_at || win.failed_at > win.fetched_at)) {{
+    statusEl.textContent = '\u26A0 Couldn\u2019t refresh rankings: ' + (win.failed_reason || 'EDHREC unavailable') + (when ? ` \u2014 showing the ones saved ${{when}}.` : '.');
+    statusEl.style.color = 'var(--missing)';
+    return;
+  }}
+  statusEl.style.color = '';
   statusEl.textContent = when ? `Rankings last updated ${{when}}` : '';
 }}
 function pollCommanderPopularity(attemptsLeft) {{
@@ -3106,6 +3128,7 @@ function confirmDeckType() {{
 }}
 
 function startWizard(data) {{
+  wizard.edhrecProblem = data.edhrec_problem || null;
   wizard.meta = {{ gcCap: data.gc_cap, gcExisting: data.gc_existing || 0, libraryTarget: data.library_target, libraryCount: data.library_count, deckType: data.deck_type || null }};
   wizard.selected = new Set();
   wizard.basicQty = {{}};
@@ -3315,7 +3338,7 @@ function renderWizard() {{
   const fillerNote = fillerSelected
     ? ' &middot; <span class="filler-count" title="' + FILLER_TIP + '">' + fillerSelected + ' slot filler' + (fillerSelected === 1 ? '' : 's') + '</span>'
     : '';
-  let html = '<div class="wz-intro"><span class="hint wz-blurb">' + escapeHtml(info.blurb) + '</span>'
+  let html = edhrecBannerHtml(wizard.edhrecProblem) + '<div class="wz-intro"><span class="hint wz-blurb">' + escapeHtml(info.blurb) + '</span>'
     + '<span class="wz-count ' + countClass + '"><b>' + n + '</b> selected (aiming for ' + step.needed + ') &middot; ' + countNote + fillerNote + '</span>'
     + '<span class="wz-tools">' + (wizard.meta.deckType ? '<button type="button" class="btn ghost small" data-wz="type" title="Pick a different EDHREC deck type for this commander (restarts the suggestions)">Deck type: ' + escapeHtml(wizard.meta.deckType.value || '') + ' &#9662;</button>' : '')
     + '<button type="button" class="btn ghost small" data-wz="none">Select none</button>'
@@ -3503,7 +3526,7 @@ suggestBtn.addEventListener('click', () => {{
       if (data.error) {{ showError(data.error); return; }}
       applyMixCorrection(data.mix_correction);
       const panel = document.getElementById('suggestions-panel');
-      panel.innerHTML = '<h4 style="font-size:0.8rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.03em;">Suggestions</h4>';
+      panel.innerHTML = edhrecBannerHtml(data.edhrec_problem) + '<h4 style="font-size:0.8rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.03em;">Suggestions</h4>';
       if (!data.suggestions.length) {{
         panel.innerHTML += '<div class="hint" style="margin:0;">No suggestions -- your deck may already be full, or nothing left fits the color/legality filters.</div>';
         return;
@@ -4623,7 +4646,7 @@ def builder_suggest():
     suggestions, err = _run_suggest(body, meta_out=meta)
     if err:
         return jsonify(error=err[0]), err[1]
-    return jsonify(suggestions=suggestions, deck_type=meta.get("deck_type"), mix_correction=meta.get("mix_correction"))
+    return jsonify(suggestions=suggestions, deck_type=meta.get("deck_type"), mix_correction=meta.get("mix_correction"), edhrec_problem=meta.get("edhrec_problem"))
 
 
 @app.route("/builder/suggest-pools", methods=["POST"])
@@ -4640,6 +4663,7 @@ def builder_suggest_pools():
     if err:
         return jsonify(error=err[0]), err[1]
     pools["deck_type"] = meta.get("deck_type")
+    pools["edhrec_problem"] = meta.get("edhrec_problem")
     return jsonify(pools)
 
 
@@ -4691,7 +4715,7 @@ def builder_deck_types():
 
         with ThreadPoolExecutor(max_workers=6) as pool:
             deck_types = list(pool.map(detail, deck_types[:8]))
-    return jsonify(deck_types=deck_types, total_decks=total)
+    return jsonify(deck_types=deck_types, total_decks=total, edhrec_problem=None if deck_types else commander_data_problem(name))
 
 
 @app.route("/builder/optimize", methods=["POST"])

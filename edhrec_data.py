@@ -79,6 +79,7 @@ _NEXT_DATA_RE = re.compile(
 
 _refresh_lock = threading.Lock()
 _refreshing: set[str] = set()  # windows currently being refreshed by a background thread
+_refresh_failures: dict[str, dict] = {}  # window -> {"at", "reason"} for a refresh that failed
 
 
 def _fetch_next_data(url: str) -> dict | None:
@@ -97,13 +98,25 @@ def _fetch_next_data(url: str) -> dict | None:
         return None
 
 
+# How the last fetch of each JSON path went ("ok", "http 404", "http 403", "network",
+# "bad data"), so the UI can say WHY EDHREC data is missing instead of showing nothing.
+_fetch_status: dict[str, str] = {}
+
+
 def _fetch_json_page(path: str) -> dict | None:
     req = urllib.request.Request(f"https://json.edhrec.com/pages/{path}", headers={"User-Agent": _USER_AGENT, "Accept": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=_REQUEST_TIMEOUT) as resp:
-            return json.loads(resp.read().decode("utf-8", errors="replace"))
-    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
-        return None
+            data = json.loads(resp.read().decode("utf-8", errors="replace"))
+        _fetch_status[path] = "ok"
+        return data
+    except urllib.error.HTTPError as e:
+        _fetch_status[path] = f"http {e.code}"
+    except (urllib.error.URLError, TimeoutError, OSError):
+        _fetch_status[path] = "network"
+    except ValueError:
+        _fetch_status[path] = "bad data"
+    return None
 
 
 def _fetch_page_data(path: str) -> dict | None:
@@ -201,7 +214,12 @@ def _refresh_window_in_background(window: str) -> None:
         try:
             entries = _fetch_full_top_list(window)
             if entries is None:
-                return  # best-effort -- leave whatever (possibly stale, possibly absent) cache entry there was
+                # best-effort -- leave whatever (possibly stale, possibly absent) cache entry there was,
+                # but remember that it failed so the UI can say so
+                path = _JSON_WINDOW_PATHS[window] + ".json"
+                _refresh_failures[window] = {"at": time.time(), "reason": _problem_text([_fetch_status.get(_JSON_WINDOW_PATHS[window] + ".json", "")])}
+                return
+            _refresh_failures.pop(window, None)
             cache = _load_cache()
             cache.setdefault("top", {})[window] = {"fetched_at": time.time(), "cards": entries}
             _save_cache(cache)
@@ -250,6 +268,8 @@ def top_list_status(cache: dict | None = None) -> dict:
         windows[window] = {
             "fetched_at": entry.get("fetched_at") if entry else None,
             "count": len(entry.get("cards", [])) if entry else 0,
+            "failed_at": (_refresh_failures.get(window) or {}).get("at"),
+            "failed_reason": (_refresh_failures.get(window) or {}).get("reason"),
         }
     return {"refreshing": is_refreshing(), "windows": windows}
 
@@ -470,6 +490,41 @@ def commander_profile(commander_name: str) -> dict:
     commander_synergy_cards(commander_name)
     entry = _load_cache().get("synergy", {}).get(commander_name.strip().lower()) or {}
     return {"themes": entry.get("themes") or [], "avg_planeswalkers": entry.get("avg_planeswalkers")}
+
+
+def _feed_healthy() -> bool:
+    """Whether EDHREC's JSON feed answers at all (a page that certainly exists),
+    to tell "this commander has no page" apart from "the feed is blocked/changed"."""
+    return _fetch_json_page("commanders/year.json") is not None
+
+
+def _problem_text(statuses: list[str]) -> str:
+    if any(st == "network" for st in statuses):
+        return "Couldn't reach EDHREC (network problem)"
+    codes = [st for st in statuses if st.startswith("http ")]
+    if codes:
+        # EDHREC's feed answers 403 (not 404) for a page that doesn't exist, so a refusal only
+        # means "blocked / site changed" when a page that certainly exists is refused too.
+        if codes[0] in ("http 403", "http 404") and _feed_healthy():
+            return "EDHREC has no page for this commander (it may be too new or have too few decks)"
+        return f"EDHREC refused the request ({codes[0]}) -- the site may have changed or be blocking requests"
+    if any(st == "bad data" for st in statuses):
+        return "EDHREC returned data in a format this app doesn't understand -- the site may have changed"
+    return "EDHREC data isn't available for this commander right now"
+
+
+def commander_data_problem(commander_name: str) -> str | None:
+    """None when EDHREC data for this commander is in hand; otherwise a short,
+    human-readable reason it is missing (offline, no page for it, blocked, or the
+    site's format changed), from how the last fetches went. Builds still work
+    without it -- they use the collection only -- but the player should be told."""
+    entry = _load_cache().get("synergy", {}).get(commander_name.strip().lower()) or {}
+    if entry.get("cards"):
+        return None
+    pop = commander_popularity(commander_name)
+    slugs = ([pop["slug"]] if pop and pop.get("slug") else []) + [_slugify(commander_name)]
+    statuses = [_fetch_status.get(f"commanders/{sl}.json", "") for sl in slugs]
+    return _problem_text([st for st in statuses if st and st != "ok"])
 
 
 def _cards_from_cardlists(cardlists: list[dict]) -> dict[str, dict]:
