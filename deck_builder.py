@@ -996,6 +996,32 @@ def mana_fixes(
     return swaps
 
 
+def deck_filler_flags(entries: list[CardEntry], edhrec_theme: str | None = None) -> dict | None:
+    """Which cards of a finished deck are only slot filler -- EDHREC doesn't list them for this commander's
+    decks (the same test Suggest uses for its "Slot filler" pill). For decks saved before the pill existed.
+    Returns {"fillers": {name: {"role", "note"}}, "checked": n, "problem": str|None}, or None with no commander."""
+    commander = next((e for e in entries if e.section == "commander"), None)
+    if not commander:
+        return None
+    view = edhrec_commander_view(commander.name, edhrec_theme)
+    names = [e.name for e in entries]
+    tracked = set(_alias_dfc_synergy(view["synergy_data"], names).keys())
+    if not tracked:
+        return {"fillers": {}, "checked": 0, "problem": view.get("problem") or "EDHREC has no data for this commander."}
+    budget_alt = budget_alt_data_in_index()
+    role_members = _role_member_names(budget_alt["groups"], budget_alt["tag_labels"])
+    fillers, checked = {}, 0
+    for e in entries:
+        if e.section == "commander" or ("Basic" in e.type_line and "Land" in e.type_line):
+            continue
+        checked += 1
+        if normalize_name(e.name) in tracked:
+            continue
+        role = _card_role(e.name, categorize(e.type_line), role_members)
+        fillers[e.name] = {"role": role, "note": f"not on EDHREC's list for your commander's decks; picked to fill {role}"}
+    return {"fillers": fillers, "checked": checked, "problem": None}
+
+
 def karsten_correction(entries: list[CardEntry], current_lands: int, adjust: int = 0, threshold: int = 2) -> dict | None:
     """The Auto preset's second look: Karsten's formula on the deck a build actually
     produced (its real average mana value and cheap ramp/draw count). Returns
