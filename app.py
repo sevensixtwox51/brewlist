@@ -1689,6 +1689,23 @@ function currentTemplateKey() {{
 // selected the numbers follow the commander / deck type; touching any number or
 // choosing another preset switches it off. Not saved -- the numbers are.
 let mixAuto = false;
+
+// What each of the five deck-shape numbers counts. Every card falls into exactly one
+// role: lands by type first, then Ramp, then Draw, then Interaction (a card tagged for
+// two of those counts in the first), and everything else is Synergy.
+const ROLE_HELP = {{
+  Lands: 'Land cards in the 99-card library: nonbasic lands plus basics. Karsten\u2019s formula suggests a number from your deck\u2019s average mana value and how many cheap ramp and draw cards it has (see Auto).',
+  Ramp: 'Cards that make or fetch mana: mana rocks (Sol Ring, signets), mana creatures, and spells that put lands onto the battlefield. Ones costing 2 or less also lower how many lands the deck needs.',
+  Draw: 'Card advantage: spells and permanents that draw cards or let you play cards from the top of the library. Loots and cantrips that only replace themselves rank behind real card advantage. A commander that draws for itself (Sauron, Cloud) gets 4 fewer.',
+  Interaction: 'Answers to what opponents do: targeted removal, board wipes, counterspells, bounce and tuck effects, and edicts. Burn on a creature or a mass-removal card both count.',
+  Synergy: 'Everything else: creatures, win conditions, and cards that support your commander\u2019s plan. It is not set directly -- it is whatever is left of the 99 after the four numbers above.',
+}};
+['Lands', 'Ramp', 'Draw', 'Interaction'].forEach(role => {{
+  const label = document.getElementById('mix-' + role.toLowerCase()).closest('label');
+  if (label) label.title = ROLE_HELP[role];
+}});
+document.getElementById('mix-synergy-readout').title = ROLE_HELP.Synergy;
+
 function updateSynergyReadout() {{
   const t = brew.mix_targets;
   const synergy = Math.max(0, 100 - (t.Lands + t.Ramp + t.Draw + t.Interaction));
@@ -4099,7 +4116,7 @@ function renderDeckShape(data) {{
     const actual = counts[role] || 0;
     const target = targets[role];
     if (target === null || target === undefined) {{
-      return `<div class="shape-row"><span class="shape-label">${{role}}</span><span class="shape-count">${{actual}} card(s)</span></div>`;
+      return `<div class="shape-row" title="${{ROLE_HELP[role] || ''}}"><span class="shape-label">${{role}}</span><span class="shape-count">${{actual}} card(s)</span></div>`;
     }}
     const ratio = target ? actual / target : (actual ? 2 : 0);
     let cls = 'near';
@@ -4107,7 +4124,7 @@ function renderDeckShape(data) {{
     else if (ratio > 1.3) cls = 'over';
     const widthPct = Math.min(100, ratio * 100);
     return `
-      <div class="shape-row" title="${{actual}} of a ~${{target}} target">
+      <div class="shape-row" title="${{actual}} of a ~${{target}} target. ${{ROLE_HELP[role] || ''}}">
         <span class="shape-label">${{role}}</span>
         <div class="shape-bar-track"><div class="shape-bar ${{cls}}" style="width:${{widthPct}}%"></div></div>
         <span class="shape-count">${{actual}} / ~${{target}}</span>
