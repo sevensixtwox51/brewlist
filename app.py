@@ -2592,9 +2592,8 @@ function closeReplacePopup() {{ replacePopup.classList.remove('show'); }}
 function openReplacePopup(btn, card) {{
   const rect = btn.getBoundingClientRect();
   replacePopup.innerHTML = '<h5>Suggested replacements</h5><div class="hint">Loading&hellip;</div>';
-  replacePopup.style.top = (rect.bottom + 6) + 'px';
-  replacePopup.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - 268)) + 'px';
   replacePopup.classList.add('show');
+  placePopup(replacePopup, btn, 260);
   fetch('/builder/replace', {{
     method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
     body: JSON.stringify({{
@@ -2606,9 +2605,10 @@ function openReplacePopup(btn, card) {{
     .then(r => r.json())
     .then(data => {{
       if (!replacePopup.classList.contains('show')) return; // closed while the request was in flight
-      if (data.error) {{ replacePopup.innerHTML = `<h5>Suggested replacements</h5><div class="hint">${{data.error}}</div>`; return; }}
+      if (data.error) {{ replacePopup.innerHTML = `<h5>Suggested replacements</h5><div class="hint">${{data.error}}</div>`; placePopup(replacePopup, btn, 260); return; }}
       if (!data.replacements.length) {{
         replacePopup.innerHTML = '<h5>Suggested replacements</h5><div class="hint">Nothing else owned fills this role.</div>';
+        placePopup(replacePopup, btn, 260);
         return;
       }}
       replacePopup.innerHTML = '<h5>Suggested replacements</h5>' +
@@ -2617,6 +2617,7 @@ function openReplacePopup(btn, card) {{
             ${{thumbHtml(r.scryfall_id, 'card-thumb small')}}
             <div><div>${{r.name}}</div><div class="reason">${{r.reason}}</div></div>
           </div>`).join('');
+      placePopup(replacePopup, btn, 260);
       replacePopup.querySelectorAll('.replace-item').forEach(item => {{
         const rep = data.replacements[Number(item.dataset.i)];
         item.addEventListener('click', () => {{
@@ -3063,6 +3064,22 @@ function setWizardFooter(opts) {{
 
 const FILLER_TIP = 'This card is not on EDHREC&#39;s list for this commander&#39;s decks (and has no combo or theme link here) -- it was picked only to fill a slot, ranked by overall popularity. It can still be a popular card elsewhere.';
 function isFiller(card) {{ return card.basis === 'filler'; }}
+// Keeps a fixed-position popup fully on screen: below its anchor if it fits, else above,
+// else pinned to the bottom edge, and capped in height so it scrolls instead of running
+// off the viewport. Call again whenever its content (and so its height) changes.
+function placePopup(el, anchor, width) {{
+  const margin = 8, r = anchor.getBoundingClientRect();
+  el.style.maxHeight = Math.max(140, Math.min(320, window.innerHeight - 2 * margin)) + 'px';
+  const h = el.offsetHeight;
+  let top = r.bottom + 6;
+  if (top + h > window.innerHeight - margin) {{
+    const above = r.top - 6 - h;
+    top = above >= margin ? above : Math.max(margin, window.innerHeight - margin - h);
+  }}
+  el.style.top = top + 'px';
+  el.style.left = Math.max(margin, Math.min(r.left, window.innerWidth - width - margin)) + 'px';
+}}
+
 // Role pools for a card that is already IN the deck: a full deck has no open slots,
 // so the server would return nothing -- ask with that card taken out (one open
 // slot), which still gives the best cards you don't own for its role. Cached until
@@ -3098,18 +3115,14 @@ function openBuyPopup(anchor, suggestion, getPools) {{
   document.body.appendChild(pop);
   setupHoverPreview(pop);  // the popup lives on <body>, outside every container that already has hover previews
   buyPopup = pop;
-  const r = anchor.getBoundingClientRect();
-  const w = 360;
-  pop.style.left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8)) + 'px';
-  const below = r.bottom + 6;
-  pop.style.top = (below + 300 > window.innerHeight ? Math.max(8, r.top - 6 - 300) : below) + 'px';
+  placePopup(pop, anchor, 360);
   getPools().then(pools => {{
     if (buyPopup !== pop) return;
     const step = (pools.steps || []).find(s => s.role === suggestion.role);
     const options = ((step && step.unowned_alternates) || []).filter(c => !findCard(c.name)).slice(0, 12);
     const body = pop.querySelector('.buy-body');
     body.classList.remove('hint');
-    if (!options.length) {{ body.innerHTML = '<div class="hint" style="margin:0;">No purchase suggestions for this role.</div>'; return; }}
+    if (!options.length) {{ body.innerHTML = '<div class="hint" style="margin:0;">No purchase suggestions for this role.</div>'; placePopup(pop, anchor, 360); return; }}
     body.innerHTML = options.map(c => {{
       const price = c.price != null ? '$' + c.price.toFixed(2) : '';
       const buy = c.price_url
@@ -3120,6 +3133,7 @@ function openBuyPopup(anchor, suggestion, getPools) {{
         + '<span class="buy-text"><b>' + escapeHtml(c.name) + '</b><span class="reason">' + escapeHtml(c.reason || '') + '</span></span>'
         + buy + '</div>';
     }}).join('');
+    placePopup(pop, anchor, 360);
   }}).catch(() => {{
     if (buyPopup === pop) pop.querySelector('.buy-body').textContent = 'Could not look up cards to buy.';
   }});
