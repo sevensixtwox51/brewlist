@@ -621,6 +621,114 @@ def deck_templates(target_size: int = 100) -> dict[str, dict[str, int]]:
     return templates
 
 
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}" + ("" if n == 1 else "s")
+
+
+def deck_pitch_draft(
+    entries: list[CardEntry], commander_name: str | None, commander_type_line: str | None,
+    deck_label: str | None, facts: dict, role_members: dict[str, frozenset[str]] | None = None,
+) -> dict | None:
+    """A first-person Rule 0 pitch for a finished or partial Commander deck, assembled from
+    what the cards show (no AI, no guessing): pace and style from the curve and the creature
+    share, the theme from EDHREC's deck type for the commander, a sub-theme from card types and
+    mechanics, win routes from the creature share, drain cards and known combos, then the
+    interaction/ramp/draw counts and the bracket facts. Returns {"text", "signals"} or None for
+    an empty deck. It is a draft: intent can't be inferred, so the player edits it.
+    `facts`: combos_included, wotc_bracket ((n, label) or None), game_changers, mass_land_denial,
+    extra_turn_count."""
+    budget_alt = budget_alt_data_in_index()
+    if role_members is None:
+        role_members = _role_member_names(budget_alt["groups"], budget_alt["tag_labels"])
+    tags_by_name, _ = _card_tag_index(budget_alt["groups"])
+    labels = budget_alt["tag_labels"]
+    spells = [e for e in entries if e.section != "commander" and categorize(e.type_line) not in ("Lands", "Basic Lands")]
+    total = sum(e.quantity for e in spells)
+    if not total:
+        return None
+    avg_mv = sum((e.cmc or 0) * e.quantity for e in spells) / total
+    cheap_share = sum(e.quantity for e in spells if (e.cmc or 0) <= 2) / total
+    creatures = sum(e.quantity for e in spells if "Creature" in e.type_line)
+    creature_share = creatures / total
+
+    def share(word: str) -> float:
+        return sum(e.quantity for e in spells if word in e.type_line) / total
+
+    roles = collections.Counter()
+    tag_counts = collections.Counter()
+    for e in spells:
+        roles[_card_role(e.name, categorize(e.type_line), role_members)] += e.quantity
+        for t in tags_by_name.get(normalize_name(e.name), ()):
+            tag_counts[labels.get(t, t)] += e.quantity
+    wipes = tag_counts["sweeper"] + tag_counts["sweeper-one-sided"]
+    counters = sum(n for label, n in tag_counts.items() if label.startswith("counterspell"))
+    drain = tag_counts["opponent loses life"]
+    sacrifice = sum(n for label, n in tag_counts.items() if label.startswith("sacrifice outlet"))
+    instants_sorceries = share("Instant") + share("Sorcery")
+
+    pace = "fast" if avg_mv < 2.7 else ("midrange" if avg_mv < 3.3 else "top-heavy")
+    if creature_share >= 0.42:
+        style = "creature-based"
+    elif counters >= 4 or wipes >= 5:
+        style = "control-leaning"
+    elif instants_sorceries >= 0.4:
+        style = "spell-heavy"
+    else:
+        style = "value"
+    theme = f"{deck_label} deck" if deck_label else (f"deck built around {commander_name}" if commander_name else "deck")
+    subs = []
+    if share("Artifact") >= 0.25:
+        subs.append("artifacts")
+    if share("Enchantment") >= 0.2:
+        subs.append("enchantments")
+    if sacrifice >= 6:
+        subs.append("sacrifice")
+    sub = f", with {subs[0]} as a sub-theme" if subs else ""
+
+    routes = []
+    if creature_share >= 0.3:
+        routes.append("combat and commander damage" if "Creature" in (commander_type_line or "") else "combat damage")
+    if drain >= 6:
+        routes.append("incremental life drain")
+    combos = int(facts.get("combos_included") or 0)
+    if combos:
+        routes.append(f"{_plural(combos, 'known combo')} that can close the game early")
+    if not routes:
+        routes.append("steady value and board presence")
+    routes_text = routes[0] if len(routes) == 1 else ", ".join(routes[:-1]) + " and " + routes[-1]
+
+    parts = [
+        f"Today I'm bringing a {pace} {style} {theme}{sub}.",
+        f"It looks to win through {routes_text}.",
+    ]
+    inter = f"It runs {_plural(roles['Interaction'], 'piece')} of interaction"
+    extras = []
+    if wipes:
+        extras.append(_plural(wipes, "board wipe"))
+    if counters:
+        extras.append(_plural(counters, "counterspell"))
+    if extras:
+        inter += " (including " + " and ".join(extras) + ")"
+    parts.append(f"{inter}, {roles['Ramp']} ramp and {roles['Draw']} card draw, at an average mana value of {avg_mv:.1f}.")
+    bracket = facts.get("wotc_bracket")
+    power = []
+    if bracket:
+        power.append(f"Estimated Bracket {bracket[0]} ({bracket[1]})")
+    gc = int(facts.get("game_changers") or 0)
+    power.append(f"{_plural(gc, 'Game Changer')}" if gc else "no Game Changers")
+    power.append("mass land denial" if facts.get("mass_land_denial") else "no mass land denial")
+    xt = int(facts.get("extra_turn_count") or 0)
+    power.append(f"{_plural(xt, 'extra-turn effect')}" if xt else "no extra turns")
+    power_text = ", ".join(power)
+    parts.append(power_text[0].upper() + power_text[1:] + ".")
+    signals = {
+        "avg_mv": round(avg_mv, 2), "cheap_share": round(cheap_share, 2), "creature_share": round(creature_share, 2),
+        "interaction": roles["Interaction"], "ramp": roles["Ramp"], "draw": roles["Draw"], "wipes": wipes,
+        "counterspells": counters, "drain": drain, "sacrifice": sacrifice, "pace": pace, "style": style,
+    }
+    return {"text": " ".join(parts), "signals": signals}
+
+
 # Frank Karsten's Commander land formula: lands = 31.42 + 3.13 x (average mana
 # value of the nonland cards) - 0.28 x (number of cheap -- MV 2 or less -- mana
 # ramp and card draw spells). The mix can't know the finished deck's numbers up

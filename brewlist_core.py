@@ -4116,7 +4116,7 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
                  buckets: dict[str, list[CardResult]], totals: dict,
                  overrides_endpoint: str | None = None, is_commander_format: bool = False,
                  ai_summary: str = "", further_optimizations: list[str] | None = None,
-                 maybeboard: list[dict] | None = None) -> str:
+                 maybeboard: list[dict] | None = None, pitch: str = "") -> str:
     """Renders the full standalone HTML report. Every price/enrichment here
     reflects build_comparison's single always-accurate pass (see its
     docstring) -- there's no separate "fast vs. accurate" mode to reconcile.
@@ -4416,6 +4416,12 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
         f'<div class="ai-summary-note"><b>&#10024; AI Summary</b> -- {html.escape(ai_summary)}</div>'
         if ai_summary else ""
     )
+    pitch_html = (
+        '<div class="ai-summary-note"><b>&#127908; Rule 0 pitch</b> -- '
+        + html.escape(pitch.strip()).replace("\n", "<br>")
+        + "</div>"
+        if pitch and pitch.strip() else ""
+    )
     further_optimizations_html = (
         '<div class="ai-summary-note"><b>&#10003; Optimizations applied</b><ul class="rule0-list" style="margin-top:6px;">'
         + "".join(f"<li>&#10003; {html.escape(t)}</li>" for t in further_optimizations)
@@ -4439,6 +4445,7 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
     deck_analysis_html = f"""<details class="combos-panel" open>
 <summary>&#128202; Deck Analysis</summary>
 <div class="deck-analysis-body">
+  {pitch_html}
   {ai_summary_html}
   {further_optimizations_html}
   {maybeboard_html}

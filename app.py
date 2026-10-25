@@ -54,6 +54,8 @@ from brewlist_core import (
     update_from_git,
 )
 from deck_builder import (
+    deck_pitch_draft,
+    edhrec_commander_view,
     KARSTEN_BASE,
     KARSTEN_PER_CHEAP,
     KARSTEN_PER_MV,
@@ -217,7 +219,7 @@ def _run_compare_job(job_id, entries, owned, break_out_basics, reserved,
                 job["error"] = str(e)
 
 
-def _run_brew_report_job(job_id, entries, owned, deck_id, deck_name, is_commander_format, ai_summary="", further_optimizations=None, maybeboard=None):
+def _run_brew_report_job(job_id, entries, owned, deck_id, deck_name, is_commander_format, ai_summary="", further_optimizations=None, maybeboard=None, pitch=""):
     """Same job shape as _run_compare_job, for the deck builder's "View
     full report" button -- reuses the exact same /compare/progress and
     /compare/result polling routes, so a brew's report is a saved decklist
@@ -239,7 +241,7 @@ def _run_brew_report_job(job_id, entries, owned, deck_id, deck_name, is_commande
         html_report = render_html(
             deck_name, "", deck_id, bucket_names, buckets, totals,
             overrides_endpoint=f"/api/overrides/{deck_id}",
-            is_commander_format=is_commander_format, ai_summary=ai_summary,
+            is_commander_format=is_commander_format, ai_summary=ai_summary, pitch=pitch,
             further_optimizations=further_optimizations, maybeboard=maybeboard,
         )
         with _JOBS_LOCK:
@@ -1428,6 +1430,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
         "ai_summary": brew.get("ai_summary") or "",
         "further_optimizations": brew.get("further_optimizations") or [],
         "maybeboard": brew.get("maybeboard") or [],
+        "pitch": brew.get("pitch") or "",
     }
 
     category_options = "".join(f'<option value="{_esc(b)}">{_esc(b)}</option>' for b in BUCKET_ORDER)
@@ -1626,10 +1629,18 @@ def render_builder_page(deck_id: str | None = None) -> str:
       <div class="hint" id="analyze-loading" style="margin:0 0 12px;">Checking&hellip; (calls Commander Spellbook live, may take a few seconds)</div>
 
       <h4 class="analysis-heading">Rule 0 summary</h4>
+      <div id="pitch-block" style="margin:0 0 12px;">
+        <label for="rule0-pitch" class="hint" style="margin:0 0 4px;display:block;">Your pitch &mdash; what you'd say at the table. Saved with the deck; shown on the battle card and in the report.</label>
+        <textarea id="rule0-pitch" rows="4" placeholder="e.g. &ldquo;Today I'm bringing a midrange abilities-matter deck with an artifacts sub-theme...&rdquo;" style="width:100%;box-sizing:border-box;padding:8px 10px;border-radius:8px;border:1px solid var(--card-border);background:var(--bg);color:var(--text);font:inherit;font-size:0.85rem;line-height:1.45;resize:vertical;"></textarea>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap;">
+          <button type="button" class="btn ghost small" id="rule0-pitch-draft-btn" title="Writes a first draft from this deck's curve, creature count, EDHREC deck type, win routes, interaction and bracket facts -- then edit it into your own words.">&#9998; Write a draft</button>
+          <span class="hint" id="rule0-pitch-note" style="margin:0;"></span>
+        </div>
+      </div>
       <ul class="rule0-list" id="rule0-list"></ul>
 
       <h4 class="analysis-heading">&#9878;&#65039; Deck Shape</h4>
-      <p class="hint" style="margin:0 0 8px;">Actual card counts against the rough Commander template (~37 lands, ~10 ramp, ~10 draw, ~15 removal/wipes, rest win-cons &amp; synergy) -- guidelines, not hard walls.</p>
+      <p class="hint" style="margin:0 0 8px;">Actual card counts against your Deck mix targets (the template you picked; Command Zone by default) &mdash; guidelines, not hard walls.</p>
       <div id="deck-shape-breakdown"></div>
 
       <h4 class="analysis-heading">&#128202; Mana Curve &amp; Colors</h4>
@@ -4153,6 +4164,26 @@ function rule0Items(data) {{
   return items;
 }}
 
+// The player's own Rule 0 pitch (saved with the deck as brew.pitch). The draft button fills it from
+// the server's rule-based draft (deck_pitch_draft) -- a starting point, never auto-applied.
+let lastPitchDraft = '';
+const pitchBox = document.getElementById('rule0-pitch');
+const pitchNote = document.getElementById('rule0-pitch-note');
+pitchBox.addEventListener('input', () => {{ brew.pitch = pitchBox.value; }});
+document.getElementById('rule0-pitch-draft-btn').addEventListener('click', () => {{
+  if (!lastPitchDraft) {{ pitchNote.textContent = 'The draft is written once the deck check below finishes.'; return; }}
+  const current = pitchBox.value.trim();
+  if (current && current !== lastPitchDraft.trim() && !confirm('Replace your pitch with a new draft?')) return;
+  pitchBox.value = lastPitchDraft;
+  brew.pitch = lastPitchDraft;
+  pitchNote.textContent = 'Draft written \u2014 edit it into your own words.';
+}});
+function showPitchFor(data) {{
+  lastPitchDraft = (data && data.pitch_draft && data.pitch_draft.text) || '';
+  document.getElementById('pitch-block').style.display = data && data.is_commander_format === false ? 'none' : 'block';
+  pitchNote.textContent = brew.pitch ? '' : (lastPitchDraft ? 'No pitch yet \u2014 click "Write a draft" for a starting point.' : '');
+}}
+
 function renderComboReference(data) {{
   const included = data.combos_included_list || [];
   const almost = data.combos_almost_list || [];
@@ -4204,6 +4235,8 @@ analyzeBtn.addEventListener('click', () => {{
     return;
   }}
   lastAnalyzeData = null;
+  pitchBox.value = brew.pitch || '';
+  lastPitchDraft = '';
   analyzeModal.classList.add('show');
   document.getElementById('analyze-modal-title').textContent = brew.deck_name || document.getElementById('deck-name').value || 'Analyze Deck';
   document.getElementById('ai-summary-block').style.display = brew.ai_summary ? 'block' : 'none';
@@ -4243,6 +4276,7 @@ analyzeBtn.addEventListener('click', () => {{
         `<span class="bv-badge ${{b.cls || ''}}">${{b.label}}<span class="tooltip-popup">${{b.tip}}</span></span>`
       ).join('');
       document.getElementById('rule0-list').innerHTML = rule0Items(data).map(t => `<li>${{t}}</li>`).join('');
+      showPitchFor(data);
       renderDeckShape(data);
       renderComboReference(data);
       printBattleCardBtn.disabled = false;
@@ -4349,6 +4383,7 @@ function buildBattleCardHtml(data) {{
     <h1>${{name}}</h1>
     <div class="bc-sub">${{commanderLine}}</div>
     <div class="bc-badges">${{badges.map(b => `<span>${{b}}</span>`).join('')}}</div>
+    ${{brew.pitch && brew.pitch.trim() ? `<h2>The pitch</h2><p>${{escapeHtml(brew.pitch.trim()).replace(/\\n/g, '<br>')}}</p>` : ''}}
     <h2>Rule 0 Summary</h2>
     <ul>${{rule0Items(data).map(t => `<li>${{t}}</li>`).join('')}}</ul>
     <h2>Game Changers</h2>
@@ -4580,6 +4615,7 @@ def builder_save():
         ai_summary=body.get("ai_summary") or "",
         further_optimizations=body.get("further_optimizations") or [],
         maybeboard=body.get("maybeboard") or [],
+        pitch=body.get("pitch") or "",
     )
     return jsonify(deck_id=deck_id)
 
@@ -4728,6 +4764,29 @@ def builder_suggest_pools():
     pools["deck_type"] = meta.get("deck_type")
     pools["edhrec_problem"] = meta.get("edhrec_problem")
     return jsonify(pools)
+
+
+def _pitch_draft_for(body: dict, entries, totals: dict):
+    """The Rule 0 pitch draft for /builder/stats (see deck_builder.deck_pitch_draft)."""
+    commander = body.get("commander") or {}
+    deck_label = None
+    if commander.get("name"):
+        try:
+            deck_label = ((edhrec_commander_view(commander["name"], body.get("edhrec_theme") or None).get("deck_type")) or {}).get("value")
+        except Exception:  # noqa: BLE001 -- the pitch is a nicety; never fail Analyze over it
+            deck_label = None
+    combos = totals.get("combos") or {}
+    facts = {
+        "combos_included": len(combos.get("included") or []),
+        "wotc_bracket": totals.get("wotc_bracket"),
+        "game_changers": totals.get("game_changers"),
+        "mass_land_denial": totals.get("mass_land_denial"),
+        "extra_turn_count": totals.get("extra_turn_count"),
+    }
+    try:
+        return deck_pitch_draft(entries, commander.get("name"), commander.get("type_line"), deck_label, facts)
+    except Exception:  # noqa: BLE001
+        return None
 
 
 @app.route("/builder/auto-mix", methods=["POST"])
@@ -4920,6 +4979,7 @@ def builder_stats():
         is_commander_format=is_commander_format,
         role_counts=role_counts_for_entries(entries),
         karsten=deck_karsten(entries) if is_commander_format else None,
+        pitch_draft=_pitch_draft_for(body, entries, totals) if is_commander_format else None,
         role_targets=deck_shape_targets_with_mix(
             deck_format, target_size, _mix_targets_from(body),
             commander_card=gameplay_data_in_index().get(normalize_name((body.get("commander") or {}).get("name") or "")),
@@ -4954,7 +5014,7 @@ def builder_report_start():
         args=(job_id, entries, owned, deck_id, brew.get("deck_name") or "Brew", is_commander_format),
         kwargs={
             "ai_summary": brew.get("ai_summary") or "", "further_optimizations": brew.get("further_optimizations") or [],
-            "maybeboard": brew.get("maybeboard") or [],
+            "maybeboard": brew.get("maybeboard") or [], "pitch": brew.get("pitch") or "",
         },
         daemon=True,
     ).start()
