@@ -414,10 +414,69 @@ def _page_chrome(subtitle: str, error: str | None) -> tuple[str, str]:
 SHUTDOWN_BTN_SCRIPT = """
 document.getElementById('shutdown-btn').addEventListener('click', () => {
   if (!confirm('Shut down the server? You will need to relaunch it to use this again.')) return;
+  window.__serverWatchStop = true;
   fetch('/shutdown', { method: 'POST' }).catch(() => {});
   document.body.innerHTML =
     '<main><p style="color:var(--text-dim);padding-top:40px;">Server stopped. You can close this tab.</p></main>';
 });
+"""
+
+
+# Page-side server watcher (home, Decks and Deck Builder pages): pings /health every 10 s and,
+# after two missed pings, shows a banner so a dead server isn't discovered only when the
+# next Save/Suggest fails. Also notices when the server was restarted under an open page.
+SERVER_WATCH_SCRIPT = """
+(function () {
+  const INTERVAL_MS = 10000, TIMEOUT_MS = 4000, MISSES_BEFORE_BANNER = 2;
+  let misses = 0, startedAt = null, banner = null;
+  function show(kind, html) {
+    if (window.__serverWatchStop) return;
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.id = 'server-watch-banner';
+      banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:600;padding:9px 16px;text-align:center;font-size:0.85rem;line-height:1.4;box-shadow:0 2px 10px rgba(0,0,0,.4);';
+      document.body.appendChild(banner);
+    }
+    const bad = kind === 'down';
+    banner.style.background = bad ? 'var(--missing, #fb7185)' : 'var(--gold, #facc15)';
+    banner.style.color = bad ? '#2a0509' : '#241f00';
+    banner.innerHTML = html;
+    banner.style.display = 'block';
+    const btn = banner.querySelector('button');
+    if (btn) btn.onclick = () => { btn.textContent = 'Checking...'; ping(true); };
+  }
+  function hide() { if (banner) banner.style.display = 'none'; }
+  async function ping(manual) {
+    if (window.__serverWatchStop) return;
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+      const r = await fetch('/health', { cache: 'no-store', signal: ctrl.signal });
+      clearTimeout(timer);
+      if (!r.ok) throw new Error('bad status');
+      const j = await r.json();
+      misses = 0;
+      if (startedAt && j.started && j.started !== startedAt) {
+        show('restarted', 'The server was restarted since this page loaded. Your deck here is still intact -- <button type="button" style="margin-left:6px;">Reload page</button>');
+        const btn = banner.querySelector('button');
+        if (btn) btn.onclick = () => location.reload();
+      } else {
+        hide();
+      }
+      if (!startedAt) startedAt = j.started;
+    } catch (e) {
+      misses += 1;
+      if (misses >= MISSES_BEFORE_BANNER || manual) {
+        show('down', '<b>Server not responding</b> -- it may have been shut down or have crashed. Anything you haven\\u2019t saved is only in this tab: on the Deck Builder, <b>Copy Decklist</b> keeps your deck (Import Decklist restores it). <button type="button" style="margin-left:6px;">Check again</button>');
+      }
+    }
+  }
+  window.serverWatch = { ping };
+  setInterval(() => ping(false), INTERVAL_MS);
+  ping(false);
+  window.addEventListener('online', () => ping(false));
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) ping(false); });
+})();
 """
 
 
@@ -589,6 +648,7 @@ checkUpdatesBtn.addEventListener('click', () => {{
 }});
 
 {SHUTDOWN_BTN_SCRIPT}
+{SERVER_WATCH_SCRIPT}
 </script>
 </body>
 </html>
@@ -825,6 +885,7 @@ form.addEventListener('submit', (e) => {{
 }});
 
 {SHUTDOWN_BTN_SCRIPT}
+{SERVER_WATCH_SCRIPT}
 </script>
 </body>
 </html>
@@ -1641,12 +1702,14 @@ const DECK_TEMPLATES = {json.dumps(deck_templates(100))};
 // What's on disk right now (the deck as loaded, or as last saved), so Shut Down
 // can warn before throwing away unsaved work.
 let lastSavedJson = JSON.stringify(brew);
+{SERVER_WATCH_SCRIPT}
 document.getElementById('shutdown-btn').addEventListener('click', () => {{
   const unsaved = brew.cards.length > 0 && JSON.stringify(brew) !== lastSavedJson;
   const msg = unsaved
     ? 'This deck has unsaved changes. Shut down anyway? (Cancel, then Save or Copy Decklist first.)'
     : 'Shut down the server? You will need to relaunch it to use this again.';
   if (!confirm(msg)) return;
+  window.__serverWatchStop = true;
   fetch('/shutdown', {{ method: 'POST' }}).catch(() => {{}});
   // Unlike the other pages, leave the builder on screen: the deck is still
   // here and Copy Decklist works without the server.
@@ -5065,6 +5128,53 @@ def save_overrides(deck_id):
     return {"ok": True, "reserved_count": len(clean)}
 
 
+APP_STARTED_AT = time.time()
+_last_activity = time.time()
+
+
+@app.before_request
+def _note_activity():
+    """Every request counts as activity -- what the opt-in idle exit below watches."""
+    global _last_activity
+    _last_activity = time.time()
+
+
+@app.route("/health")
+def health():
+    """Tiny liveness check for the page-side watcher (see SERVER_WATCH_SCRIPT). `started`
+    changes when the server is restarted, so an open page can tell."""
+    return jsonify(ok=True, started=APP_STARTED_AT)
+
+
+# Opt-in: BREWLIST_IDLE_EXIT_MINUTES=10 makes the server quit once nothing has talked to it
+# for that long. Open pages ping /health every ~10 s (even in a background tab, which the
+# browser slows to about once a minute), so while any Brewlist tab is open the server stays up
+# and closing the last one shuts it down. Not meant for Docker (the container would be restarted).
+_IDLE_EXIT_MIN_SECONDS = 120
+
+
+def _idle_exit_watcher(idle_seconds: float, poll_seconds: float = 15.0) -> None:
+    while True:
+        time.sleep(poll_seconds)
+        idle = time.time() - _last_activity
+        if idle > idle_seconds:
+            print(f"No Brewlist page has been open for {int(idle // 60)} min -- shutting down (BREWLIST_IDLE_EXIT_MINUTES).")
+            os._exit(0)
+
+
+def _start_idle_exit_if_configured() -> None:
+    raw = os.environ.get("BREWLIST_IDLE_EXIT_MINUTES", "").strip()
+    if not raw:
+        return
+    try:
+        seconds = max(_IDLE_EXIT_MIN_SECONDS, float(raw) * 60)
+    except ValueError:
+        print(f"Ignoring BREWLIST_IDLE_EXIT_MINUTES={raw!r} (not a number).")
+        return
+    print(f"Idle exit on: the server stops after {seconds / 60:.0f} min with no open Brewlist page.")
+    threading.Thread(target=_idle_exit_watcher, args=(seconds,), daemon=True).start()
+
+
 @app.route("/shutdown", methods=["POST"])
 def shutdown():
     # os._exit() rather than a graceful stop: this is a personal local dev
@@ -5133,6 +5243,7 @@ if __name__ == "__main__":
         # that permission's state.
         threading.Thread(target=_open_browser_when_ready, args=(f"http://127.0.0.1:{port}",), daemon=True).start()
     threading.Thread(target=_check_for_updates_on_launch, daemon=True).start()
+    _start_idle_exit_if_configured()
     # use_reloader=False: the reloader runs the app in a child process and
     # respawns it on exit, which would silently undo the /shutdown route above.
     # debug=True is kept for friendly in-browser tracebacks if something breaks.

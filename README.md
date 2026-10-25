@@ -271,6 +271,14 @@ Either way, it finds a free port automatically (starting at 5050, since
 macOS's AirPlay Receiver often squats on 5000) and opens your browser to
 it -- same behavior on macOS, Windows, and Linux. Closing the terminal
 window (or the "Shut Down" button in the page itself) stops the server.
+Every page checks that the server is still alive (a tiny `/health` ping every
+10 seconds); if it stops answering, a banner says so and points you to Copy
+Decklist so an open deck isn't lost, and a yellow banner appears if the server was
+restarted under an open page. Set `BREWLIST_IDLE_EXIT_MINUTES` (e.g.
+`BREWLIST_IDLE_EXIT_MINUTES=10 python3 app.py`; minimum 2) to have the server quit by itself
+once no Brewlist page has been open for that long -- closing the last tab then really
+shuts it down. It's off by default, and not meant for Docker (the container would just be
+restarted).
 Set `PORT` (e.g. `PORT=6000 python3 app.py`) to force a specific port
 instead of auto-picking one. `HOST` (default `127.0.0.1`, local machine
 only) and `NO_BROWSER=1` (skip auto-opening a browser) are also available
