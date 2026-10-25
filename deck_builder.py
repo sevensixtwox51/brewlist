@@ -656,11 +656,24 @@ def deck_pitch_draft(
 
     roles = collections.Counter()
     tag_counts = collections.Counter()
+    # Interaction is counted as spells (removal, counters, wipes you cast) apart from bodies
+    # (creatures whose attached removal is a bonus, like Massacre Wurm): a table reads "12
+    # removal spells" very differently from "12 interaction pieces" when half are creatures.
+    interaction_spells = interaction_bodies = wipes = 0
     for e in spells:
-        roles[_card_role(e.name, categorize(e.type_line), role_members)] += e.quantity
+        role = _card_role(e.name, categorize(e.type_line), role_members)
+        roles[role] += e.quantity
+        is_body = "Creature" in e.type_line
+        if role == "Interaction":
+            if is_body:
+                interaction_bodies += e.quantity
+            else:
+                interaction_spells += e.quantity
         for t in tags_by_name.get(normalize_name(e.name), ()):
-            tag_counts[labels.get(t, t)] += e.quantity
-    wipes = tag_counts["sweeper"] + tag_counts["sweeper-one-sided"]
+            label = labels.get(t, t)
+            tag_counts[label] += e.quantity
+            if label in ("sweeper", "sweeper-one-sided") and not is_body:
+                wipes += e.quantity  # a creature's board-clearing ETB isn't a wipe you cast
     counters = sum(n for label, n in tag_counts.items() if label.startswith("counterspell"))
     drain = tag_counts["opponent loses life"]
     sacrifice = sum(n for label, n in tag_counts.items() if label.startswith("sacrifice outlet"))
@@ -723,14 +736,14 @@ def deck_pitch_draft(
         window = "4-7"
     else:
         window = {"fast": "5-8", "midrange": "7-10", "top-heavy": "9-12"}[pace]
-    interaction_n = roles["Interaction"]
-    level = "light" if interaction_n < 10 else ("moderate" if interaction_n < 17 else "heavy")
+    interaction_n = interaction_spells
+    level = "light" if interaction_n < 8 else ("moderate" if interaction_n < 14 else "heavy")
 
     parts = [
         f"Today I'm bringing a {pace} {style} {theme}{sub}.",
         f"It looks to win through {routes_text}, usually threatening it around turns {window}.",
     ]
-    inter = f"Interaction is {level}: {_plural(interaction_n, 'piece')}"
+    inter = f"Interaction is {level}: {interaction_n} removal and counter {'spell' if interaction_n == 1 else 'spells'}"
     extras = []
     if wipes:
         extras.append(_plural(wipes, "board wipe"))
@@ -738,7 +751,10 @@ def deck_pitch_draft(
         extras.append(_plural(counters, "counterspell"))
     if extras:
         inter += " (including " + " and ".join(extras) + ")"
-    parts.append(f"{inter}, plus {roles['Ramp']} ramp and {roles['Draw']} card draw, at an average mana value of {avg_mv:.1f}.")
+    if interaction_bodies:
+        inter += f", plus {_plural(interaction_bodies, 'creature')} with removal attached"
+    parts.append(f"{inter}.")
+    parts.append(f"It also runs {roles['Ramp']} ramp and {roles['Draw']} card draw, at an average mana value of {avg_mv:.1f}.")
     parts.append(f"It runs {_plural(tutors, 'tutor') if tutors else 'no tutors'} and {_plural(fast_mana, 'piece') + ' of fast mana' if fast_mana else 'no fast mana'}.")
     theft = sum(n for label, n in tag_counts.items() if label.startswith("theft-"))
     xt = int(facts.get("extra_turn_count") or 0)
@@ -767,7 +783,7 @@ def deck_pitch_draft(
     parts.append(power_text[0].upper() + power_text[1:] + ".")
     signals = {
         "avg_mv": round(avg_mv, 2), "cheap_share": round(cheap_share, 2), "creature_share": round(creature_share, 2),
-        "interaction": roles["Interaction"], "ramp": roles["Ramp"], "draw": roles["Draw"], "wipes": wipes,
+        "interaction": interaction_spells, "interaction_bodies": interaction_bodies, "ramp": roles["Ramp"], "draw": roles["Draw"], "wipes": wipes,
         "counterspells": counters, "drain": drain, "sacrifice": sacrifice, "pace": pace, "style": style,
         "tutors": tutors, "fast_mana": fast_mana, "window": window, "interaction_level": level, "theft": theft,
     }
