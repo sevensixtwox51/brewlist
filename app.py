@@ -2002,6 +2002,13 @@ function setCommander(card) {{
 
 function clearCommander() {{ brew.commander = null; brew.edhrec_theme = ''; renderAll(); loadThemeOptions(); loadDeckTypes(); refreshAutoMix(); }}
 
+// A card added from a suggestion keeps the fact that it was only slot filler (not on
+// EDHREC's list for this commander), so the deck list can still mark it after it has
+// left the suggestion list. Saved with the deck; extra fields are ignored elsewhere.
+function fillerFields(card) {{
+  return card.basis === 'filler' ? {{ filler: true, fill_role: card.role || '', fill_note: card.reason || '' }} : {{}};
+}}
+
 function addCard(card, qty) {{
   const existing = findCard(card.name);
   qty = Math.max(1, qty || 1);
@@ -2017,6 +2024,7 @@ function addCard(card, qty) {{
       name: card.name, quantity: Math.min(qty, cap), scryfall_id: card.scryfall_id, cmc: card.cmc, mana_cost: card.mana_cost,
       type_line: card.type_line, color_identity: card.color_identity, category: card.category,
       set_code: card.set_code, collector_number: card.collector_number,
+      ...fillerFields(card),
     }});
   }} else {{
     const ownedQty = card.quantity || 4;
@@ -2027,6 +2035,7 @@ function addCard(card, qty) {{
         name: card.name, quantity: 1, scryfall_id: card.scryfall_id, cmc: card.cmc, mana_cost: card.mana_cost,
         type_line: card.type_line, color_identity: card.color_identity, category: card.category,
         set_code: card.set_code, collector_number: card.collector_number,
+        ...fillerFields(card),
       }});
     }}
   }}
@@ -2530,7 +2539,10 @@ function renderDeckList() {{
       const row = document.createElement('div');
       row.className = 'deck-row';
       row.dataset.full = scryfallImg(c.scryfall_id, 'normal') || '';
-      row.innerHTML = `<span class="row-name">${{thumbHtml(c.scryfall_id, 'card-thumb small')}}<span>${{c.name}}</span>${{colorIconsHtml(c.color_identity)}}</span>`;
+      const deckFillerBadge = c.filler
+        ? `<span class="filler-badge" title="${{FILLER_TIP}}${{escapeHtml(c.fill_note ? ' ' + c.fill_note : (c.fill_role ? ' Picked to fill ' + c.fill_role + '.' : ''))}}">Slot filler</span>`
+        : '';
+      row.innerHTML = `<span class="row-name">${{thumbHtml(c.scryfall_id, 'card-thumb small')}}<span>${{c.name}}</span>${{colorIconsHtml(c.color_identity)}}${{deckFillerBadge}}</span>`;
       const controls = document.createElement('div');
       controls.className = 'qty-controls';
       if (brew.format !== 'commander' || maxCopies(c.name) > 1) {{
@@ -2616,8 +2628,10 @@ function renderStats() {{
   const avgCmc = brew.cards.length
     ? (brew.cards.reduce((s, c) => s + (c.cmc || 0) * c.quantity, 0) / Math.max(1, total)).toFixed(2)
     : '0.00';
+  const fillers = brew.cards.filter(c => c.filler).reduce((s, c) => s + c.quantity, 0);
   document.getElementById('deck-stats').innerHTML =
-    `<span><b>${{total}}</b> / ${{targetSize()}} cards</span><span><b>${{lands}}</b> lands</span><span>avg CMC <b>${{avgCmc}}</b></span>`;
+    `<span><b>${{total}}</b> / ${{targetSize()}} cards</span><span><b>${{lands}}</b> lands</span><span>avg CMC <b>${{avgCmc}}</b></span>`
+    + (fillers ? `<span title="Cards added only to fill a slot (not on EDHREC's list for this commander) -- marked in the list below">slot filler <b>${{fillers}}</b></span>` : '');
 }}
 
 function parseManaPips(manaCost) {{
