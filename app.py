@@ -2531,7 +2531,10 @@ function renderDeckList() {{
     const g = c.category || 'Other';
     (groups[g] = groups[g] || []).push(c);
   }});
-  Object.keys(groups).sort().forEach(g => {{
+  // Same type order as the suggestion lists and the compare report (BUCKET_ORDER), so the
+  // sections don't reshuffle when a batch is added; anything unlisted goes last, A-Z.
+  const bucketRank = (g) => {{ const i = BUCKET_ORDER.indexOf(g); return i === -1 ? BUCKET_ORDER.length : i; }};
+  Object.keys(groups).sort((x, y) => bucketRank(x) - bucketRank(y) || x.localeCompare(y)).forEach(g => {{
     const div = document.createElement('div');
     div.className = 'deck-group';
     div.innerHTML = `<h4>${{g}} (${{groups[g].reduce((s, c) => s + c.quantity, 0)}})</h4>`;
