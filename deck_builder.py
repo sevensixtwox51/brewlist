@@ -832,6 +832,78 @@ def deck_karsten(entries: list[CardEntry], role_members: dict[str, frozenset[str
     return {"lands_formula": round(karsten_lands(avg_mv, cheap), 1), "avg_mv": round(avg_mv, 2), "cheap": cheap, "lands_actual": lands}
 
 
+# Karsten's colored-source requirements ("How Many Sources Do You Need to Consistently Cast
+# Your Spells?"): enough sources of a color to cast a spell with N pips of it on the turn
+# equal to its mana value, with probability (89 + MV)% (90% for a 1-drop up to 96% for 7+).
+# His published 99-card column isn't reachable here, so this recomputes it: the chance of
+# at least N sources among the cards seen by then (7 + that many draws), plus 2 extra cards
+# standing in for his free first mulligan. Fitted to his two published anchor values (19
+# sources for one pip on turn 1, 30 for two pips on turn 2: this gives 20 and 31).
+SOURCE_MULLIGAN_CARDS = 2
+_SOURCE_CHECK_LIBRARY = 99
+
+
+def _p_at_least(library: int, sources: int, seen: int, need: int) -> float:
+    return sum(
+        math.comb(sources, i) * math.comb(library - sources, seen - i)
+        for i in range(need, min(sources, seen) + 1)
+    ) / math.comb(library, seen)
+
+
+def karsten_sources_needed(pips: int, mana_value: int) -> int:
+    """Colored sources a 99-card deck needs for a spell with `pips` pips of one color at
+    `mana_value`, cast on curve."""
+    turn = max(1, int(mana_value))
+    seen = 7 + turn + SOURCE_MULLIGAN_CARDS
+    target = (89 + min(turn, 7)) / 100
+    for sources in range(pips, _SOURCE_CHECK_LIBRARY):
+        if _p_at_least(_SOURCE_CHECK_LIBRARY, sources, seen, pips) >= target:
+            return sources
+    return _SOURCE_CHECK_LIBRARY
+
+
+def deck_color_sources(entries: list[CardEntry]) -> list[dict] | None:
+    """Per-color check of a Commander deck's mana sources against Karsten's requirement.
+    For each color the deck has pips in: `have` (lands that make it, plus mana rocks and
+    dorks of MV 2 or less), `need` (the requirement of the color's more demanding spells:
+    80% of them are covered by it, so one far-off 7-drop doesn't set the bar) and
+    `hardest` (the single most demanding spell). The commander counts as a spell.
+    None for a deck with no colored pips."""
+    gameplay = gameplay_data_in_index()
+    spells: dict[str, list[tuple[int, int, str]]] = {col: [] for col in _BASIC_FOR_COLOR}
+    have = {col: 0 for col in _BASIC_FOR_COLOR}
+    for e in entries:
+        category = categorize(e.type_line)
+        info = gameplay.get(normalize_name(e.name)) or {}
+        if category in ("Lands", "Basic Lands"):
+            if e.section == "commander":
+                continue
+            made = _land_produces({"type_line": e.type_line, "oracle_text": info.get("oracle_text") or ""})
+            for col in made:
+                have[col] += e.quantity
+            continue
+        mv = int(e.cmc or 0)
+        if mv <= 2 and category in ("Artifacts", "Creatures") and e.section != "commander":
+            text = info.get("oracle_text") or ""
+            if re.search(r"\{T\}[^.\n]*: Add ", text):
+                for col in _land_produces({"type_line": "", "oracle_text": text}):
+                    have[col] += e.quantity
+        for col, pips in _color_pips(e.mana_cost or info.get("mana_cost")).items():
+            spells[col].extend([(max(1, math.ceil(pips)), mv, e.name)] * (1 if e.section == "commander" else e.quantity))
+    result = []
+    for col in _BASIC_FOR_COLOR:
+        cards = spells[col]
+        if not cards:
+            continue
+        needs = sorted((karsten_sources_needed(p, mv), name) for p, mv, name in cards)
+        covered = needs[min(len(needs) - 1, math.ceil(len(needs) * 0.8) - 1)][0]
+        result.append({
+            "color": col, "name": _COLOR_NAME[col], "have": have[col], "need": covered,
+            "hardest": {"card": needs[-1][1], "need": needs[-1][0]}, "cards": len(cards),
+        })
+    return result or None
+
+
 def karsten_correction(entries: list[CardEntry], current_lands: int, adjust: int = 0, threshold: int = 2) -> dict | None:
     """The Auto preset's second look: Karsten's formula on the deck a build actually
     produced (its real average mana value and cheap ramp/draw count). Returns

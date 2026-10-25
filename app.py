@@ -62,6 +62,7 @@ from deck_builder import (
     LANDS_MATTER_TYPES,
     auto_deck_mix,
     karsten_correction,
+    deck_color_sources,
     deck_karsten,
     commander_deck_shape_targets,
     deck_shape_targets_with_mix,
@@ -4317,7 +4318,30 @@ function renderDeckShape(data) {{
         <div class="shape-bar-track"><div class="shape-bar ${{cls}}" style="width:${{widthPct}}%"></div></div>
         <span class="shape-count">${{actual}} / ~${{target}}</span>
       </div>`;
-  }}).join('') + karstenLineHtml(data);
+  }}).join('') + karstenLineHtml(data) + colorSourcesHtml(data);
+}}
+
+// Per-color mana sources against Karsten's requirement (deck_builder.deck_color_sources):
+// what the colour's more demanding spells need to be cast on curve, vs. the lands and
+// cheap mana rocks/dorks that make it.
+const SOURCE_COLOR_HEX = {{ W: '#e9dfae', U: '#6fa8e0', B: '#8a7a8f', R: '#e0735a', G: '#6fb07a' }};
+function colorSourcesHtml(data) {{
+  const rows = data.color_sources;
+  if (!rows || !rows.length) return '';
+  const body = rows.map(r => {{
+    const gap = r.need - r.have;
+    const cls = gap <= 0 ? 'near' : (gap <= 5 ? 'over' : 'under');
+    const verdict = gap <= 0 ? 'enough' : (gap <= 5 ? 'a little short' : 'add ' + gap + ' more');
+    const pct = Math.min(100, r.have / Math.max(1, r.need) * 100);
+    const tip = r.have + ' ' + r.name + ' sources (lands that make it, plus mana rocks and dorks costing 2 or less). '
+      + 'Karsten\u2019s requirement to cast most (80%) of your ' + r.name + ' spells on curve is ~' + r.need
+      + '; the hardest is ' + r.hardest.card + ' at ~' + r.hardest.need + '.';
+    return `<div class="shape-row" title="${{escapeHtml(tip)}}">`
+      + `<span class="shape-label"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${{SOURCE_COLOR_HEX[r.color]}};margin-right:6px;"></span>${{r.name[0].toUpperCase() + r.name.slice(1)}}</span>`
+      + `<div class="shape-bar-track"><div class="shape-bar ${{cls}}" style="width:${{pct}}%"></div></div>`
+      + `<span class="shape-count" style="white-space:nowrap;min-width:150px;">${{r.have}} / ~${{r.need}} &middot; ${{verdict}}</span></div>`;
+  }}).join('');
+  return `<div class="hint" style="margin:12px 0 4px;"><b>Colored sources</b> vs. Karsten&rsquo;s requirement (90&ndash;96% on-curve odds). A dual or tri-land counts toward every colour it makes, so one land can close several gaps:</div>` + body;
 }}
 
 // Karsten's land formula on the deck as built (real average mana value and real
@@ -4985,6 +5009,7 @@ def builder_stats():
         is_commander_format=is_commander_format,
         role_counts=role_counts_for_entries(entries),
         karsten=deck_karsten(entries) if is_commander_format else None,
+        color_sources=deck_color_sources(entries) if is_commander_format else None,
         pitch_draft=_pitch_draft_for(body, entries, totals) if is_commander_format else None,
         role_targets=deck_shape_targets_with_mix(
             deck_format, target_size, _mix_targets_from(body),
