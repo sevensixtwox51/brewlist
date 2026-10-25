@@ -1197,6 +1197,9 @@ body.compact .deck-row .card-thumb { display:none; }
 /* The Auto explanation is a long sentence; width:0 + min-width:100% lets it wrap to the
    width the numbers already need instead of stretching the whole panel to fit it. */
 #mix-auto-explain { flex:0 0 100%; width:0; min-width:100%; line-height:1.4; }
+#fast-tip { position:fixed; z-index:500; display:none; max-width:340px; width:max-content; padding:7px 10px; border-radius:8px;
+  background:var(--bg-elevated); border:1px solid var(--card-border); color:var(--text); font-size:0.78rem; line-height:1.4;
+  box-shadow:var(--shadow); pointer-events:none; }
 .kv { border-bottom:1px dotted var(--text-dim); cursor:help; }
 .mix-targets-grid label { display:flex; flex-direction:column; gap:3px; font-size:0.78rem; color:var(--text-dim); }
 .mix-targets-grid select { padding:6px 8px; border-radius:6px; border:1px solid var(--card-border); background:var(--bg); color:var(--text); font-size:0.85rem; margin:0; }
@@ -1383,6 +1386,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
 </head>
 <body>
 <img id="hover-preview" alt="">
+<div id="fast-tip" role="tooltip"></div>
 <div id="card-lightbox" class="lightbox" hidden>
   <div class="lightbox-box">
     <button type="button" class="lightbox-close" id="lightbox-close" title="Close (Esc)">&times;</button>
@@ -1949,6 +1953,37 @@ document.addEventListener('click', (e) => {{
 document.addEventListener('keydown', (e) => {{
   if (e.key === 'Escape' && !lightbox.hidden) {{ e.stopPropagation(); e.preventDefault(); closeLightbox(); }}
 }}, true);
+
+// Instant tooltips. The browser's own title tooltip waits about a second before showing
+// and that delay cannot be changed, so on this page every [title] is shown by this small
+// tooltip after ~80 ms instead: on hover the title moves to data-tip (which also stops
+// the native one), and is read back from `title` again if the page sets a new one.
+const fastTip = document.getElementById('fast-tip');
+let fastTipOwner = null, fastTipTimer = null;
+function hideFastTip() {{ clearTimeout(fastTipTimer); fastTipTimer = null; fastTipOwner = null; fastTip.style.display = 'none'; }}
+function showFastTip(el) {{
+  const text = el.dataset.tip;
+  if (!text || !document.body.contains(el)) return;
+  fastTip.textContent = text;
+  fastTip.style.display = 'block';
+  const r = el.getBoundingClientRect(), m = 8;
+  const w = fastTip.offsetWidth, h = fastTip.offsetHeight;
+  let top = r.bottom + 6;
+  if (top + h > window.innerHeight - m) top = Math.max(m, r.top - 6 - h);
+  fastTip.style.top = top + 'px';
+  fastTip.style.left = Math.max(m, Math.min(r.left, window.innerWidth - w - m)) + 'px';
+}}
+document.addEventListener('mouseover', (e) => {{
+  const el = e.target.closest ? e.target.closest('[title], [data-tip]') : null;
+  if (el && el.hasAttribute('title')) {{ el.dataset.tip = el.getAttribute('title'); el.removeAttribute('title'); }}
+  if (el === fastTipOwner) return;
+  hideFastTip();
+  if (!el || !el.dataset.tip) return;
+  fastTipOwner = el;
+  fastTipTimer = setTimeout(() => showFastTip(el), 80);
+}});
+document.addEventListener('mouseout', (e) => {{ if (fastTipOwner && !fastTipOwner.contains(e.relatedTarget)) hideFastTip(); }});
+['mousedown', 'scroll', 'keydown', 'resize'].forEach(ev => window.addEventListener(ev, hideFastTip, true));
 
 // Foil shimmer: move the glow's centre with the pointer (delegated, since the
 // grid's tiles are rebuilt on every filter change).
