@@ -487,6 +487,49 @@ SERVER_WATCH_SCRIPT = """
 """
 
 
+# Added to a report when this server serves it (see compare_result): the same instant tooltips the builder has
+# (the browser's own title tooltip waits about a second) and the server watcher. Skipped when the page is
+# opened from a saved file, where there is no server to talk to.
+REPORT_EXTRAS = """
+<style>
+#fast-tip { position:fixed; z-index:500; display:none; max-width:340px; width:max-content; padding:7px 10px; border-radius:8px;
+  background:var(--bg-elevated); border:1px solid var(--card-border); color:var(--text); font-size:0.78rem; line-height:1.4;
+  box-shadow:var(--shadow); pointer-events:none; }
+</style>
+<div id="fast-tip" role="tooltip"></div>
+<script>
+if (location.protocol.indexOf('http') === 0) {
+  const fastTip = document.getElementById('fast-tip');
+  let owner = null, timer = null;
+  const hide = () => { clearTimeout(timer); timer = null; owner = null; fastTip.style.display = 'none'; };
+  const show = (el) => {
+    const text = el.dataset.tip;
+    if (!text || !document.body.contains(el)) return;
+    fastTip.textContent = text;
+    fastTip.style.display = 'block';
+    const r = el.getBoundingClientRect(), m = 8, w = fastTip.offsetWidth, h = fastTip.offsetHeight;
+    let top = r.bottom + 6;
+    if (top + h > window.innerHeight - m) top = Math.max(m, r.top - 6 - h);
+    fastTip.style.top = top + 'px';
+    fastTip.style.left = Math.max(m, Math.min(r.left, window.innerWidth - w - m)) + 'px';
+  };
+  document.addEventListener('mouseover', (e) => {
+    const el = e.target.closest ? e.target.closest('[title], [data-tip]') : null;
+    if (el && el.hasAttribute('title')) { el.dataset.tip = el.getAttribute('title'); el.removeAttribute('title'); }
+    if (el === owner) return;
+    hide();
+    if (!el || !el.dataset.tip) return;
+    owner = el;
+    timer = setTimeout(() => show(el), 80);
+  });
+  document.addEventListener('mouseout', (e) => { if (owner && !owner.contains(e.relatedTarget)) hide(); });
+  ['mousedown', 'scroll', 'keydown', 'resize'].forEach(ev => window.addEventListener(ev, hide, true));
+""" + SERVER_WATCH_SCRIPT + """
+}
+</script>
+"""
+
+
 def render_setup_page(error: str | None = None) -> str:
     meta = collection_meta()
     if meta and meta.get("uploaded"):
@@ -5440,7 +5483,11 @@ def compare_result(job_id):
         return render_decks_page(error="That comparison has expired or wasn't found -- try again.")
     if job["status"] != "done":
         return render_decks_page(error=job.get("error") or "That comparison hasn't finished yet -- try again.")
-    return Response(job["html"], mimetype="text/html")
+    html_report = job["html"]
+    cut = html_report.rfind("</body>")
+    if cut != -1:
+        html_report = html_report[:cut] + REPORT_EXTRAS + html_report[cut:]
+    return Response(html_report, mimetype="text/html")
 
 
 @app.route("/api/overrides/<deck_id>", methods=["POST"])
