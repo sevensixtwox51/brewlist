@@ -1419,6 +1419,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
     # (11 vs. 15 Interaction) until all three were unified on one function.
     default_mix = {k: v for k, v in commander_deck_shape_targets("commander", 100).items() if k != "Synergy"}
     saved_mix = brew.get("mix_targets") or {}
+    start_auto = not saved_mix  # a new deck starts on the Auto (Karsten) mix; a saved one keeps its own numbers
     brew_state = {
         "deck_name": brew.get("deck_name") or "",
         "format": brew.get("format") or "commander",
@@ -1535,13 +1536,13 @@ def render_builder_page(deck_id: str | None = None) -> str:
         <details class="mix-targets-field" id="mix-targets-field">
           <summary>Deck mix targets</summary>
           <div class="mix-targets-grid">
-            <label title="Command Zone (38 lands, 10 ramp, 12 card draw, 18 interaction) follows the Command Zone podcast template and is the default; Classic (37/10/10/15) is the previous default; Commander Challenge (38/12/13/12) follows that YouTube channel&#39;s seven-step process and suits value-heavy decks; Low-Curve Aggro (36/6/8/10) is a lean creature-heavy shape modelled on a real Edgar Markov Vampires list; Auto keeps the Command Zone shape but sets Lands from Karsten&#39;s formula for your commander and deck type. Presets just fill the numbers below.">Template
+            <label title="Command Zone (38 lands, 10 ramp, 12 card draw, 18 interaction) follows the Command Zone podcast template; Classic (37/10/10/15) is the previous default; Commander Challenge (38/12/13/12) follows that YouTube channel&#39;s seven-step process and suits value-heavy decks; Low-Curve Aggro (36/6/8/10) is a lean creature-heavy shape modelled on a real Edgar Markov Vampires list; Auto, the default for a new deck, keeps the Command Zone shape but sets Lands from Karsten&#39;s formula for your commander and deck type. Presets just fill the numbers below.">Template
               <select id="mix-template">
-                <option value="commandzone">Command Zone (default)</option>
+                <option value="commandzone">Command Zone</option>
                 <option value="standard">Classic</option>
                 <option value="commanderchallenge">Commander Challenge</option>
                 <option value="lowcurveaggro">Low-Curve Aggro</option>
-                <option value="auto">Auto (Karsten)</option>
+                <option value="auto">Auto (Karsten, default)</option>
                 <option value="custom" hidden>Custom</option>
               </select>
             </label>
@@ -1787,7 +1788,7 @@ function currentTemplateKey() {{
 // the current commander and deck type (server: /builder/auto-mix). While it is
 // selected the numbers follow the commander / deck type; touching any number or
 // choosing another preset switches it off. Not saved -- the numbers are.
-let mixAuto = false;
+let mixAuto = {json.dumps(start_auto)};
 
 // What each of the five deck-shape numbers counts. Every card falls into exactly one
 // role: lands by type first, then Ramp, then Draw, then Interaction (a card tagged for
@@ -1894,6 +1895,7 @@ function updateFormatUI() {{
 }}
 updateFormatUI();
 loadThemeOptions();
+if (mixAuto) refreshAutoMix();
 
 document.getElementById('deck-format').addEventListener('change', (e) => {{
   brew.format = e.target.value;
