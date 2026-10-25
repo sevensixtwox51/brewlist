@@ -1194,6 +1194,9 @@ body.compact .deck-row .card-thumb { display:none; }
 .mix-targets-field summary { cursor:pointer; padding:6px 10px; font-size:0.85rem; color:var(--text-dim); white-space:nowrap; }
 .mix-targets-field[open] { position:relative; z-index:5; }
 .mix-targets-grid { display:flex; gap:16px; flex-wrap:wrap; align-items:flex-end; padding:2px 0 12px; }
+/* The Auto explanation is a long sentence; width:0 + min-width:100% lets it wrap to the
+   width the numbers already need instead of stretching the whole panel to fit it. */
+#mix-auto-explain { flex:0 0 100%; width:0; min-width:100%; line-height:1.4; }
 .mix-targets-grid label { display:flex; flex-direction:column; gap:3px; font-size:0.78rem; color:var(--text-dim); }
 .mix-targets-grid select { padding:6px 8px; border-radius:6px; border:1px solid var(--card-border); background:var(--bg); color:var(--text); font-size:0.85rem; margin:0; }
 .mix-targets-grid input[type=number] {
@@ -1468,7 +1471,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
             <label>Draw <input type="number" id="mix-draw" min="0" max="100"></label>
             <label>Interaction <input type="number" id="mix-interaction" min="0" max="100"></label>
             <span class="hint" id="mix-synergy-readout" style="margin:0;"></span>
-            <span class="hint" id="mix-auto-explain" style="margin:0; flex-basis:100%; display:none;"></span>
+            <span class="hint" id="mix-auto-explain" style="margin:0; display:none;"></span>
           </div>
         </details>
         <div class="set-selection-field">
