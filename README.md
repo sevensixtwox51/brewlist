@@ -178,9 +178,9 @@ page).
   and a **Turn Clock** (how soon the deck kills one opponent who does
   nothing; it reads creature combat, tokens, equipment and auras, team
   boosts, extra combats, board-scaling drain, tutors, and the combos you've
-  already assembled, but not planeswalkers or repeatable activated abilities),
-  a **Resilience** check (the same clock when a board wipe lands on turn 6 or
-  the commander is removed each time it's cast), and **Synergy Packages**
+  already assembled, planeswalkers, and repeatable abilities that cost only mana and tapping),
+  a **Resilience** check (the same clock under spot removal, a board wipe on
+  turn 6, both, or the commander removed each time it's cast), and **Synergy Packages**
   (what the deck is built around as enablers vs. payoffs, tribal included,
   with payoffs that have nothing to enable them and cards outside every
   package). A **Print Battle

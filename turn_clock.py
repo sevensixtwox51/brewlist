@@ -24,8 +24,13 @@ builds, not a prediction of a real table. What it understands:
   - commander damage: 21 from the commander alone ends one opponent
   - tutors: cast for their mana, fetching the one missing piece of the nearest combo, else the best damage card
 Resilience (simulate_resilience) reruns the clock with a board wipe on turn 6 (survived if a protection spell is in hand,
-reversed by reanimation) and with the commander removed each time it is cast, twice.
-What it ignores: repeatable activated abilities, planeswalkers, choices and targeting, and combos
+reversed by reanimation), with spot removal taking the best creature 40% of turns, both together, and with the commander removed each
+time it is cast, twice.
+  - planeswalkers: cast, then one loyalty ability a turn (tokens, drain, damage, draw, an emblem for creatures), with their
+    printed loyalty from Scryfall; they survive a creature wipe
+  - repeatable abilities that cost only mana and {T}: token makers, pingers, firebreathing, card draw -- spending the mana the
+    plays leave over, and tapping a creature only when that is worth more than its attack
+What it ignores: abilities with other costs (sacrifice, discard, life), choices and targeting, and combos
 that need a card the deck can't find on its own. A deck that wins in a way it can't read shows a slow or
 missing clock -- the panel says so when most games never kill.
 """
@@ -52,6 +57,7 @@ LIFE = 40
 OPPONENTS = 3
 COMMANDER_DAMAGE = 21
 WIPE_TURN = 6
+SPOT_CHANCE = 0.4
 
 _NUMBER_WORDS = {"a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8}
 _COUNT = r"(a|an|one|two|three|four|five|six|seven|eight|\d+)"
@@ -77,6 +83,10 @@ _ADDITIONAL_COMBAT_RE = re.compile(r"additional combat phase")
 _PING_RE = re.compile(r"^whenever a creature you control attacks, ~ deals (\d+) damage to (?:the player|defending player|that player)")
 _ETB_PING_RE = re.compile(r"^whenever (?:a|another) (?:other )?creature (?:you control )?enters(?: the battlefield)?(?: under your control)?, ~ (?:deals (\d+) damage to each opponent|causes each opponent to lose (\d+) life)")
 _TUTOR_LABELS = {"tutor-to-hand", "tutor-card", "tutor-creature", "tutor-artifact", "tutor-mv", "tutor-to-top"}
+_LOYALTY_RE = re.compile(r"^\[?([+\u2212\-]?\d+|[+\u2212\-]x)\]?: (.+)")
+_DRAW_N_RE = re.compile(r"\bdraw (a|an|one|two|three|four|\d+) cards?")
+_EMBLEM_RE = re.compile(r"you get an emblem with")
+_PUMP_SELF_RE = re.compile(r"~ gets? \+(\d+)/\+0 until end of turn")
 _WIN_FEATURES = ("win the game", "loses the game", "infinite damage", "infinite lifeloss", "infinite combat")
 _EACH_TURN_RE = re.compile(r"^at the beginning of (?:your|each) (?:upkeep|end step|combat|precombat main phase|postcombat main phase)", re.I)
 
@@ -105,12 +115,13 @@ def _read_stats() -> dict:
         return {}
 
 
-def ensure_card_stats(names: list[str]) -> dict[str, dict]:
+def ensure_card_stats(names: list[str], need_loyalty: set[str] | frozenset = frozenset()) -> dict[str, dict]:
     """{normalized name: {"p", "t"}} for creatures, fetched once from Scryfall's collection endpoint and
     cached in data/card_stats.json (a card's printed power never changes). Network failures leave a
     name out; callers estimate a power for it."""
     cache = _read_stats()
-    need = [n for n in dict.fromkeys(names) if normalize_name(n) not in cache]
+    need = [n for n in dict.fromkeys(names)
+            if normalize_name(n) not in cache or (n in need_loyalty and "l" not in cache[normalize_name(n)])]
     changed = False
     for i in range(0, len(need), 75):
         chunk = need[i:i + 75]
@@ -128,10 +139,11 @@ def ensure_card_stats(names: list[str]) -> dict[str, dict]:
             face = card
             if card.get("power") is None and card.get("card_faces"):
                 face = card["card_faces"][0]
-            cache[normalize_name(card.get("name", ""))] = {"p": face.get("power"), "t": face.get("toughness")}
-            cache[normalize_name((card.get("name") or "").split(" // ")[0])] = {"p": face.get("power"), "t": face.get("toughness")}
+            stat = {"p": face.get("power"), "t": face.get("toughness"), "l": card.get("loyalty") or face.get("loyalty")}
+            cache[normalize_name(card.get("name", ""))] = stat
+            cache[normalize_name((card.get("name") or "").split(" // ")[0])] = stat
         for n in chunk:
-            cache.setdefault(normalize_name(n), {"p": None, "t": None})
+            cache.setdefault(normalize_name(n), {"p": None, "t": None, "l": None})
         changed = True
     if changed:
         try:
@@ -153,6 +165,36 @@ def _power(raw, mv: int) -> tuple[int, bool]:
 
 
 # -- reading a card's damage plan from its text ----------------------------------------------------------------------
+
+def _effects_in(effect: str) -> dict:
+    """What one ability's effect text does for the clock: tokens made, damage or life loss to opponents (each of them, or
+    one), cards drawn, a power pump on itself, or an emblem that gives creatures +N."""
+    out = {"tokens": [], "each": 0, "one": 0, "draw": 0, "pump": 0, "emblem": 0}
+    tok = _tokens_in(effect)
+    if tok:
+        out["tokens"].append(tok)
+    each = re.search(r"each opponent loses (\d+) life|deals (\d+) damage to each opponent", effect)
+    if each:
+        out["each"] = int(next(g for g in each.groups() if g))
+    one = re.search(r"deals (\d+) damage to (?:any target|target (?:player|opponent)(?: or planeswalker)?)|target (?:player|opponent) loses (\d+) life", effect)
+    if one:
+        out["one"] = int(next(g for g in one.groups() if g))
+    draw = _DRAW_N_RE.search(effect)
+    if draw and "each player" not in effect and "target player" not in effect and "target opponent" not in effect:
+        out["draw"] = _num(draw.group(1))
+    pump = _PUMP_SELF_RE.search(effect)
+    if pump:
+        out["pump"] = int(pump.group(1))
+    if _EMBLEM_RE.search(effect):
+        anthem = _ANTHEM_RE.search(effect)
+        if anthem:
+            out["emblem"] = int(anthem.group(1))
+    return out
+
+
+def _has_effect(e: dict) -> bool:
+    return bool(e["tokens"] or e["each"] or e["one"] or e["draw"] or e["pump"] or e["emblem"])
+
 
 def _scaling(descriptor: str):
     """What a "where X is ..." clause counts, as ("devotion", colors) | ("creatures", 0) | ("greatest_power", 0)
@@ -191,7 +233,7 @@ def _profile(entry: CardEntry, info: dict, stats: dict) -> dict | None:
     profile: dict = {"creature": is_creature, "tokens": [], "drain": 0, "each_turn_tokens": [], "each_turn_drain": 0,
                      "anthem": 0, "tribe_anthem": None, "pump": 0, "global_haste": False, "haste": False, "double_strike": False,
                      "attack_tokens": [], "cheat": None, "estimated": False, "subtypes": set(), "power": 0,
-                     "scaling": None, "extra_combat": None, "ping": 0, "etb_ping": 0, "equipment": None, "aura": None}
+                     "scaling": None, "extra_combat": None, "ping": 0, "etb_ping": 0, "loyalty": None, "activated": [], "equipment": None, "aura": None}
     is_equipment, is_aura = "Equipment" in type_line, "Aura" in type_line
     equip_bonus = equip_haste = equip_cost = 0
     equip_double = False
@@ -208,8 +250,26 @@ def _profile(entry: CardEntry, info: dict, stats: dict) -> dict | None:
         keywords = set().union(*[ks for ks in keyword_lines if ks <= _KEYWORDS]) if keyword_lines else set()
         profile["haste"] = "haste" in keywords
         profile["double_strike"] = "double strike" in keywords
+    is_planeswalker = "Planeswalker" in type_line
+    loyalty_abilities = []
     for ln in lines:
+        loyal = _LOYALTY_RE.match(ln) if is_planeswalker else None
+        if loyal:
+            cost_text = loyal.group(1).replace("\u2212", "-")
+            cost = 3 if cost_text.lstrip("+-") == "x" else int(cost_text.replace("+", ""))
+            effects = _effects_in(loyal.group(2))
+            if _has_effect(effects):
+                loyalty_abilities.append({"cost": cost, **effects})
+            continue
         ln = _ABILITY_WORD_RE.sub("", ln)
+        if not is_planeswalker and ":" in ln and not ln.startswith(("when", "whenever", "at the beginning")) and not ln.startswith(("equip", "cycling", "channel")):
+            cost_part, effect_part = ln.split(":", 1)
+            if not effect_part.strip().startswith("add ") and not re.search(r"sacrifice|discard|exile|pay \d+ life|remove|\bx\b|\{x\}", cost_part):
+                symbols = re.findall(r"\{([^}]+)\}", cost_part)
+                mana = sum(int(s) if s.isdigit() else 1 for s in symbols if s not in ("t", "q"))
+                effects = _effects_in(effect_part)
+                if _has_effect(effects) and not re.search(r"\bx\b", effect_part):
+                    profile["activated"].append({"mana": mana, "tap": "{t}" in cost_part, **effects})
         triggered = ln.startswith(("when", "whenever", "at the beginning"))
         activated = ":" in ln.split(".")[0] and not triggered
         if _ADDITIONAL_COMBAT_RE.search(ln):
@@ -281,12 +341,15 @@ def _profile(entry: CardEntry, info: dict, stats: dict) -> dict | None:
         tribe = _TRIBE_ANTHEM_RE.search(ln)
         if tribe and not triggered and is_permanent:
             profile["tribe_anthem"] = (tribe.group(1).capitalize(), int(tribe.group(2)))
+    if loyalty_abilities:
+        raw = (stats.get(normalize_name(name)) or {}).get("l")
+        profile["loyalty"] = {"start": int(raw) if raw is not None and str(raw).isdigit() else 4, "abilities": loyalty_abilities}
     if is_equipment and (equip_bonus or equip_haste or equip_double or living_weapon):
         profile["equipment"] = {"bonus": equip_bonus, "haste": bool(equip_haste), "double": equip_double,
                                 "equip": equip_cost or 3, "living_weapon": living_weapon}
     if is_aura and (equip_bonus or equip_haste or equip_double):
         profile["aura"] = {"bonus": equip_bonus, "haste": bool(equip_haste), "double": equip_double}
-    useful = profile["scaling"] or profile["extra_combat"] or profile["ping"] or profile["etb_ping"] or profile["equipment"] or profile["aura"] \
+    useful = profile["loyalty"] or profile["activated"] or profile["scaling"] or profile["extra_combat"] or profile["ping"] or profile["etb_ping"] or profile["equipment"] or profile["aura"] \
         or (is_creature and profile["power"] > 0) or profile["tokens"] or profile["drain"] or profile["each_turn_tokens"] \
         or profile["each_turn_drain"] or profile["anthem"] or profile["tribe_anthem"] or profile["pump"] or profile["cheat"]
     return profile if useful else None
@@ -328,9 +391,13 @@ def _name_keys(name: str) -> set[str]:
 
 
 def _play(deck: list[dict], commander: dict | None, deck_colors: set[str], combos: list[dict], rng: random.Random,
-          scenario: str | None = None) -> dict:
-    """One goldfish game. `scenario`: None, "wipe" (every creature dies at the start of turn WIPE_TURN unless a protection
-    spell is in hand) or "commander" (the commander is removed at the end of each turn it is cast, twice)."""
+          scenario: str | dict | None = None) -> dict:
+    """One goldfish game. `scenario` is None or a dict of what the opponents do: {"wipe": turn} (every creature dies at the
+    start of that turn unless a protection spell is in hand), {"spot": p} (from turn 3, each turn with chance p your best
+    creature is removed), {"cmd": n} (the commander is removed at the end of each of the first n turns it is cast).
+    "wipe" and "commander" are shorthand for the first and third."""
+    plan = {"wipe": WIPE_TURN} if scenario == "wipe" else {"cmd": 2} if scenario == "commander" else dict(scenario or {})
+    wipe_turn, spot_chance = plan.get("wipe"), plan.get("spot", 0.0)
     table = Table(deck, deck_colors, rng)
     table.auto_draw = False  # the clock spends mana on damage first and card draw with what is left
     creatures: list[dict] = []     # {"power", "subtypes", "ready", "ds", "bonus", "haste_granted"}
@@ -339,8 +406,10 @@ def _play(deck: list[dict], commander: dict | None, deck_colors: set[str], combo
     permanents: list[dict] = []    # {"card", "profile", "creature": its creature dict or None, "commander"}
     graveyard: list[dict] = []     # creature cards that died (for reanimation)
     commander_tax = 0
+    emblem_bonus = 0
+    pw_loyalty: dict[int, int] = {}
     wiped = False
-    removals_left = 2
+    removals_left = plan.get("cmd", 0)
     anthem = 0
     tribe_anthems: list[tuple[str, int]] = []
     global_haste = False
@@ -415,7 +484,7 @@ def _play(deck: list[dict], commander: dict | None, deck_colors: set[str], combo
         return turn if global_haste else turn + 1
 
     def power_of(c: dict) -> int:
-        bonus = anthem + c["bonus"] + sum(n for tribe, n in tribe_anthems if tribe in c["subtypes"])
+        bonus = anthem + emblem_bonus + c["bonus"] + sum(n for tribe, n in tribe_anthems if tribe in c["subtypes"])
         return max(0, c["power"] + bonus) * (2 if c["ds"] else 1)
 
     def attach(item: dict, creature: dict, turn: int) -> None:
@@ -488,12 +557,33 @@ def _play(deck: list[dict], commander: dict | None, deck_colors: set[str], combo
         damage += amount
         table_damage += amount * OPPONENTS
 
+    def effect_value(a: dict) -> float:
+        """Rough worth of one ability use, in damage: tokens as future attackers, drain as table damage, an emblem as a lot."""
+        return (sum(n * pw for n, pw in a["tokens"]) * 1.5 + a["each"] * 2 + a["one"] + a["draw"] * 1.5 + a["pump"] + a["emblem"] * 8)
+
+    def apply_effects(a: dict, turn: int) -> None:
+        nonlocal damage, table_damage, emblem_bonus
+        for count, power in a["tokens"]:
+            for _ in range(min(count, 12)):
+                new_creature(power, set(), False, token_ready(turn))
+        if a["each"]:
+            deal_each(a["each"])
+        if a["one"]:
+            damage += a["one"]
+            table_damage += a["one"]
+        if a["draw"]:
+            table.draw(a["draw"])
+        emblem_bonus += a["emblem"]
+
     def castable_value(card: dict) -> float:
         p = card["profile"]
         eq = p["equipment"] or p["aura"] or {}
         value = p["power"] + sum(pw * n for n, pw in p["tokens"]) + p["drain"] + 3 * (p["anthem"] + (p["tribe_anthem"] or ("", 0))[1])
         value += 1.5 * eq.get("bonus", 0) + (2 if eq.get("haste") else 0) + (3 if p["extra_combat"] else 0) + 4 * p["ping"] + 4 * p["etb_ping"]
         value += 5 if p["scaling"] else 0
+        if p["loyalty"]:
+            value += max(effect_value(a) for a in p["loyalty"]["abilities"]) * 3
+        value += sum(effect_value(a) for a in p["activated"]) * 2
         return value / max(1, card["mv"])
 
     def combo_pieces(combo: dict, turn: int, sources: list):
@@ -523,7 +613,7 @@ def _play(deck: list[dict], commander: dict | None, deck_colors: set[str], combo
     for turn in range(1, MAX_TURN + 1):
         table.begin_turn(turn)
         sources = table.mana_sources(turn)
-        if scenario == "wipe" and turn == WIPE_TURN and not wiped:
+        if wipe_turn and turn == wipe_turn and not wiped:
             wiped = True
             guard = next((c for c in table.hand if c.get("protect")), None)
             paid = _pay(sources, guard["pips"], guard["mv"]) if guard and creatures else None
@@ -532,6 +622,17 @@ def _play(deck: list[dict], commander: dict | None, deck_colors: set[str], combo
                 table.hand.remove(guard)
             else:
                 wipe_board()
+        if spot_chance and turn >= 3 and creatures and rng.random() < spot_chance:
+            doomed = max(creatures, key=power_of)  # an opponent's removal spell takes your best creature
+            perm = next((p for p in permanents if p["creature"] is doomed), None)
+            if perm:
+                kill_permanent(perm)
+            else:
+                creatures.remove(doomed)
+                for item in equipment:
+                    if item["on"] is doomed:
+                        item["on"] = None
+            refresh()
         if combo_turn == turn:
             kill_turn = kill_turn or turn
             table_turn = turn
@@ -659,11 +760,51 @@ def _play(deck: list[dict], commander: dict | None, deck_colors: set[str], combo
                 if paid is not None:
                     sources = paid
                     attach(item, best_carrier(turn), turn)
+        # planeswalkers: one loyalty ability each, the most valuable one the loyalty can pay for
+        for perm in [p for p in permanents if p["profile"]["loyalty"]]:
+            lo = perm["profile"]["loyalty"]
+            current = pw_loyalty.setdefault(id(perm), lo["start"])
+            options = [a for a in lo["abilities"] if current + a["cost"] >= 0]
+            if options:
+                best = max(options, key=lambda a: (effect_value(a), a["cost"]))
+                pw_loyalty[id(perm)] = current + best["cost"]
+                apply_effects(best, turn)
+        # repeatable activated abilities spend the mana the plays left over; a creature's {T} ability is used only
+        # when it is worth more than the creature's attack
+        pump_extra = 0
+        uses = []
+        for perm in permanents:
+            for a in perm["profile"]["activated"]:
+                uses.append((effect_value(a) / max(0.5, a["mana"]), perm, a))
+        activations = 0
+        for _, perm, a in sorted(uses, key=lambda u: -u[0]):
+            body = perm["creature"]
+            if a["tap"]:
+                if body is not None and (body["ready"] > turn or effect_value(a) < power_of(body)):
+                    continue
+                repeats = 1
+            else:
+                repeats = 6
+            for _ in range(repeats):
+                if activations >= 12:
+                    break
+                paid = _pay(sources, {}, a["mana"]) if a["mana"] else sources
+                if paid is None:
+                    break
+                sources = paid
+                activations += 1
+                if a["tap"] and body is not None:
+                    body["tapped"] = turn
+                if a["pump"]:
+                    if body is None or body["ready"] > turn or body.get("tapped") == turn:
+                        break
+                    pump_extra += a["pump"] * (2 if body["ds"] else 1)
+                apply_effects(a, turn)
         extra = 0
         spent = table.cast_draw_spells(len(sources))  # card draw with the mana the damage plays left over
         sources = sources[spent:]
-        attackers = [c for c in creatures if c["ready"] <= turn]
-        attack_damage = sum(power_of(c) + pump * (2 if c["ds"] else 1) for c in attackers)
+        attackers = [c for c in creatures if c["ready"] <= turn and c.get("tapped") != turn]
+        attack_damage = sum(power_of(c) + pump * (2 if c["ds"] else 1) for c in attackers) + pump_extra
         if attackers:
             for count, power in attack_tokens:
                 for _ in range(count):
@@ -698,7 +839,7 @@ def _play(deck: list[dict], commander: dict | None, deck_colors: set[str], combo
             table_turn = turn
         if table_turn:
             break
-        if scenario == "commander" and removals_left and commander_cast == turn:
+        if removals_left and commander_cast == turn:
             cmd_perm = next((p for p in permanents if p["commander"]), None)
             if cmd_perm:
                 kill_permanent(cmd_perm)
@@ -727,8 +868,9 @@ def _prepare(entries: list[CardEntry], combos_included: list[dict] | None):
     """The shuffled-deck inputs both simulations share: (deck cards, commander, deck colors, combos, cards whose
     power had to be estimated)."""
     gameplay = gameplay_data_in_index()
-    creature_names = [e.name for e in entries if "Creature" in (e.type_line or "")]
-    stats = ensure_card_stats(creature_names)
+    creature_names = [e.name for e in entries if "Creature" in (e.type_line or "") or "Planeswalker" in (e.type_line or "")]
+    walkers = {e.name for e in entries if "Planeswalker" in (e.type_line or "")}
+    stats = ensure_card_stats(creature_names, walkers)
     budget_alt = budget_alt_data_in_index()
     tags_by_name, _ = _card_tag_index(budget_alt["groups"])
     labels = budget_alt["tag_labels"]
@@ -768,7 +910,7 @@ def _prepare(entries: list[CardEntry], combos_included: list[dict] | None):
     return deck, commander, deck_colors, _combos_for(combos_included), estimated
 
 
-def simulate_resilience(entries: list[CardEntry], games: int = 1500, combos_included: list[dict] | None = None) -> dict | None:
+def simulate_resilience(entries: list[CardEntry], games: int = 1200, combos_included: list[dict] | None = None) -> dict | None:
     """How the Turn Clock changes when the opponents interact: a board wipe on turn WIPE_TURN (survived if a
     protection spell is in hand; creatures come back if a reanimation spell is), and the commander removed each
     time it is cast (twice). Reports each scenario's median kill turn and kill rate by turn 12 next to the baseline,
@@ -790,7 +932,8 @@ def simulate_resilience(entries: list[CardEntry], games: int = 1500, combos_incl
     threats = [c for c in unique if c.get("profile") and ((c["profile"]["creature"] and c["profile"]["power"] >= 3) or c["profile"]["tokens"] or c["profile"]["drain"] or c["profile"]["scaling"])]
     return {
         "games": games, "wipe_turn": WIPE_TURN,
-        "baseline": run(None), "wipe": run("wipe"), "commander": run("commander"),
+        "baseline": run(None), "spot": run({"spot": SPOT_CHANCE}), "wipe": run({"wipe": WIPE_TURN}),
+        "both": run({"wipe": WIPE_TURN, "spot": SPOT_CHANCE}), "commander": run({"cmd": 2}), "spot_chance": SPOT_CHANCE,
         "protection": sum(1 for c in deck if c.get("protect")),
         "recursion": sum(1 for c in deck if c.get("reanimate")),
         "draw": sum(1 for c in deck if c.get("draw")),

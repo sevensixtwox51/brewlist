@@ -4562,9 +4562,11 @@ function renderResilience(res) {{
     : `${{res.protection}} protection spell${{res.protection === 1 ? '' : 's'}} and ${{res.recursion}} reanimation spell${{res.recursion === 1 ? '' : 's'}} soften a wipe: it costs ${{wipeDelay === null ? 'the game' : wipeDelay + ' turn' + (wipeDelay === 1 ? '' : 's')}}.`;
   document.getElementById('resilience-heading').style.display = '';
   document.getElementById('resilience').innerHTML =
-    `<p class="hint" style="margin:0 0 8px;">The same Turn Clock when opponents interact (${{res.games.toLocaleString()}} games each). Bars show the chance of a kill by turn 10.</p>`
+    `<p class="hint" style="margin:0 0 8px;">The same Turn Clock when opponents interact (${{res.games.toLocaleString()}} games each). Bars show the chance of a kill by turn 10; the number after the turn is how many turns later than with no interaction.</p>`
     + row('No interaction', base, 'The baseline Turn Clock.')
-    + row('Board wipe on turn ' + res.wipe_turn, res.wipe, 'Every creature and token dies at the start of turn ' + res.wipe_turn + ', unless a protection spell is in hand; reanimation spells bring creatures back.')
+    + row('Spot removal (' + Math.round(res.spot_chance * 100) + '% each turn)', res.spot, 'From turn 3, each turn there is a ' + Math.round(res.spot_chance * 100) + '% chance an opponent removes your best creature.')
+    + row('Board wipe on turn ' + res.wipe_turn, res.wipe, 'Every creature and token dies at the start of turn ' + res.wipe_turn + ', unless a protection spell is in hand; reanimation spells bring creatures back. Planeswalkers, artifacts and enchantments survive.')
+    + row('Wipe and spot removal', res.both, 'Both of the above in the same game, the closest of these to a real table.')
     + row('Commander removed when cast (twice)', res.commander, 'Each time the commander is cast it is removed at the end of that turn, and recasting costs {2} more. Its own effects and creatures that depend on it go with it.')
     + `<p class="hint" style="margin:8px 0 0;">${{advice}} Protection ${{res.protection}} &middot; reanimation ${{res.recursion}} &middot; card draw ${{res.draw}} &middot; threats (power 3+, token makers, drain) ${{res.threats}}${{res.combos ? ' &middot; ' + res.combos + ' combo' + (res.combos === 1 ? '' : 's') : ''}}.</p>`;
 }}
@@ -4589,7 +4591,7 @@ function renderTurnClock(clock) {{
     + bars
     + (never ? `<p class="hint" style="margin:8px 0 0;"><b>Most games never kill.</b> The clock reads combat, tokens, equipment and auras, team boosts, extra combats, damage that scales with the board, direct life loss and the combos you've already assembled, so a deck that wins another way looks slower than it is.</p>` : '')
     + (clock.combos ? `<p class="hint" style="margin:8px 0 0;">${{clock.combos}} assembled game-ending combo${{clock.combos === 1 ? '' : 's'}} counted: ${{clock.combo_kill_rate}}% of games end by combo.</p>` : '')
-    + `<p class="hint" style="margin:6px 0 0;">A ruler for comparing builds, not a prediction: it can't read repeatable activated abilities, planeswalkers, or choices and targeting.</p>`;
+    + `<p class="hint" style="margin:6px 0 0;">A ruler for comparing builds, not a prediction: it can't read choices and targeting, or abilities that cost more than mana and tapping (sacrifice, discard, life).</p>`;
 }}
 
 // Per-color mana sources against Karsten's requirement (deck_builder.deck_color_sources):
