@@ -9,6 +9,8 @@ decks fairly rather than predicting exact table results):
   - the player is on the draw on turn 1 (draws a card), as Karsten's tables assume
   - the first mulligan is free (multiplayer Commander); London mulligans after that
   - a land is "keepable" in a 7-card hand at 2-5 lands (ramp that costs 2 or less counts as half a land)
+  - card draw is played (cheapest first, with the mana ramp leaves) so a deck with a lot of it finds its lands sooner
+  - validated: with 41 untapped basics it reproduces Karsten's published land-only table to within a point at turns 4-6
   - lands that enter tapped only when unconditional ("enters tapped"); conditional ones count as untapped
   - ramp spells are paid with mana from any source; colors only matter for the commander and land choice
 """
@@ -18,7 +20,7 @@ import random
 import re
 
 from brewlist_core import CardEntry, categorize, gameplay_data_in_index, normalize_name
-from deck_builder import _BASIC_FOR_COLOR, _color_pips, _land_produces
+from deck_builder import _BASIC_FOR_COLOR, _color_pips, _land_produces, _net_cards_drawn
 
 _ADD_RE = re.compile(r"\{T\}[^.\n]*: Add ([^.\n]*)", re.I)
 _SYMBOL_RE = re.compile(r"\{([^}]+)\}")
@@ -32,13 +34,30 @@ TURNS = 8
 SEED = 20260519
 
 
+def _draw_info(entry: CardEntry, text: str) -> dict | None:
+    """The card-draw a card gives, as {"net": cards, "engine": repeats every turn}, or None. Net counts
+    cards drawn minus cards discarded (Faithless Looting is 0). Only draw the player controls counts as an
+    engine: "at the beginning of your ..." and {T} abilities, not opponents' actions we can't see in a goldfish."""
+    if "Land" in (entry.type_line or ""):
+        return None
+    result = _net_cards_drawn({"oracle_text": text, "type_line": entry.type_line})
+    if not result or result[0] < 1:
+        return None
+    net, repeatable = result
+    low = text.lower()
+    engine = repeatable and ("at the beginning of your" in low or "{t}:" in low)
+    if repeatable and not engine:
+        return None
+    return {"net": min(net, 3), "engine": engine}
+
+
 def _classify(entry: CardEntry, info: dict) -> dict:
     """What one card does for the mana game: {kind: land|rock|dork|landramp|spell, mv, makes: set of
     colors, amount (mana per tap), tapped (enters tapped)}."""
     category = categorize(entry.type_line)
     text = info.get("oracle_text") or ""
     mv = int(entry.cmc or info.get("cmc") or 0)
-    base = {"kind": "spell", "mv": mv, "makes": set(), "amount": 0, "tapped": False}
+    base = {"kind": "spell", "mv": mv, "makes": set(), "amount": 0, "tapped": False, "draw": _draw_info(entry, text)}
     if category in ("Lands", "Basic Lands"):
         tapped = bool(_ENTERS_TAPPED_RE.search(text)) and not _CONDITIONAL_TAPPED_RE.search(text)
         makes = _land_produces({"type_line": entry.type_line, "oracle_text": text})
@@ -114,6 +133,8 @@ class Table:
         self.opening_lands = sum(1 for c in self.hand if c["kind"] == "land")
         self.battlefield: list[dict] = []  # {"makes", "amount", "ready_turn", "land"}
         self.played: set[str] = set()  # normalized names of lands and ramp already on the battlefield
+        self.auto_draw = True  # cast pure card-draw spells with mana left over after ramp (the Turn Clock turns this off)
+        self.engines = 0       # extra cards drawn every turn by draw engines on the battlefield
         self.produced = 0   # mana the table can make this turn
         self.pool = 0       # ...of which is still unspent after ramp
 
@@ -122,10 +143,30 @@ class Table:
         if name:
             self.played.update({normalize_name(name), normalize_name(name.split(" // ")[0])})
 
+    def draw(self, n: int) -> None:
+        for _ in range(n):
+            if self.library:
+                self.hand.append(self.library.pop(0))
+
+    def cast_draw_spells(self, budget: int) -> int:
+        """Casts the cheapest card-draw cards in hand that fit `budget` mana, newest cards drawn included;
+        returns the mana spent. Engines (a permanent that draws every turn) are cast and then draw each turn."""
+        spent = 0
+        while True:
+            options = [c for c in self.hand if c.get("draw") and not c.get("profile") and c["kind"] == "spell" and c["mv"] <= budget - spent]
+            if not options:
+                return spent
+            card = min(options, key=lambda c: (c["mv"], -c["draw"]["net"]))
+            self.hand.remove(card)
+            spent += card["mv"]
+            self._mark_played(card)
+            if card["draw"]["engine"]:
+                self.engines += 1
+            self.draw(card["draw"]["net"])
+
     def begin_turn(self, turn: int) -> int:
         hand, battlefield, deck_colors = self.hand, self.battlefield, self.deck_colors
-        if self.library:
-            hand.append(self.library.pop(0))
+        self.draw(1 + self.engines)
         lands_in_hand = [c for c in hand if c["kind"] == "land"]
         if lands_in_hand:
             have_colors = {col for p in battlefield for col in p["makes"]}
@@ -156,6 +197,8 @@ class Table:
                 if ready <= turn:
                     pool += c["amount"]
                     produced += c["amount"]
+        if self.auto_draw:
+            pool -= self.cast_draw_spells(pool)
         self.produced, self.pool = produced, pool
         return produced
 

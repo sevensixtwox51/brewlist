@@ -4471,12 +4471,12 @@ function renderManaSim(sim) {{
     ? `<li><b>${{escapeHtml(sim.commander.name)}}</b> (mana value ${{sim.commander.mv}}) can be cast on curve in <b>${{sim.commander.on_curve}}%</b> of games, and within two turns of that in <b>${{sim.commander.within_two}}%</b>.</li>` : '';
   document.getElementById('mana-sim-heading').style.display = '';
   document.getElementById('mana-sim').innerHTML =
-    `<p class="hint" style="margin:0 0 8px;">${{sim.games.toLocaleString()}} simulated games of just the mana game (${{sim.lands}} lands, ${{sim.ramp}} mana rocks, dorks and land-fetching spells): chance of having at least as much mana as the turn number.</p>`
+    `<p class="hint" style="margin:0 0 8px;">${{sim.games.toLocaleString()}} simulated games of just the mana game (${{sim.lands}} lands, ${{sim.ramp}} mana rocks, dorks and land-fetching spells, plus your card draw): chance of having at least as much mana as the turn number.</p>`
     + curve
     + `<ul class="rule0-list" style="margin-top:10px;">${{cmd}}`
     + `<li>Opening hands average <b>${{sim.avg_opening_lands}}</b> lands; <b>${{sim.mulligan_rate}}%</b> of games mulligan (the first one is free); <b>${{sim.stuck_on_two_turn_4}}%</b> are stuck on two mana or less on turn 4.</li>`
     + `<li>Chance each colour is available by turn 4: ${{colors}}</li></ul>`
-    + `<p class="hint" style="margin:6px 0 0;">Mana only &mdash; no spells are cast but ramp. It plays lands that enter tapped as tapped, so it reads a few points harsher than Karsten&rsquo;s land-only tables.</p>`;
+    + `<p class="hint" style="margin:6px 0 0;">Mana only &mdash; no spells are cast but ramp. It plays lands that enter tapped as tapped; checked against Karsten&rsquo;s land-only table with untapped basics, it agrees to within a point.</p>`;
 }}
 
 // Turn Clock (turn_clock.simulate_turn_clock): how soon the deck kills one opponent who does nothing.
@@ -4501,15 +4501,16 @@ function renderTurnClock(clock) {{
     const tip = 'In ' + pct + '% of ' + clock.games + ' simulated games the deck has dealt ' + clock.life + ' damage to one do-nothing opponent by turn ' + t + '.';
     return `<div class="shape-row" title="${{escapeHtml(tip)}}"><span class="shape-label">By turn ${{t}}</span>`
       + `<div class="shape-bar-track"><div class="shape-bar near" style="width:${{pct}}%"></div></div>`
-      + `<span class="shape-count" style="white-space:nowrap;min-width:150px;">${{pct}}%</span></div>`;
+      + `<span class="shape-count" style="white-space:nowrap;min-width:150px;" title="${{escapeHtml('Chance the deck has killed all ' + clock.opponents + ' opponents (' + clock.life * clock.opponents + ' damage spread across them) by turn ' + t + '.')}}">${{pct}}% &middot; table ${{clock.table_by_turn[t]}}%</span></div>`;
   }}).join('');
   const never = clock.kill_rate < 60;
   const headline = clock.median_turn
     ? `Kills one opponent on turn <b>${{clock.median_turn}}</b> in half of games` + (clock.fast_turn ? ` (the fastest tenth by turn <b>${{clock.fast_turn}}</b>` + (clock.slow_turn ? `, the slowest tenth by turn <b>${{clock.slow_turn}}</b>` : '') + ')' : '') + '.'
     : `Fewer than half of games kill an opponent by turn ${{clock.max_turn}}.`;
+  const tableLine = clock.table_median_turn ? ` The whole table of ${{clock.opponents}} is dead by turn <b>${{clock.table_median_turn}}</b> in half of games.` : (clock.table_kill_rate ? ` All ${{clock.opponents}} opponents are dead by turn ${{clock.max_turn}} in ${{clock.table_kill_rate}}% of games.` : '');
   document.getElementById('turn-clock-heading').style.display = '';
   document.getElementById('turn-clock').innerHTML =
-    `<p class="hint" style="margin:0 0 8px;">${{headline}} ${{clock.games.toLocaleString()}} simulated games against one opponent at ${{clock.life}} life who blocks nothing and removes nothing.</p>`
+    `<p class="hint" style="margin:0 0 8px;">${{headline}}${{tableLine}} ${{clock.games.toLocaleString()}} simulated games against opponents at ${{clock.life}} life who block nothing and remove nothing. Commander damage (21) counts as a kill.</p>`
     + bars
     + (never ? `<p class="hint" style="margin:8px 0 0;"><b>Most games never kill.</b> The clock reads combat, tokens, equipment and auras, team boosts, extra combats, damage that scales with the board, direct life loss and the combos you've already assembled, so a deck that wins another way looks slower than it is.</p>` : '')
     + (clock.combos ? `<p class="hint" style="margin:8px 0 0;">${{clock.combos}} assembled game-ending combo${{clock.combos === 1 ? '' : 's'}} counted: ${{clock.combo_kill_rate}}% of games end by combo.</p>` : '')

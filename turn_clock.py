@@ -19,6 +19,9 @@ builds, not a prediction of a real table. What it understands:
     from your hand onto the battlefield attacking" cheat (Kaalia)
   - combos the deck has already assembled (Commander Spellbook's "included" list) that win the game --
     infinite damage or life loss, an outright win, infinite combat -- once every piece is castable
+  - card draw: spells cast with the mana the damage plays leave, engines drawing every turn, ETB draws on creatures
+  - the whole table: three opponents at 40, attackers hit one at a time, each-opponent effects hit all three
+  - commander damage: 21 from the commander alone ends one opponent
   - tutors: cast for their mana, fetching the one missing piece of the nearest combo, else the best damage card
 What it ignores: repeatable activated abilities, planeswalkers, choices and targeting, and combos
 that need a card the deck can't find on its own. A deck that wins in a way it can't read shows a slow or
@@ -41,9 +44,11 @@ from mana_sim import SEED, Table, _classify, _opening_hand  # noqa: F401 -- _ope
 _CORE_DIR = os.path.dirname(os.path.abspath(__file__))
 CARD_STATS_PATH = os.path.join(_CORE_DIR, "data", "card_stats.json")
 
-GAMES_DEFAULT = 1500
+GAMES_DEFAULT = 2000
 MAX_TURN = 12
 LIFE = 40
+OPPONENTS = 3
+COMMANDER_DAMAGE = 21
 
 _NUMBER_WORDS = {"a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8}
 _COUNT = r"(a|an|one|two|three|four|five|six|seven|eight|\d+)"
@@ -321,6 +326,7 @@ def _name_keys(name: str) -> set[str]:
 
 def _play(deck: list[dict], commander: dict | None, deck_colors: set[str], combos: list[dict], rng: random.Random) -> dict:
     table = Table(deck, deck_colors, rng)
+    table.auto_draw = False  # the clock spends mana on damage first and card draw with what is left
     creatures: list[dict] = []     # {"power", "subtypes", "ready", "ds", "bonus", "haste_granted"}
     equipment: list[dict] = []     # {"bonus", "haste", "double", "equip", "on"}
     on_battlefield: set[str] = set()
@@ -336,18 +342,22 @@ def _play(deck: list[dict], commander: dict | None, deck_colors: set[str], combo
     extra_combat_once = 0
     extra_combat_costs: list[int] = []
     cheat = None
-    damage = 0
+    damage = 0          # dealt to one opponent
+    table_damage = 0    # dealt across all three (an each-opponent effect hits every one of them)
+    cmd_damage = 0      # combat damage the commander has dealt to one opponent
     kill_turn = None
+    table_turn = None
     combo_turn = None
     combo_fired = False
     commander_cast = None
     cast_count = 0
 
     def new_creature(power: int, subtypes: set, ds: bool, ready: int) -> dict:
-        nonlocal damage
+        nonlocal damage, table_damage
         c = {"power": power, "subtypes": subtypes, "ds": ds, "ready": ready, "bonus": 0}
         creatures.append(c)
         damage += etb_ping  # Impact Tremors / Purphoros: each creature entering hurts
+        table_damage += etb_ping * OPPONENTS
         return c
 
     def token_ready(turn: int) -> int:
@@ -386,6 +396,10 @@ def _play(deck: list[dict], commander: dict | None, deck_colors: set[str], combo
         nonlocal anthem, global_haste, each_turn_drain, cheat, attack_ping, etb_ping, extra_combat_once
         profile = card["profile"]
         on_battlefield.update(_name_keys(card.get("name", "")))
+        if card.get("draw"):  # an enters-the-battlefield or spell draw on a card the clock casts for its damage
+            table.draw(card["draw"]["net"])
+            if card["draw"]["engine"]:
+                table.engines += 1
         if card["permanent"]:
             for col, n in card["devo"].items():
                 devotion[col] += n
@@ -429,6 +443,12 @@ def _play(deck: list[dict], commander: dict | None, deck_colors: set[str], combo
             gain += scaling_value(profile["scaling"])
         return gain
 
+    def deal_each(amount: int) -> None:
+        """Damage or life loss to each opponent: it counts once against one opponent and three times across the table."""
+        nonlocal damage, table_damage
+        damage += amount
+        table_damage += amount * OPPONENTS
+
     def castable_value(card: dict) -> float:
         p = card["profile"]
         eq = p["equipment"] or p["aura"] or {}
@@ -465,7 +485,8 @@ def _play(deck: list[dict], commander: dict | None, deck_colors: set[str], combo
         table.begin_turn(turn)
         sources = table.mana_sources(turn)
         if combo_turn == turn:
-            kill_turn = turn
+            kill_turn = kill_turn or turn
+            table_turn = turn
             break
         for count, power in each_turn_tokens:
             for _ in range(count):
@@ -473,7 +494,7 @@ def _play(deck: list[dict], commander: dict | None, deck_colors: set[str], combo
         # a known combo that wins the game: cast whatever pieces are missing and it goes off (next turn if a
         # creature piece needs to lose summoning sickness first)
         def try_combos() -> bool:
-            nonlocal sources, commander_cast, damage, cast_count, combo_fired, combo_turn, kill_turn
+            nonlocal sources, commander_cast, cast_count, combo_fired, combo_turn, kill_turn, table_turn
             for combo in combos:
                 found = combo_pieces(combo, turn, sources)
                 if found is None:
@@ -490,13 +511,14 @@ def _play(deck: list[dict], commander: dict | None, deck_colors: set[str], combo
                     on_battlefield.update(_name_keys(card.get("name", "") if card is not commander else commander["name"]))
                     sick = sick or (card.get("creature") and not (card.get("profile") or {}).get("haste") and not global_haste)
                     if card.get("profile"):
-                        damage += resolve(card, turn)
+                        deal_each(resolve(card, turn))
                     cast_count += 1
                 combo_fired = True
                 if sick:
                     combo_turn = turn + 1
                 else:
-                    kill_turn = turn
+                    kill_turn = kill_turn or turn
+                    table_turn = turn
                 return True
             return False
 
@@ -533,19 +555,22 @@ def _play(deck: list[dict], commander: dict | None, deck_colors: set[str], combo
                 cast_count += 1
 
         try_combos()
-        if kill_turn:
+        if table_turn:
             break
         if combos or any(c.get("tutor") for c in table.hand):
             cast_tutors()
             try_combos()
-            if kill_turn:
+            if table_turn:
                 break
         # commander first, then the best damage per mana
         if commander and commander_cast is None and commander["profile"]:
             paid = _pay(sources, commander["pips"], commander["mv"])
             if paid is not None:
                 sources, commander_cast = paid, turn
-                damage += resolve(commander, turn)
+                before = len(creatures)
+                deal_each(resolve(commander, turn))
+                if commander["profile"]["creature"]:
+                    creatures[before]["cmd"] = True
         castable = [c for c in table.hand if c.get("profile")]
         castable.sort(key=lambda c: -castable_value(c))
         pump = 0
@@ -563,7 +588,7 @@ def _play(deck: list[dict], commander: dict | None, deck_colors: set[str], combo
             cast_count += 1
             if p["pump"]:
                 pump += p["pump"]
-            damage += resolve(c, turn)
+            deal_each(resolve(c, turn))
         # equip: move each unattached piece of equipment onto the best creature we can pay for
         for item in equipment:
             if item["on"] is None and creatures:
@@ -571,6 +596,9 @@ def _play(deck: list[dict], commander: dict | None, deck_colors: set[str], combo
                 if paid is not None:
                     sources = paid
                     attach(item, best_carrier(turn), turn)
+        extra = 0
+        spent = table.cast_draw_spells(len(sources))  # card draw with the mana the damage plays left over
+        sources = sources[spent:]
         attackers = [c for c in creatures if c["ready"] <= turn]
         attack_damage = sum(power_of(c) + pump * (2 if c["ds"] else 1) for c in attackers)
         if attackers:
@@ -586,7 +614,7 @@ def _play(deck: list[dict], commander: dict | None, deck_colors: set[str], combo
                     card = {**best, "profile": {**best["profile"], "haste": True}}
                     entering = new_creature(best["profile"]["power"], best["profile"]["subtypes"], best["profile"]["double_strike"], turn)
                     attack_damage += power_of(entering)
-                    damage += resolve({**card, "profile": {**card["profile"], "creature": False}}, turn)
+                    deal_each(resolve({**card, "profile": {**card["profile"], "creature": False}}, turn))
             attack_damage += attack_ping * len(attackers)
             extra = extra_combat_once
             for cost in extra_combat_costs:  # Aggravated Assault style: pay again and again
@@ -598,11 +626,17 @@ def _play(deck: list[dict], commander: dict | None, deck_colors: set[str], combo
                     extra += 1
             attack_damage *= 1 + min(extra, 4)
         damage += attack_damage + each_turn_drain
-        if damage >= LIFE:
+        table_damage += attack_damage + each_turn_drain * OPPONENTS  # attackers hit one opponent at a time
+        if attackers:
+            cmd_damage += sum(power_of(c) + pump * (2 if c["ds"] else 1) for c in attackers if c.get("cmd")) * (1 + min(extra, 4))
+        if kill_turn is None and (damage >= LIFE or cmd_damage >= COMMANDER_DAMAGE):
             kill_turn = turn
+        if table_turn is None and table_damage >= LIFE * OPPONENTS:
+            table_turn = turn
+        if table_turn:
             break
-    return {"kill_turn": kill_turn, "commander_turn": commander_cast, "cast": cast_count, "damage": damage,
-            "combo_kill": combo_fired and kill_turn is not None}
+    return {"kill_turn": kill_turn, "table_turn": table_turn, "commander_turn": commander_cast, "cast": cast_count,
+            "damage": damage, "combo_kill": combo_fired and kill_turn is not None}
 
 
 def _combos_for(combos_included: list[dict] | None) -> list[dict]:
@@ -660,7 +694,9 @@ def simulate_turn_clock(entries: list[CardEntry], games: int = GAMES_DEFAULT, co
     rng = random.Random(SEED)
     runs = [_play(deck, commander, deck_colors, combos, rng) for _ in range(games)]
     kills = sorted(r["kill_turn"] for r in runs if r["kill_turn"] is not None)
+    table_kills = sorted(r["table_turn"] for r in runs if r["table_turn"] is not None)
     by_turn = {t: round(100.0 * sum(1 for k in kills if k <= t) / games, 1) for t in range(3, MAX_TURN + 1)}
+    table_by_turn = {t: round(100.0 * sum(1 for k in table_kills if k <= t) / games, 1) for t in range(3, MAX_TURN + 1)}
 
     def percentile(p: float):
         index = int(games * p)
@@ -673,6 +709,10 @@ def simulate_turn_clock(entries: list[CardEntry], games: int = GAMES_DEFAULT, co
         "fast_turn": percentile(0.1),
         "slow_turn": percentile(0.9),
         "by_turn": by_turn,
+        "table_by_turn": table_by_turn,
+        "table_kill_rate": round(100.0 * len(table_kills) / games, 1),
+        "table_median_turn": table_kills[games // 2] if games // 2 < len(table_kills) else None,
+        "opponents": OPPONENTS,
         "estimated_power_cards": estimated,
         "commander_cast_rate": round(100.0 * sum(1 for r in runs if r["commander_turn"] is not None) / games, 1),
         "combos": len(combos),
