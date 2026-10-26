@@ -1387,6 +1387,15 @@ body.compact .deck-row .card-thumb { display:none; }
 .modal-close { background:none; border:none; color:var(--text-dim); font-size:1.4rem; line-height:1; cursor:pointer; padding:2px 6px; }
 .modal-close:hover { color:var(--text); }
 .modal-body { padding:16px 18px; overflow-y:auto; flex:1; }
+/* Analyze loads in stages (combos, then the simulations); the page is dimmed under a sticky status pill until all are in. */
+#analyze-busy { display:none; position:sticky; top:-16px; z-index:6; align-items:center; justify-content:center; gap:10px;
+  margin:-16px -18px 14px; padding:10px 14px; background:var(--bg-elevated); border-bottom:1px solid var(--card-border);
+  box-shadow:var(--shadow); font-size:0.82rem; color:var(--text); }
+.modal-body.analyzing #analyze-busy { display:flex; }
+.modal-body.analyzing > :not(#analyze-busy) { opacity:0.4; pointer-events:none; filter:saturate(0.6); transition:opacity .2s; }
+.analyze-spinner { width:15px; height:15px; border-radius:50%; border:2px solid var(--card-border); border-top-color:var(--accent);
+  animation:analyze-spin .8s linear infinite; flex:0 0 auto; }
+@keyframes analyze-spin { to { transform:rotate(360deg); } }
 .modal-footer { padding:12px 18px; border-top:1px solid var(--card-border); display:flex; justify-content:flex-end; flex-shrink:0; }
 .rule0-list { margin:0 0 4px; padding-left:20px; font-size:0.85rem; color:var(--text); }
 .rule0-list li { margin-bottom:5px; }
@@ -1661,6 +1670,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
       <button type="button" class="modal-close" id="analyze-modal-close" aria-label="Close">&times;</button>
     </div>
     <div class="modal-body">
+      <div id="analyze-busy" role="status" aria-live="polite"><span class="analyze-spinner"></span><span id="analyze-busy-text"></span></div>
       <div id="analyze-badges"></div>
       <div id="ai-summary-block" style="display:none;">
         <h4 class="analysis-heading">&#10024; AI Summary</h4>
@@ -1678,7 +1688,6 @@ def render_builder_page(deck_id: str | None = None) -> str:
         <p class="hint" style="margin:0 0 8px;">Candidates the AI found but wasn't confident enough to commit as a direct swap -- not part of the deck.</p>
         <div id="maybeboard-list"></div>
       </div>
-      <div class="hint" id="analyze-loading" style="margin:0 0 12px;">Checking&hellip; (calls Commander Spellbook live, may take a few seconds)</div>
 
       <h4 class="analysis-heading">Rule 0 summary</h4>
       <div id="pitch-block" style="margin:0 0 12px;">
@@ -4316,6 +4325,27 @@ let lastAnalyzeData = null;
 // even though a newer, correct response already rendered (or the deck is
 // now empty). Only the response matching the current sequence number wins.
 let analyzeRequestSeq = 0;
+// Which of Analyze's loading stages are still running. Every stage is registered up front so the status line can
+// say "2 of 5 done"; a stage that won't run (constructed decks) or fails is simply marked finished.
+const ANALYZE_STAGES = {{ stats: 'deck stats and combos', mana: 'mana simulation', land: 'land-count table', clock: 'Turn Clock', resilience: 'resilience' }};
+const analyzeBusy = {{ pending: new Set() }};
+function renderAnalyzeBusy() {{
+  const body = document.querySelector('#analyze-modal .modal-body');
+  const total = Object.keys(ANALYZE_STAGES).length, left = analyzeBusy.pending.size;
+  body.classList.toggle('analyzing', left > 0);
+  document.getElementById('analyze-busy-text').textContent = left
+    ? `Analyzing\u2026 ${{total - left}} of ${{total}} done \u00b7 working on ${{[...analyzeBusy.pending].map(k => ANALYZE_STAGES[k]).join(', ')}}`
+    : '';
+}}
+function analyzeStage(seq, key, running) {{
+  if (seq !== analyzeRequestSeq) return; // a newer Analyze has started; this one no longer counts
+  if (running) analyzeBusy.pending.add(key); else analyzeBusy.pending.delete(key);
+  renderAnalyzeBusy();
+}}
+function analyzeStart(seq) {{
+  analyzeBusy.pending = new Set(Object.keys(ANALYZE_STAGES));
+  renderAnalyzeBusy();
+}}
 const analyzeModal = document.getElementById('analyze-modal');
 const analyzeBtn = document.getElementById('analyze-btn');
 const printBattleCardBtn = document.getElementById('print-battle-card-btn');
@@ -4328,6 +4358,8 @@ document.addEventListener('keydown', (e) => {{ if (e.key === 'Escape' && analyze
 analyzeBtn.addEventListener('click', () => {{
   if (!brew.cards.length && !brew.commander) {{
     analyzeRequestSeq++; // invalidate any still-in-flight request from before the deck was emptied
+    analyzeBusy.pending.clear();
+    renderAnalyzeBusy();
     showError('Add some cards first.');
     return;
   }}
@@ -4365,9 +4397,9 @@ analyzeBtn.addEventListener('click', () => {{
   document.getElementById('resilience-heading').style.display = 'none';
   document.getElementById('turn-clock-heading').style.display = 'none';
   document.getElementById('mana-sim-heading').style.display = 'none';
-  document.getElementById('analyze-loading').style.display = 'block';
   printBattleCardBtn.disabled = true;
   const requestSeq = ++analyzeRequestSeq;
+  analyzeStart(requestSeq);
   fetch('/builder/stats', {{
     method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
     body: JSON.stringify({{ cards: brew.cards, commander: brew.commander, format: brew.format, mix_targets: brew.mix_targets, deck_id: deckId }}),
@@ -4375,8 +4407,8 @@ analyzeBtn.addEventListener('click', () => {{
     .then(r => r.json())
     .then(data => {{
       if (requestSeq !== analyzeRequestSeq) return; // a newer analyze request has since started -- discard this stale response
-      document.getElementById('analyze-loading').style.display = 'none';
-      if (data.error) {{ showError(data.error); return; }}
+      analyzeStage(requestSeq, 'stats', false);
+      if (data.error) {{ showError(data.error); ['mana', 'land', 'clock', 'resilience'].forEach(k => analyzeStage(requestSeq, k, false)); return; }}
       lastAnalyzeData = data;
       document.getElementById('analyze-badges').innerHTML = statBadges(data).map(b =>
         `<span class="bv-badge ${{b.cls || ''}}">${{b.label}}<span class="tooltip-popup">${{b.tip}}</span></span>`
@@ -4392,7 +4424,7 @@ analyzeBtn.addEventListener('click', () => {{
     }})
     .catch(() => {{
       if (requestSeq !== analyzeRequestSeq) return;
-      document.getElementById('analyze-loading').style.display = 'none';
+      Object.keys(ANALYZE_STAGES).forEach(k => analyzeStage(requestSeq, k, false));
       showError('Could not reach the server.');
     }});
 }});
@@ -4433,18 +4465,20 @@ function renderDeckShape(data) {{
 // run on the server right after Analyze and shown as on-curve odds per turn.
 const MANA_SIM_GOOD = {{ 2: 95, 3: 88, 4: 78, 5: 66, 6: 55 }};
 function runManaSim(requestSeq) {{
-  if (brew.format === 'constructed') return;
+  if (brew.format === 'constructed') {{ analyzeStage(requestSeq, 'mana', false); analyzeStage(requestSeq, 'land', false); return; }}
   fetch('/builder/mana-sim', {{
     method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
     body: JSON.stringify({{ cards: brew.cards, commander: brew.commander }}),
   }})
     .then(r => r.json())
     .then(sim => {{
-      if (requestSeq !== analyzeRequestSeq || !sim || sim.error) return;
+      if (requestSeq !== analyzeRequestSeq) return;
+      analyzeStage(requestSeq, 'mana', false);
+      if (!sim || sim.error) {{ analyzeStage(requestSeq, 'land', false); return; }}
       renderManaSim(sim);
       loadLandCurve(requestSeq);
     }})
-    .catch(() => {{}});
+    .catch(() => {{ analyzeStage(requestSeq, 'mana', false); analyzeStage(requestSeq, 'land', false); }});
 }}
 function loadLandCurve(requestSeq) {{
   fetch('/builder/land-curve', {{
@@ -4453,7 +4487,9 @@ function loadLandCurve(requestSeq) {{
   }})
     .then(r => r.json())
     .then(curve => {{
-      if (requestSeq !== analyzeRequestSeq || !curve || curve.error) return;
+      if (requestSeq !== analyzeRequestSeq) return;
+      analyzeStage(requestSeq, 'land', false);
+      if (!curve || curve.error) return;
       const wanted = new Set([curve.current - 4, curve.current - 2, curve.current, curve.current + 2, curve.current + 4]);
       const rows = curve.rows.filter(r => wanted.has(r.lands)).map(r =>
         `<tr><td>${{r.lands}} lands${{r.lands === curve.current ? ' <span class="hint" style="margin:0;">(yours)</span>' : ''}}</td><td>${{r.four_on_four}}%</td><td>${{r.five_on_five}}%</td><td>${{r.flood}}%</td></tr>`).join('');
@@ -4466,7 +4502,7 @@ function loadLandCurve(requestSeq) {{
         `<p class="hint" style="margin:12px 0 4px;"><b>Land count</b> &mdash; the same deck with more or fewer lands (${{curve.games.toLocaleString()}} games each). Around ${{curve.current}} lands, each extra land adds about <b>${{gain}}</b> points of four-mana-on-turn-4 odds and about <b>${{cost}}</b> points of flood odds.</p>`
         + `<table class="land-curve" style="width:100%;font-size:13px;border-collapse:collapse;"><thead><tr style="text-align:left;"><th>Lands</th><th title="Chance of at least four mana on turn 4">4 on T4</th><th title="Chance of at least five mana on turn 5">5 on T5</th><th title="Chance of 8 or more lands in your first 14 cards">Flood</th></tr></thead><tbody>${{rows}}</tbody></table>`);
     }})
-    .catch(() => {{}});
+    .catch(() => analyzeStage(requestSeq, 'land', false));
 }}
 function renderManaSim(sim) {{
   const row = (label, pct, good, tip) => {{
@@ -4519,18 +4555,20 @@ function renderSynergy(data) {{
 
 // Turn Clock (turn_clock.simulate_turn_clock): how soon the deck kills one opponent who does nothing.
 function runTurnClock(requestSeq) {{
-  if (brew.format === 'constructed') return;
+  if (brew.format === 'constructed') {{ analyzeStage(requestSeq, 'clock', false); analyzeStage(requestSeq, 'resilience', false); return; }}
   fetch('/builder/turn-clock', {{
     method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
     body: JSON.stringify({{ cards: brew.cards, commander: brew.commander, combos: (lastAnalyzeData && lastAnalyzeData.combos_included_list) || [] }}),
   }})
     .then(r => r.json())
     .then(clock => {{
-      if (requestSeq !== analyzeRequestSeq || !clock || clock.error) return;
+      if (requestSeq !== analyzeRequestSeq) return;
+      analyzeStage(requestSeq, 'clock', false);
+      if (!clock || clock.error) {{ analyzeStage(requestSeq, 'resilience', false); return; }}
       renderTurnClock(clock);
       loadResilience(requestSeq);
     }})
-    .catch(() => {{}});
+    .catch(() => {{ analyzeStage(requestSeq, 'clock', false); analyzeStage(requestSeq, 'resilience', false); }});
 }}
 function loadResilience(requestSeq) {{
   fetch('/builder/resilience', {{
@@ -4539,10 +4577,12 @@ function loadResilience(requestSeq) {{
   }})
     .then(r => r.json())
     .then(res => {{
-      if (requestSeq !== analyzeRequestSeq || !res || res.error) return;
+      if (requestSeq !== analyzeRequestSeq) return;
+      analyzeStage(requestSeq, 'resilience', false);
+      if (!res || res.error) return;
       renderResilience(res);
     }})
-    .catch(() => {{}});
+    .catch(() => analyzeStage(requestSeq, 'resilience', false));
 }}
 function renderResilience(res) {{
   const base = res.baseline;
