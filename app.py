@@ -54,6 +54,7 @@ from brewlist_core import (
     update_from_git,
 )
 from mana_sim import land_count_curve, simulate_mana
+from synergy import deck_synergy_packages
 from turn_clock import simulate_turn_clock
 from deck_builder import (
     deck_pitch_draft,
@@ -1696,6 +1697,9 @@ def render_builder_page(deck_id: str | None = None) -> str:
       <h4 class="analysis-heading">&#9878;&#65039; Deck Shape</h4>
       <p class="hint" style="margin:0 0 8px;">Actual card counts against your Deck mix targets (the template you picked; Command Zone by default) &mdash; guidelines, not hard walls.</p>
       <div id="deck-shape-breakdown"></div>
+
+      <h4 class="analysis-heading" id="synergy-heading" style="display:none;">&#129513; Synergy Packages</h4>
+      <div id="synergy-packages"></div>
 
       <h4 class="analysis-heading" id="mana-sim-heading" style="display:none;">&#127922; Mana Simulation</h4>
       <div id="mana-sim"></div>
@@ -4351,6 +4355,8 @@ analyzeBtn.addEventListener('click', () => {{
   // until the new response lands (this is what you saw).
   document.getElementById('deck-shape-breakdown').innerHTML = '';
   document.getElementById('mana-sim').innerHTML = '';
+  document.getElementById('synergy-packages').innerHTML = '';
+  document.getElementById('synergy-heading').style.display = 'none';
   document.getElementById('turn-clock').innerHTML = '';
   document.getElementById('turn-clock-heading').style.display = 'none';
   document.getElementById('mana-sim-heading').style.display = 'none';
@@ -4373,6 +4379,7 @@ analyzeBtn.addEventListener('click', () => {{
       document.getElementById('rule0-list').innerHTML = rule0Items(data).map(t => `<li>${{t}}</li>`).join('');
       showPitchFor(data);
       renderDeckShape(data);
+      renderSynergy(data);
       renderComboReference(data);
       runManaSim(requestSeq);
       runTurnClock(requestSeq);
@@ -4477,6 +4484,32 @@ function renderManaSim(sim) {{
     + `<li>Opening hands average <b>${{sim.avg_opening_lands}}</b> lands; <b>${{sim.mulligan_rate}}%</b> of games mulligan (the first one is free); <b>${{sim.stuck_on_two_turn_4}}%</b> are stuck on two mana or less on turn 4.</li>`
     + `<li>Chance each colour is available by turn 4: ${{colors}}</li></ul>`
     + `<p class="hint" style="margin:6px 0 0;">Mana only &mdash; no spells are cast but ramp. It plays lands that enter tapped as tapped; checked against Karsten&rsquo;s land-only table with untapped basics, it agrees to within a point.</p>`;
+}}
+
+// Synergy packages (synergy.deck_synergy_packages): what the deck is built around, as enablers (cards that
+// make the thing happen) and payoffs (cards that reward it), plus cards that belong to none of it.
+function renderSynergy(data) {{
+  const syn = data.synergy;
+  const box = document.getElementById('synergy-packages');
+  if (!syn || !(syn.packages.length || syn.thin.length || syn.off_plan_total)) return;
+  const verdictClass = v => v === 'balanced' ? 'near' : 'over';
+  const rows = syn.packages.map(p => {{
+    const total = p.enablers + p.payoffs;
+    const share = Math.round(p.enablers / total * 100);
+    const tip = `${{p.blurb}}. Enablers (${{p.enablers}}): ${{p.enabler_cards.join(', ')}}${{p.enablers > p.enabler_cards.length ? '...' : ''}}. Payoffs (${{p.payoffs}}): ${{p.payoff_cards.join(', ') || 'none'}}${{p.payoffs > p.payoff_cards.length ? '...' : ''}}.`;
+    return `<div class="shape-row" title="${{escapeHtml(tip)}}"><span class="shape-label" style="min-width:150px;">${{escapeHtml(p.name)}}</span>`
+      + `<div class="shape-bar-track" style="display:flex;overflow:hidden;"><div class="shape-bar ${{verdictClass(p.verdict)}}" style="width:${{share}}%;border-radius:0;"></div>`
+      + `<div class="shape-bar near" style="width:${{100 - share}}%;border-radius:0;opacity:0.55;"></div></div>`
+      + `<span class="shape-count" style="white-space:nowrap;min-width:200px;">${{p.enablers}} enablers &middot; ${{p.payoffs}} payoffs${{p.verdict === 'balanced' ? '' : ' &middot; ' + p.verdict}}</span></div>`;
+  }}).join('');
+  const thin = syn.thin.length
+    ? `<p class="hint" style="margin:8px 0 0;"><b>Payoffs with little to enable them:</b> ` + syn.thin.map(p =>
+        `<span title="${{escapeHtml(p.payoff_cards.join(', '))}}">${{escapeHtml(p.name)}} (${{p.payoffs}} payoffs, ${{p.enablers}} enabler${{p.enablers === 1 ? '' : 's'}})</span>`).join('; ') + `. Those cards may sit idle in hand.</p>` : '';
+  const off = syn.off_plan_total
+    ? `<p class="hint" style="margin:8px 0 0;"><b>Outside every package above (${{syn.off_plan_total}}):</b> ${{syn.off_plan.map(c => escapeHtml(c.name)).join(', ')}}${{syn.off_plan_total > syn.off_plan.length ? '...' : ''}}. These are the likeliest filler among your non-land, non-ramp, non-draw, non-interaction cards.</p>` : '';
+  document.getElementById('synergy-heading').style.display = '';
+  box.innerHTML = (syn.packages.length ? `<p class="hint" style="margin:0 0 8px;">What the deck is built around, from card text. Each bar is enablers (left, bright) against payoffs (right); hover for the cards.</p>` + rows
+      : `<p class="hint" style="margin:0 0 8px;">No package has both enablers and payoffs in this deck yet.</p>`) + thin + off;
 }}
 
 // Turn Clock (turn_clock.simulate_turn_clock): how soon the deck kills one opponent who does nothing.
@@ -5224,6 +5257,10 @@ def builder_stats():
     # differently-tuned one.
     target_size = 100 if is_commander_format else 60
     color_sources = deck_color_sources(entries) if is_commander_format else None
+    try:
+        synergy = deck_synergy_packages(entries) if is_commander_format else None
+    except Exception:  # noqa: BLE001 -- a nicety panel; never fail Analyze over it
+        synergy = None
     mana_fixes_list = []
     if color_sources and body.get("commander"):
         try:
@@ -5254,6 +5291,7 @@ def builder_stats():
         role_counts=role_counts_for_entries(entries),
         karsten=deck_karsten(entries) if is_commander_format else None,
         color_sources=color_sources,
+        synergy=synergy,
         mana_fixes=mana_fixes_list,
         pitch_draft=_pitch_draft_for(body, entries, totals) if is_commander_format else None,
         role_targets=deck_shape_targets_with_mix(
