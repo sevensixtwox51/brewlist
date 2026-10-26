@@ -456,10 +456,29 @@ def _role_member_names(groups: dict, tag_labels: dict) -> dict[str, frozenset[st
             for nm in result[role]:
                 card = gameplay.get(nm)
                 text = ((card or {}).get("oracle_text") or "").lower()
+                # a two-faced card's other face isn't in the index, so its evidence can't be checked
                 if card and text and nm not in multi_face and not rx.search(text):
                     unproven.add(nm)
             if unproven:
                 result[role] = frozenset(result[role] - unproven)
+        # A draw spell that also makes Treasure is a draw spell (Deadly Dispute, Big Score), and an Aura that
+        # turns a creature into a land (Imprisoned in the Moon) is removal, not ramp.
+        # Two-faced cards whose text can't be checked (see above) and are tagged wrongly: reanimating what an
+        # opponent sacrifices or discards isn't mana.
+        not_ramp, now_draw = {"tergrid, god of fright", "tergrid, god of fright // tergrid's lantern"}, set()
+        for nm in result["Ramp"]:
+            card = gameplay.get(nm) or {}
+            text, type_line = (card.get("oracle_text") or "").lower(), card.get("type_line") or ""
+            if ("Instant" in type_line or "Sorcery" in type_line) and "treasure" in text and re.search(r"\bdraws? (?:two|three|x|a) cards?", text) \
+                    and not re.search(r"\badd \{|search your library|land card|lands? onto the battlefield", text):
+                not_ramp.add(nm)
+                now_draw.add(nm)
+            elif "Aura" in type_line and "enchant creature" in text:
+                not_ramp.add(nm)
+        if not_ramp:
+            result["Ramp"] = frozenset(result["Ramp"] - not_ramp)
+        if now_draw:
+            result["Draw"] = frozenset(result["Draw"] | now_draw)
     return result
 
 
