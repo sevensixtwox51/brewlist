@@ -886,6 +886,21 @@ def karsten_sources_needed(pips: int, mana_value: int) -> int:
     return _SOURCE_CHECK_LIBRARY
 
 
+def source_needs_for_cards(cards: list[tuple[int, str]]) -> dict[str, int]:
+    """Karsten's colored-source requirement per color for a set of spells given as (mana value, mana cost): the number
+    that covers 80% of that color's spells cast on curve, so one far-off 7-drop doesn't set the bar. Colors with no
+    pips are left out. deck_color_sources reports the same numbers for a finished deck."""
+    needs: dict[str, list[int]] = {}
+    for mv, cost in cards:
+        for col, pips in _color_pips(cost).items():
+            needs.setdefault(col, []).append(karsten_sources_needed(max(1, math.ceil(pips)), mv))
+    result = {}
+    for col, values in needs.items():
+        values.sort()
+        result[col] = values[min(len(values) - 1, math.ceil(len(values) * 0.8) - 1)]
+    return result
+
+
 def deck_color_sources(entries: list[CardEntry]) -> list[dict] | None:
     """Per-color check of a Commander deck's mana sources against Karsten's requirement.
     For each color the deck has pips in: `have` (lands that make it, plus mana rocks and
@@ -3004,6 +3019,7 @@ def suggest_builder_cards(
             return owned_by_name.get(normalize_name(name)) or {"type_line": fallback_type, "mana_cost": "", "oracle_text": ""}
 
         non_land_costs = [c.get("mana_cost") for c in ordered if role_of(c["name"], c["category"]) != "Lands"]
+        non_land_mvs = [int(c.get("cmc") or 0) for c in ordered if role_of(c["name"], c["category"]) != "Lands"]
         sources = {col: 0.0 for col in deck_colors}
         for c in ordered:
             if role_of(c["name"], c["category"]) == "Lands":
@@ -3016,6 +3032,7 @@ def suggest_builder_cards(
                     sources[col] += e.quantity
             else:
                 non_land_costs.append(info.get("mana_cost"))
+                non_land_mvs.append(int(info.get("cmc") or e.cmc or 0))
         for cost in non_land_costs:
             for col, n in _color_pips(cost).items():
                 pips_by_color[col] = pips_by_color.get(col, 0.0) + n
@@ -3031,10 +3048,14 @@ def suggest_builder_cards(
         main_colours = [col for col in deck_colors if colour_cards[col] >= _MIN_CARDS_FOR_SOURCE_FLOOR]
         floor_share = {1: 0.0, 2: 0.38, 3: 0.32}.get(len(main_colours), 0.28)
         source_floor = {col: (round(land_total * floor_share) if col in main_colours else 0) for col in deck_colors}
-        deficit = {
-            col: max(0.0, max(land_total * weights[col] / total_w, source_floor[col]) - sources[col])
-            for col in deck_colors
-        }
+        # Karsten's requirement per color for the cards actually picked, so a color whose spells are hard to cast on
+        # time gets sources even when it has few pips (Aerid: 15 Mountain, 6 Forest left green 9 short of its 33).
+        karsten_need = source_needs_for_cards(list(zip(non_land_mvs, non_land_costs)))
+        def _target(col: str) -> float:
+            need = min(karsten_need.get(col, 0), land_total)
+            return float(need) if need else max(land_total * weights[col] / total_w, source_floor[col])
+
+        deficit = {col: max(0.0, _target(col) - sources[col]) for col in deck_colors}
         if sum(deficit.values()) <= 0:
             deficit = dict(weights)
         # Step 1: cover each color's source shortfall; step 2: split what's left
