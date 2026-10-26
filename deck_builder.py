@@ -953,15 +953,22 @@ def _reliable_land(row: dict) -> tuple[set[str], bool]:
     ("{1}, {T}: Add any color"), opponent-dependent lands (Exotic Orchard) and restricted mana don't count
     -- they aren't the fixing a mana base can lean on."""
     type_line, text = row.get("type_line") or "", (row.get("oracle_text") or "")
+    low_text = text.lower()
+    # Not dependable mana: the back face of a double-faced card (not a land you can put in a deck), a land that can
+    # sacrifice itself (Glimmervoid, Thran Quarry) and one that gives you poison counters.
+    if "transforms from" in low_text or "if you control no" in low_text or "poison counter" in low_text:
+        return set(), False
     colors = {col for sub, col in _BASIC_SUBTYPE_COLOR.items() if sub in type_line}
     tapped = False
     for line in text.lower().split("\n"):
         line = re.sub(r"\(.*?\)", "", line).strip()
         if re.search(r"enters(?: the battlefield)? tapped", line) and not _CONDITIONAL_LINE_RE.search(line):
             tapped = True
+        if "sacrifice it unless you return" in line:  # a bounce land: fixes well but costs a land drop, so count it as slow
+            tapped = True
         if line.startswith("{t}: add") and "opponent" not in line and "spend this mana only" not in line and " only " not in line:
             if "any color" in line or "any one color" in line:
-                if re.match(r"\{t\}: add one mana of any (?:one )?color(?: in your commander's color identity)?\.?(?: |$)", line) and "instead" not in line:
+                if re.match(r"\{t\}: add one mana of any (?:one )?color(?: in your commander's color identity)?\.?(?: when that mana is spent.*)?$", line) and "instead" not in line:
                     colors |= set(_BASIC_FOR_COLOR)
             else:
                 colors |= {col for col in _BASIC_FOR_COLOR if "{" + col.lower() + "}" in line}
