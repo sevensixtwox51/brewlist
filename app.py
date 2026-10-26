@@ -55,7 +55,7 @@ from brewlist_core import (
 )
 from mana_sim import land_count_curve, simulate_mana
 from synergy import deck_synergy_packages
-from turn_clock import simulate_turn_clock
+from turn_clock import simulate_resilience, simulate_turn_clock
 from deck_builder import (
     deck_pitch_draft,
     edhrec_commander_view,
@@ -1706,6 +1706,9 @@ def render_builder_page(deck_id: str | None = None) -> str:
 
       <h4 class="analysis-heading" id="turn-clock-heading" style="display:none;">&#9201;&#65039; Turn Clock</h4>
       <div id="turn-clock"></div>
+
+      <h4 class="analysis-heading" id="resilience-heading" style="display:none;">&#128737;&#65039; Resilience</h4>
+      <div id="resilience"></div>
 
       <h4 class="analysis-heading">&#128202; Mana Curve &amp; Colors</h4>
       <div class="analysis-stat-line" id="analysis-stat-line"></div>
@@ -4358,6 +4361,8 @@ analyzeBtn.addEventListener('click', () => {{
   document.getElementById('synergy-packages').innerHTML = '';
   document.getElementById('synergy-heading').style.display = 'none';
   document.getElementById('turn-clock').innerHTML = '';
+  document.getElementById('resilience').innerHTML = '';
+  document.getElementById('resilience-heading').style.display = 'none';
   document.getElementById('turn-clock-heading').style.display = 'none';
   document.getElementById('mana-sim-heading').style.display = 'none';
   document.getElementById('analyze-loading').style.display = 'block';
@@ -4500,7 +4505,7 @@ function renderSynergy(data) {{
     return `<div class="shape-row" title="${{escapeHtml(tip)}}"><span class="shape-label" style="min-width:150px;">${{escapeHtml(p.name)}}</span>`
       + `<div class="shape-bar-track" style="display:flex;overflow:hidden;"><div class="shape-bar ${{verdictClass(p.verdict)}}" style="width:${{share}}%;border-radius:0;"></div>`
       + `<div class="shape-bar near" style="width:${{100 - share}}%;border-radius:0;opacity:0.55;"></div></div>`
-      + `<span class="shape-count" style="white-space:nowrap;min-width:200px;">${{p.enablers}} enablers &middot; ${{p.payoffs}} payoffs${{p.verdict === 'balanced' ? '' : ' &middot; ' + p.verdict}}</span></div>`;
+      + `<span class="shape-count" style="white-space:nowrap;min-width:200px;">${{p.enablers}} enabler${{p.enablers === 1 ? '' : 's'}} &middot; ${{p.payoffs}} payoff${{p.payoffs === 1 ? '' : 's'}}${{p.verdict === 'balanced' ? '' : ' &middot; ' + p.verdict}}</span></div>`;
   }}).join('');
   const thin = syn.thin.length
     ? `<p class="hint" style="margin:8px 0 0;"><b>Payoffs with little to enable them:</b> ` + syn.thin.map(p =>
@@ -4523,8 +4528,45 @@ function runTurnClock(requestSeq) {{
     .then(clock => {{
       if (requestSeq !== analyzeRequestSeq || !clock || clock.error) return;
       renderTurnClock(clock);
+      loadResilience(requestSeq);
     }})
     .catch(() => {{}});
+}}
+function loadResilience(requestSeq) {{
+  fetch('/builder/resilience', {{
+    method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
+    body: JSON.stringify({{ cards: brew.cards, commander: brew.commander, combos: (lastAnalyzeData && lastAnalyzeData.combos_included_list) || [] }}),
+  }})
+    .then(r => r.json())
+    .then(res => {{
+      if (requestSeq !== analyzeRequestSeq || !res || res.error) return;
+      renderResilience(res);
+    }})
+    .catch(() => {{}});
+}}
+function renderResilience(res) {{
+  const base = res.baseline;
+  const turnText = (s) => s.median_turn ? 'turn ' + s.median_turn : 'rarely';
+  const delta = (s) => (s.median_turn && base.median_turn) ? (s.median_turn - base.median_turn) : null;
+  const row = (label, s, tip) => {{
+    const d = delta(s);
+    const cls = d === null ? 'under' : (d <= 1 ? 'near' : (d <= 2 ? 'over' : 'under'));
+    const width = Math.max(4, Math.min(100, s.by_10));
+    return `<div class="shape-row" title="${{escapeHtml(tip)}}"><span class="shape-label" style="min-width:210px;">${{label}}</span>`
+      + `<div class="shape-bar-track"><div class="shape-bar ${{cls}}" style="width:${{width}}%"></div></div>`
+      + `<span class="shape-count" style="white-space:nowrap;min-width:220px;">kills on ${{turnText(s)}}${{d ? ' (+' + d + ')' : ''}} &middot; ${{s.by_10}}% by turn 10</span></div>`;
+  }};
+  const wipeDelay = delta(res.wipe);
+  const advice = (res.protection + res.recursion === 0)
+    ? `Nothing in the deck protects the board or brings it back, so a wipe on turn ${{res.wipe_turn}} costs ${{wipeDelay === null ? 'the game' : wipeDelay + ' turn' + (wipeDelay === 1 ? '' : 's')}}.`
+    : `${{res.protection}} protection spell${{res.protection === 1 ? '' : 's'}} and ${{res.recursion}} reanimation spell${{res.recursion === 1 ? '' : 's'}} soften a wipe: it costs ${{wipeDelay === null ? 'the game' : wipeDelay + ' turn' + (wipeDelay === 1 ? '' : 's')}}.`;
+  document.getElementById('resilience-heading').style.display = '';
+  document.getElementById('resilience').innerHTML =
+    `<p class="hint" style="margin:0 0 8px;">The same Turn Clock when opponents interact (${{res.games.toLocaleString()}} games each). Bars show the chance of a kill by turn 10.</p>`
+    + row('No interaction', base, 'The baseline Turn Clock.')
+    + row('Board wipe on turn ' + res.wipe_turn, res.wipe, 'Every creature and token dies at the start of turn ' + res.wipe_turn + ', unless a protection spell is in hand; reanimation spells bring creatures back.')
+    + row('Commander removed when cast (twice)', res.commander, 'Each time the commander is cast it is removed at the end of that turn, and recasting costs {2} more. Its own effects and creatures that depend on it go with it.')
+    + `<p class="hint" style="margin:8px 0 0;">${{advice}} Protection ${{res.protection}} &middot; reanimation ${{res.recursion}} &middot; card draw ${{res.draw}} &middot; threats (power 3+, token makers, drain) ${{res.threats}}${{res.combos ? ' &middot; ' + res.combos + ' combo' + (res.combos === 1 ? '' : 's') : ''}}.</p>`;
 }}
 function renderTurnClock(clock) {{
   const turns = [];
@@ -5333,6 +5375,18 @@ def builder_mark_fillers():
     if result is None:
         return jsonify(error="Pick a commander first.")
     return jsonify(result)
+
+
+@app.route("/builder/resilience", methods=["POST"])
+def builder_resilience():
+    """The Turn Clock under a board wipe and under commander removal (see turn_clock.simulate_resilience)."""
+    body = request.get_json(silent=True) or {}
+    entries = brew_to_card_entries({"commander": body.get("commander"), "cards": body.get("cards") or []})
+    try:
+        result = simulate_resilience(entries, combos_included=body.get("combos") or []) if entries else None
+    except Exception:  # noqa: BLE001 -- a nicety panel; never break Analyze over it
+        result = None
+    return jsonify(result or {"error": "Not enough cards to simulate yet."})
 
 
 @app.route("/builder/turn-clock", methods=["POST"])

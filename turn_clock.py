@@ -23,6 +23,8 @@ builds, not a prediction of a real table. What it understands:
   - the whole table: three opponents at 40, attackers hit one at a time, each-opponent effects hit all three
   - commander damage: 21 from the commander alone ends one opponent
   - tutors: cast for their mana, fetching the one missing piece of the nearest combo, else the best damage card
+Resilience (simulate_resilience) reruns the clock with a board wipe on turn 6 (survived if a protection spell is in hand,
+reversed by reanimation) and with the commander removed each time it is cast, twice.
 What it ignores: repeatable activated abilities, planeswalkers, choices and targeting, and combos
 that need a card the deck can't find on its own. A deck that wins in a way it can't read shows a slow or
 missing clock -- the panel says so when most games never kill.
@@ -49,6 +51,7 @@ MAX_TURN = 12
 LIFE = 40
 OPPONENTS = 3
 COMMANDER_DAMAGE = 21
+WIPE_TURN = 6
 
 _NUMBER_WORDS = {"a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8}
 _COUNT = r"(a|an|one|two|three|four|five|six|seven|eight|\d+)"
@@ -324,13 +327,20 @@ def _name_keys(name: str) -> set[str]:
     return {normalize_name(name), normalize_name(name.split(" // ")[0])}
 
 
-def _play(deck: list[dict], commander: dict | None, deck_colors: set[str], combos: list[dict], rng: random.Random) -> dict:
+def _play(deck: list[dict], commander: dict | None, deck_colors: set[str], combos: list[dict], rng: random.Random,
+          scenario: str | None = None) -> dict:
+    """One goldfish game. `scenario`: None, "wipe" (every creature dies at the start of turn WIPE_TURN unless a protection
+    spell is in hand) or "commander" (the commander is removed at the end of each turn it is cast, twice)."""
     table = Table(deck, deck_colors, rng)
     table.auto_draw = False  # the clock spends mana on damage first and card draw with what is left
     creatures: list[dict] = []     # {"power", "subtypes", "ready", "ds", "bonus", "haste_granted"}
     equipment: list[dict] = []     # {"bonus", "haste", "double", "equip", "on"}
     on_battlefield: set[str] = set()
-    devotion = {col: 0.0 for col in "WUBRG"}
+    permanents: list[dict] = []    # {"card", "profile", "creature": its creature dict or None, "commander"}
+    graveyard: list[dict] = []     # creature cards that died (for reanimation)
+    commander_tax = 0
+    wiped = False
+    removals_left = 2
     anthem = 0
     tribe_anthems: list[tuple[str, int]] = []
     global_haste = False
@@ -360,6 +370,47 @@ def _play(deck: list[dict], commander: dict | None, deck_colors: set[str], combo
         table_damage += etb_ping * OPPONENTS
         return c
 
+    def refresh() -> None:
+        """Recompute every ongoing effect from the permanents on the battlefield (so destroying one removes its effects)."""
+        nonlocal anthem, global_haste, each_turn_drain, cheat, attack_ping, etb_ping
+        profiles = [p["profile"] for p in permanents]
+        anthem = sum(p["anthem"] for p in profiles)
+        tribe_anthems[:] = [p["tribe_anthem"] for p in profiles if p["tribe_anthem"]]
+        global_haste = any(p["global_haste"] for p in profiles)
+        each_turn_drain = sum(p["each_turn_drain"] for p in profiles)
+        each_turn_tokens[:] = [tok for p in profiles for tok in p["each_turn_tokens"]]
+        attack_tokens[:] = [tok for p in profiles for tok in p["attack_tokens"]]
+        attack_ping = sum(p["ping"] for p in profiles)
+        etb_ping = sum(p["etb_ping"] for p in profiles)
+        extra_combat_costs[:] = [p["extra_combat"]["cost"] for p in profiles if p["extra_combat"] and p["extra_combat"]["repeat"]]
+        cheat = next((p["cheat"] for p in profiles if p["cheat"]), None)
+
+    def devotion_to(colors: list[str]) -> int:
+        return int(sum(p["card"]["devo"].get(col, 0) for p in permanents for col in colors))
+
+    def kill_permanent(perm: dict) -> None:
+        nonlocal commander_cast, commander_tax
+        permanents.remove(perm)
+        dead = perm["creature"]
+        if dead is not None and dead in creatures:
+            creatures.remove(dead)
+        for item in equipment:
+            if item["on"] is dead:
+                item["on"] = None
+        on_battlefield.difference_update(_name_keys(perm["card"].get("name", "")))
+        if perm["commander"]:
+            commander_cast, commander_tax = None, commander_tax + 2  # back to the command zone; recasting costs {2} more
+        elif perm["card"].get("creature"):
+            graveyard.append(perm["card"])
+
+    def wipe_board() -> None:
+        for perm in [p for p in permanents if p["card"].get("creature") or p["profile"]["aura"]]:
+            kill_permanent(perm)
+        creatures.clear()  # tokens go too
+        for item in equipment:
+            item["on"] = None
+        refresh()
+
     def token_ready(turn: int) -> int:
         return turn if global_haste else turn + 1
 
@@ -384,49 +435,37 @@ def _play(deck: list[dict], commander: dict | None, deck_colors: set[str], combo
     def scaling_value(kind: tuple) -> int:
         what, arg = kind
         if what == "devotion":
-            return int(sum(devotion[col] for col in arg))
+            return devotion_to(arg)
         if what == "creatures":
             return max(0, len(creatures) + arg)
         if what == "greatest_power":
             return max((power_of(c) for c in creatures), default=0)
         return sum(power_of(c) for c in creatures)
 
-    def resolve(card: dict, turn: int) -> int:
-        """Apply a cast card's effects; returns damage dealt right now."""
-        nonlocal anthem, global_haste, each_turn_drain, cheat, attack_ping, etb_ping, extra_combat_once
+    def resolve(card: dict, turn: int, creature: dict | None = None) -> int:
+        """Apply a cast card's effects; returns damage dealt right now. `creature`: one already put onto the battlefield."""
+        nonlocal extra_combat_once
         profile = card["profile"]
         on_battlefield.update(_name_keys(card.get("name", "")))
         if card.get("draw"):  # an enters-the-battlefield or spell draw on a card the clock casts for its damage
             table.draw(card["draw"]["net"])
             if card["draw"]["engine"]:
                 table.engines += 1
-        if card["permanent"]:
-            for col, n in card["devo"].items():
-                devotion[col] += n
         gain = profile["drain"]
+        if card["permanent"]:
+            permanents.append({"card": card, "profile": profile, "creature": creature, "commander": card is commander})
+            refresh()  # before anything enters, so a haste or anthem permanent already counts for its own tokens
         if profile["creature"]:
-            new_creature(profile["power"], profile["subtypes"], profile["double_strike"],
-                         turn if (profile["haste"] or global_haste) else turn + 1)
+            made = new_creature(profile["power"], profile["subtypes"], profile["double_strike"],
+                                turn if (profile["haste"] or global_haste) else turn + 1)
+            if card["permanent"]:
+                permanents[-1]["creature"] = made
         for count, power in profile["tokens"]:
             for _ in range(min(count, 12)):
                 new_creature(power, set(), False, token_ready(turn))
-        anthem += profile["anthem"]
-        if profile["tribe_anthem"]:
-            tribe_anthems.append(profile["tribe_anthem"])
-        global_haste = global_haste or profile["global_haste"]
-        each_turn_drain += profile["each_turn_drain"]
-        each_turn_tokens.extend(profile["each_turn_tokens"])
-        attack_tokens.extend(profile["attack_tokens"])
-        attack_ping += profile["ping"]
-        etb_ping += profile["etb_ping"]
-        if profile["cheat"]:
-            cheat = profile["cheat"]
         ec = profile["extra_combat"]
-        if ec:
-            if ec["repeat"]:
-                extra_combat_costs.append(ec["cost"])
-            else:
-                extra_combat_once += 1
+        if ec and not ec["repeat"]:
+            extra_combat_once += 1
         eq = profile["equipment"]
         if eq:
             item = {**eq, "on": None, "bonus": eq["bonus"]}
@@ -465,7 +504,7 @@ def _play(deck: list[dict], commander: dict | None, deck_colors: set[str], combo
             if piece in on_battlefield or piece in table.played:
                 continue
             if commander and commander_cast is None and piece in commander["keys"]:
-                paid = _pay(left, commander["pips"], commander["mv"])
+                paid = _pay(left, commander["pips"], commander["mv"] + commander_tax)
                 if paid is None:
                     return None
                 left = paid
@@ -484,6 +523,15 @@ def _play(deck: list[dict], commander: dict | None, deck_colors: set[str], combo
     for turn in range(1, MAX_TURN + 1):
         table.begin_turn(turn)
         sources = table.mana_sources(turn)
+        if scenario == "wipe" and turn == WIPE_TURN and not wiped:
+            wiped = True
+            guard = next((c for c in table.hand if c.get("protect")), None)
+            paid = _pay(sources, guard["pips"], guard["mv"]) if guard and creatures else None
+            if paid is not None:  # a protection spell in hand: the board survives
+                sources = paid
+                table.hand.remove(guard)
+            else:
+                wipe_board()
         if combo_turn == turn:
             kill_turn = kill_turn or turn
             table_turn = turn
@@ -562,9 +610,24 @@ def _play(deck: list[dict], commander: dict | None, deck_colors: set[str], combo
             try_combos()
             if table_turn:
                 break
+        # bring creatures back from the graveyard (only ever matters after something has died)
+        for spell in [c for c in table.hand if c.get("reanimate")]:
+            if not graveyard:
+                break
+            paid = _pay(sources, spell["pips"], spell["mv"])
+            if paid is None:
+                continue
+            sources = paid
+            table.hand.remove(spell)
+            cast_count += 1
+            returning = list(graveyard) if spell["reanimate"] == "mass" else [max(graveyard, key=lambda c: c["profile"]["power"] if c.get("profile") else 0)]
+            for back in returning:
+                graveyard.remove(back)
+                if back.get("profile"):
+                    deal_each(resolve(back, turn))
         # commander first, then the best damage per mana
         if commander and commander_cast is None and commander["profile"]:
-            paid = _pay(sources, commander["pips"], commander["mv"])
+            paid = _pay(sources, commander["pips"], commander["mv"] + commander_tax)
             if paid is not None:
                 sources, commander_cast = paid, turn
                 before = len(creatures)
@@ -614,7 +677,7 @@ def _play(deck: list[dict], commander: dict | None, deck_colors: set[str], combo
                     card = {**best, "profile": {**best["profile"], "haste": True}}
                     entering = new_creature(best["profile"]["power"], best["profile"]["subtypes"], best["profile"]["double_strike"], turn)
                     attack_damage += power_of(entering)
-                    deal_each(resolve({**card, "profile": {**card["profile"], "creature": False}}, turn))
+                    deal_each(resolve({**card, "profile": {**card["profile"], "creature": False}}, turn, creature=entering))
             attack_damage += attack_ping * len(attackers)
             extra = extra_combat_once
             for cost in extra_combat_costs:  # Aggravated Assault style: pay again and again
@@ -635,6 +698,12 @@ def _play(deck: list[dict], commander: dict | None, deck_colors: set[str], combo
             table_turn = turn
         if table_turn:
             break
+        if scenario == "commander" and removals_left and commander_cast == turn:
+            cmd_perm = next((p for p in permanents if p["commander"]), None)
+            if cmd_perm:
+                kill_permanent(cmd_perm)
+                refresh()
+                removals_left -= 1
     return {"kill_turn": kill_turn, "table_turn": table_turn, "commander_turn": commander_cast, "cast": cast_count,
             "damage": damage, "combo_kill": combo_fired and kill_turn is not None}
 
@@ -650,9 +719,13 @@ def _combos_for(combos_included: list[dict] | None) -> list[dict]:
     return sorted(out, key=lambda c: len(c["pieces"]))
 
 
-def simulate_turn_clock(entries: list[CardEntry], games: int = GAMES_DEFAULT, combos_included: list[dict] | None = None) -> dict | None:
-    """Runs the Turn Clock goldfish on a Commander deck; None when there's no library to shuffle.
-    `combos_included`: the deck's assembled combos as the Analyze stats report them (uses/produces)."""
+_PROTECT_RE = re.compile(r"(?:gain|gains|get|gets|has|have)[^.]*(?:indestructible|hexproof|protection from|shroud)|phases? out|\bregenerate\b")
+_REANIMATE_RE = re.compile(r"(?:return|put) (?:target |up to \w+ target |all |each )?(?:other )?creature cards? [^.]*from (?:your|a|any) graveyard[^.]*(?:to|onto) the battlefield")
+
+
+def _prepare(entries: list[CardEntry], combos_included: list[dict] | None):
+    """The shuffled-deck inputs both simulations share: (deck cards, commander, deck colors, combos, cards whose
+    power had to be estimated)."""
     gameplay = gameplay_data_in_index()
     creature_names = [e.name for e in entries if "Creature" in (e.type_line or "")]
     stats = ensure_card_stats(creature_names)
@@ -682,15 +755,56 @@ def simulate_turn_clock(entries: list[CardEntry], games: int = GAMES_DEFAULT, co
         card.update(base)
         card["type_line"] = type_line
         card["profile"] = profile if card["kind"] == "spell" else None
+        text = (info.get("oracle_text") or "").lower()
+        card["protect"] = bool("Instant" in type_line and card["mv"] <= 3 and "you control" in text and _PROTECT_RE.search(text))
+        reanimates = _REANIMATE_RE.search(text) if card["kind"] == "spell" and "Creature" not in type_line else None
+        card["reanimate"] = (("mass" if re.search(r"\b(?:all|each) (?:other )?creature cards?", text) else "single") if reanimates else None)
         labels_here = {labels.get(t, t) for t in tags_by_name.get(normalize_name(e.name), ())} & _TUTOR_LABELS
         card["tutor"] = None
         if labels_here and card["kind"] == "spell" and "Creature" not in type_line:
             types = {"Creature"} if labels_here == {"tutor-creature"} else {"Artifact"} if labels_here == {"tutor-artifact"} else None
             card["tutor"] = {"types": types}
         deck.extend([dict(card) for _ in range(e.quantity)])
+    return deck, commander, deck_colors, _combos_for(combos_included), estimated
+
+
+def simulate_resilience(entries: list[CardEntry], games: int = 1500, combos_included: list[dict] | None = None) -> dict | None:
+    """How the Turn Clock changes when the opponents interact: a board wipe on turn WIPE_TURN (survived if a
+    protection spell is in hand; creatures come back if a reanimation spell is), and the commander removed each
+    time it is cast (twice). Reports each scenario's median kill turn and kill rate by turn 12 next to the baseline,
+    plus how many protection, recursion, draw and threat cards the deck runs."""
+    deck, commander, deck_colors, combos, _ = _prepare(entries, combos_included)
     if len(deck) < 40:
         return None
-    combos = _combos_for(combos_included)
+
+    def run(scenario):
+        rng = random.Random(SEED)
+        runs = [_play(deck, commander, deck_colors, combos, rng, scenario) for _ in range(games)]
+        kills = sorted(r["kill_turn"] for r in runs if r["kill_turn"] is not None)
+        index = games // 2
+        return {"median_turn": kills[index] if index < len(kills) else None, "kill_rate": round(100.0 * len(kills) / games, 1),
+                "by_8": round(100.0 * sum(1 for k in kills if k <= 8) / games, 1),
+                "by_10": round(100.0 * sum(1 for k in kills if k <= 10) / games, 1)}
+
+    unique = {c["name"]: c for c in deck}.values()
+    threats = [c for c in unique if c.get("profile") and ((c["profile"]["creature"] and c["profile"]["power"] >= 3) or c["profile"]["tokens"] or c["profile"]["drain"] or c["profile"]["scaling"])]
+    return {
+        "games": games, "wipe_turn": WIPE_TURN,
+        "baseline": run(None), "wipe": run("wipe"), "commander": run("commander"),
+        "protection": sum(1 for c in deck if c.get("protect")),
+        "recursion": sum(1 for c in deck if c.get("reanimate")),
+        "draw": sum(1 for c in deck if c.get("draw")),
+        "threats": len(threats),
+        "combos": len(combos),
+    }
+
+
+def simulate_turn_clock(entries: list[CardEntry], games: int = GAMES_DEFAULT, combos_included: list[dict] | None = None) -> dict | None:
+    """Runs the Turn Clock goldfish on a Commander deck; None when there's no library to shuffle.
+    `combos_included`: the deck's assembled combos as the Analyze stats report them (uses/produces)."""
+    deck, commander, deck_colors, combos, estimated = _prepare(entries, combos_included)
+    if len(deck) < 40:
+        return None
     rng = random.Random(SEED)
     runs = [_play(deck, commander, deck_colors, combos, rng) for _ in range(games)]
     kills = sorted(r["kill_turn"] for r in runs if r["kill_turn"] is not None)

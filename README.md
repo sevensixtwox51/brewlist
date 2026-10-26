@@ -178,7 +178,12 @@ page).
   and a **Turn Clock** (how soon the deck kills one opponent who does
   nothing; it reads creature combat, tokens, equipment and auras, team
   boosts, extra combats, board-scaling drain, tutors, and the combos you've
-  already assembled, but not planeswalkers or repeatable activated abilities). A **Print Battle
+  already assembled, but not planeswalkers or repeatable activated abilities),
+  a **Resilience** check (the same clock when a board wipe lands on turn 6 or
+  the commander is removed each time it's cast), and **Synergy Packages**
+  (what the deck is built around as enablers vs. payoffs, tribal included,
+  with payoffs that have nothing to enable them and cards outside every
+  package). A **Print Battle
   Card** button turns all of that into a clean, printable one-page summary
   for talking through the deck with the table
 - **Save** remembers the brew as a project, same as a compared deck — it
