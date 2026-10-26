@@ -4370,7 +4370,7 @@ analyzeBtn.addEventListener('click', () => {{
   const requestSeq = ++analyzeRequestSeq;
   fetch('/builder/stats', {{
     method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
-    body: JSON.stringify({{ cards: brew.cards, commander: brew.commander, format: brew.format, mix_targets: brew.mix_targets }}),
+    body: JSON.stringify({{ cards: brew.cards, commander: brew.commander, format: brew.format, mix_targets: brew.mix_targets, deck_id: deckId }}),
   }})
     .then(r => r.json())
     .then(data => {{
@@ -4623,7 +4623,7 @@ function manaFixesHtml(data) {{
     const makes = f.makes.map(c => '+' + c).join(' ');
     return `<div class="shape-row" style="align-items:center;gap:8px;">`
       + `<span style="flex:1;font-size:13px;">Swap a <b>${{escapeHtml(f.remove)}}</b> for <b>${{escapeHtml(f.add.name)}}</b> `
-      + `<span class="hint" style="margin:0;">(${{makes}}${{f.tapped ? ' &middot; enters tapped' : ''}})</span></span>`
+      + `<span class="hint" style="margin:0;">(${{makes}}${{f.tapped ? ' &middot; enters tapped' : ''}}${{(f.also_in || []).length ? ' &middot; also in ' + escapeHtml(f.also_in.slice(0, 2).join(', ')) + (f.also_in.length > 2 ? ' +' + (f.also_in.length - 2) + ' more' : '') : ''}})</span></span>`
       + `<button type="button" class="btn ghost small" data-mana-fix="${{i}}">Apply</button></div>`;
   }}).join('');
   return `<div class="hint" style="margin:12px 0 4px;"><b>Land swaps from your collection</b> that close those gaps `
@@ -5309,6 +5309,15 @@ def builder_stats():
             identity = set(((gameplay_data_in_index().get(normalize_name(body["commander"].get("name") or "")) or {}).get("color_identity")) or [])
             lands = [r for r in owned_collection_gameplay_view(owned, gameplay_data_in_index()) if r["category"] == "Lands"]
             mana_fixes_list = mana_fixes(entries, lands, color_sources, identity)
+            # Decks share one collection, so say when a suggested land is already in another saved deck.
+            elsewhere: dict[str, list[str]] = {}
+            for other in list_projects():
+                if other.get("type") != "brew" or (body.get("deck_id") and other.get("deck_id") == body.get("deck_id")):
+                    continue
+                for c in other.get("cards") or []:
+                    elsewhere.setdefault(normalize_name(c.get("name") or ""), []).append(other.get("deck_name") or "another deck")
+            for fix in mana_fixes_list:
+                fix["also_in"] = sorted(set(elsewhere.get(normalize_name(fix["add"]["name"]), [])))
         except Exception:  # noqa: BLE001 -- a suggestion nicety; never fail Analyze over it
             mana_fixes_list = []
     return jsonify(
