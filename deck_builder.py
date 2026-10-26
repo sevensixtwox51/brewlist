@@ -618,6 +618,7 @@ _CURVE_LOOKAHEAD = 60
 
 # A colour with at least this many cards in the deck gets a minimum share of
 # land sources (see the basics allocation) however few of its pips there are.
+_TAPPED_LAND_CAP = 8  # lands that enter tapped the autobuild accepts while fixing colors
 _MIN_CARDS_FOR_SOURCE_FLOOR = 6
 
 TEMPLATE_FRACTIONS = {
@@ -3021,14 +3022,19 @@ def suggest_builder_cards(
         non_land_costs = [c.get("mana_cost") for c in ordered if role_of(c["name"], c["category"]) != "Lands"]
         non_land_mvs = [int(c.get("cmc") or 0) for c in ordered if role_of(c["name"], c["category"]) != "Lands"]
         sources = {col: 0.0 for col in deck_colors}
+        tapped_lands = 0
         for c in ordered:
             if role_of(c["name"], c["category"]) == "Lands":
-                for col in _land_produces(c) & deck_colors:
+                made, tapped = _reliable_land(c)
+                tapped_lands += 1 if tapped else 0
+                for col in made & deck_colors:
                     sources[col] += 1
         for e in wip_entries:
             info = _cost_and_text(e.name, e.type_line)
             if categorize(e.type_line) in ("Lands", "Basic Lands") and e.section != "commander":
-                for col in _land_produces({**info, "type_line": info.get("type_line") or e.type_line}) & deck_colors:
+                made, tapped = _reliable_land({**info, "type_line": info.get("type_line") or e.type_line})
+                tapped_lands += e.quantity if tapped else 0
+                for col in made & deck_colors:
                     sources[col] += e.quantity
             else:
                 non_land_costs.append(info.get("mana_cost"))
@@ -3055,6 +3061,40 @@ def suggest_builder_cards(
             need = min(karsten_need.get(col, 0), land_total)
             return float(need) if need else max(land_total * weights[col] / total_w, source_floor[col])
 
+        # A basic gives one color; an owned dual or tri-land gives two or three. Where the Karsten requirements can't
+        # be met with basics (three or more colors), swap basics for the owned fixers that close the most shortfall,
+        # keeping the number of lands that enter tapped to a handful. Fixers are lands the EDHREC cap on nonbasics left out.
+        fixer_pool = []
+        for c in dropped_lands:
+            if _is_basic_land_card(c):
+                continue
+            made, tapped = _reliable_land(c)
+            made &= deck_colors
+            if len(made) >= 2:
+                fixer_pool.append((c, made, tapped))
+        while lands_gap > 0 and fixer_pool and len(deck_colors) >= 2:
+            best = None
+            for item in fixer_pool:
+                _c, made, tapped = item
+                if tapped and tapped_lands >= _TAPPED_LAND_CAP:
+                    continue
+                gain = sum(1 for col in made if sources[col] < _target(col)) - 1  # net of the basic it replaces
+                score = gain - (0.3 if tapped else 0.0)
+                if gain >= 1 and (best is None or score > best[0]):
+                    best = (score, item)
+            if best is None:
+                break
+            chosen, made, tapped = best[1]
+            fixer_pool.remove(best[1])
+            ordered.append(chosen)
+            theme_reason_by_name[normalize_name(chosen["name"])] = (
+                "fixes " + ", ".join(_COLOR_NAME[col] for col in sorted(made)) + " mana: your deck is short of sources for those colors"
+                + (" (enters tapped)" if tapped else ""))
+            placed_per_role["Lands"] = placed_per_role.get("Lands", 0) + 1
+            lands_gap -= 1
+            tapped_lands += 1 if tapped else 0
+            for col in made:
+                sources[col] += 1
         deficit = {col: max(0.0, _target(col) - sources[col]) for col in deck_colors}
         if sum(deficit.values()) <= 0:
             deficit = dict(weights)
