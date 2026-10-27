@@ -435,8 +435,15 @@ document.getElementById('shutdown-btn').addEventListener('click', () => {
 # next Save/Suggest fails. Also notices when the server was restarted under an open page.
 SERVER_WATCH_SCRIPT = """
 (function () {
-  const INTERVAL_MS = 10000, TIMEOUT_MS = 4000, MISSES_BEFORE_BANNER = 2;
-  let misses = 0, startedAt = null, banner = null;
+  const INTERVAL_MS = 10000, TIMEOUT_MS = 4000, MISSES_BEFORE_BANNER = 2, ACTIVE_WINDOW_MS = 5 * 60 * 1000;
+  let misses = 0, startedAt = null, banner = null, lastTouch = Date.now(), idleWarning = false, lastPokeAt = 0;
+  // A person at the keyboard keeps the server up; an open but untouched tab does not. The ping says whether the page was
+  // touched recently (and whether it holds unsaved work, which earns a longer grace), and the server decides.
+  const touch = () => {
+    lastTouch = Date.now();
+    if (idleWarning && lastTouch - lastPokeAt > 2000) { lastPokeAt = lastTouch; ping(false); }
+  };
+  ['mousemove', 'mousedown', 'keydown', 'wheel', 'touchstart', 'scroll'].forEach(ev => window.addEventListener(ev, touch, { passive: true, capture: true }));
   function show(kind, html) {
     if (window.__serverWatchStop) return;
     if (!banner) {
@@ -459,7 +466,9 @@ SERVER_WATCH_SCRIPT = """
     try {
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
-      const r = await fetch('/health', { cache: 'no-store', signal: ctrl.signal });
+      const active = Date.now() - lastTouch < ACTIVE_WINDOW_MS ? 1 : 0;
+      const dirty = (typeof window.serverWatchDirty === 'function' && window.serverWatchDirty()) ? 1 : 0;
+      const r = await fetch('/health?active=' + active + '&dirty=' + dirty, { cache: 'no-store', signal: ctrl.signal });
       clearTimeout(timer);
       if (!r.ok) throw new Error('bad status');
       const j = await r.json();
@@ -468,7 +477,11 @@ SERVER_WATCH_SCRIPT = """
         show('restarted', 'The server was restarted since this page loaded. Your deck here is still intact -- <button type="button" style="margin-left:6px;">Reload page</button>');
         const btn = banner.querySelector('button');
         if (btn) btn.onclick = () => location.reload();
+      } else if (typeof j.idle_exit_in === 'number' && j.idle_exit_in < 120) {
+        idleWarning = true;
+        show('idle', 'Brewlist will stop in about ' + Math.max(1, Math.ceil(j.idle_exit_in / 60)) + ' min because nothing has been touched. Move the mouse or click to keep it running.');
       } else {
+        idleWarning = false;
         hide();
       }
       if (!startedAt) startedAt = j.started;
@@ -1789,6 +1802,7 @@ const DECK_TEMPLATES = {json.dumps(deck_templates(100))};
 // What's on disk right now (the deck as loaded, or as last saved), so Shut Down
 // can warn before throwing away unsaved work.
 let lastSavedJson = JSON.stringify(brew);
+window.serverWatchDirty = () => brew.cards.length > 0 && JSON.stringify(brew) !== lastSavedJson;
 {SERVER_WATCH_SCRIPT}
 document.getElementById('shutdown-btn').addEventListener('click', () => {{
   const unsaved = brew.cards.length > 0 && JSON.stringify(brew) !== lastSavedJson;
@@ -5661,50 +5675,79 @@ def save_overrides(deck_id):
 
 
 APP_STARTED_AT = time.time()
-_last_activity = time.time()
+_last_activity = time.time()   # the last time a person (not just an open tab's /health ping) used the app
+_last_dirty = 0.0              # the last time an open page reported unsaved work
+_IDLE_EXIT_SECONDS: float | None = None
 
 
 @app.before_request
 def _note_activity():
-    """Every request counts as activity -- what the opt-in idle exit below watches."""
-    global _last_activity
-    _last_activity = time.time()
+    """Every request except the page watcher's /health ping counts as activity. The ping counts only when the page says it
+    was touched in the last few minutes (active=1) -- an untouched tab left open must not keep the server alive."""
+    global _last_activity, _last_dirty
+    now = time.time()
+    if request.path == "/health":
+        if request.args.get("active") == "1":
+            _last_activity = now
+        if request.args.get("dirty") == "1":
+            _last_dirty = now
+        return
+    _last_activity = now
+
+
+def _idle_seconds_left() -> float | None:
+    """Seconds until the idle exit fires, or None when it is off. A page holding unsaved work gets three times the grace."""
+    if _IDLE_EXIT_SECONDS is None:
+        return None
+    now = time.time()
+    limit = _IDLE_EXIT_SECONDS * (3 if now - _last_dirty < 90 else 1)
+    return limit - (now - _last_activity)
 
 
 @app.route("/health")
 def health():
     """Tiny liveness check for the page-side watcher (see SERVER_WATCH_SCRIPT). `started`
-    changes when the server is restarted, so an open page can tell."""
-    return jsonify(ok=True, started=APP_STARTED_AT)
+    changes when the server is restarted, so an open page can tell; `idle_exit_in` lets it warn
+    shortly before the idle exit."""
+    left = _idle_seconds_left()
+    return jsonify(ok=True, started=APP_STARTED_AT, idle_exit_in=None if left is None else round(left))
 
 
-# Opt-in: BREWLIST_IDLE_EXIT_MINUTES=10 makes the server quit once nothing has talked to it
-# for that long. Open pages ping /health every ~10 s (even in a background tab, which the
-# browser slows to about once a minute), so while any Brewlist tab is open the server stays up
-# and closing the last one shuts it down. Not meant for Docker (the container would be restarted).
+# Idle exit: the server quits once nobody has used it for a while (default 15 minutes; BREWLIST_IDLE_EXIT_MINUTES=N
+# changes it, 0 or "off" turns it off). Open pages ping /health every ~10 s, but those pings only count when the page
+# was actually touched (mouse, keys, scroll), so a forgotten tab no longer keeps the server running. Off by default
+# for Docker (the container would just be restarted), which sets NO_BROWSER and binds 0.0.0.0.
 _IDLE_EXIT_MIN_SECONDS = 120
+_IDLE_EXIT_DEFAULT_MINUTES = 15
 
 
-def _idle_exit_watcher(idle_seconds: float, poll_seconds: float = 15.0) -> None:
+def _idle_exit_watcher(poll_seconds: float = 15.0) -> None:
     while True:
         time.sleep(poll_seconds)
-        idle = time.time() - _last_activity
-        if idle > idle_seconds:
-            print(f"No Brewlist page has been open for {int(idle // 60)} min -- shutting down (BREWLIST_IDLE_EXIT_MINUTES).")
+        left = _idle_seconds_left()
+        if left is not None and left <= 0:
+            idle = time.time() - _last_activity
+            print(f"Nothing has used Brewlist for {int(idle // 60)} min -- shutting down (BREWLIST_IDLE_EXIT_MINUTES).")
             os._exit(0)
 
 
 def _start_idle_exit_if_configured() -> None:
-    raw = os.environ.get("BREWLIST_IDLE_EXIT_MINUTES", "").strip()
-    if not raw:
+    global _IDLE_EXIT_SECONDS
+    raw = os.environ.get("BREWLIST_IDLE_EXIT_MINUTES", "").strip().lower()
+    if raw in ("0", "off", "no", "false"):
         return
+    if not raw:
+        if os.environ.get("NO_BROWSER") or os.environ.get("HOST", "127.0.0.1") not in ("127.0.0.1", "localhost"):
+            return  # a container or a network-facing server: leave it running
+        raw = str(_IDLE_EXIT_DEFAULT_MINUTES)
     try:
         seconds = max(_IDLE_EXIT_MIN_SECONDS, float(raw) * 60)
     except ValueError:
         print(f"Ignoring BREWLIST_IDLE_EXIT_MINUTES={raw!r} (not a number).")
         return
-    print(f"Idle exit on: the server stops after {seconds / 60:.0f} min with no open Brewlist page.")
-    threading.Thread(target=_idle_exit_watcher, args=(seconds,), daemon=True).start()
+    _IDLE_EXIT_SECONDS = seconds
+    print(f"Idle exit on: the server stops after {seconds / 60:.0f} min with nothing used (BREWLIST_IDLE_EXIT_MINUTES=0 turns it off).")
+    threading.Thread(target=_idle_exit_watcher, daemon=True).start()
 
 
 @app.route("/shutdown", methods=["POST"])
