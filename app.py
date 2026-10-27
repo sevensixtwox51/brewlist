@@ -1667,7 +1667,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
       <div class="deck-stats" id="deck-stats"></div>
       <button type="button" class="btn ghost small" id="analyze-btn" style="margin-bottom:10px;">&#128269; Analyze Deck</button>
       <button type="button" class="btn ghost small" id="optimize-btn" style="margin-bottom:10px;" title="Looks for real, owned combos you're exactly one card away from completing, and proposes swaps to add them -- useful after Suggest cards has already filled the deck, since a full batch can't always see a combo piece it's about to add in that same batch">&#9889; Optimize Deck</button>
-      <button type="button" class="btn ghost small" id="mark-fillers-btn" style="margin-bottom:10px;" title="Flags the cards in this deck that EDHREC doesn't list for your commander, with the same Slot filler pill Suggest adds -- for decks built or saved before the pill existed">&#127991;&#65039; Mark slot fillers</button>
+      <button type="button" class="btn ghost small" id="mark-fillers-btn" style="margin-bottom:10px;display:none;" title="Flags the cards in this deck that EDHREC doesn't list for your commander, with the same Slot filler pill Suggest adds -- for decks built or saved before the pill existed">&#127991;&#65039; Mark slot fillers <span id="mark-fillers-count"></span></button>
       <div id="commander-slot-wrap"></div>
       <div id="suggestions-panel"></div>
       <button type="button" class="btn danger small" id="clear-cards-btn" style="display:none;margin-top:14px;margin-bottom:6px;">Clear All Cards</button>
@@ -3044,6 +3044,38 @@ function renderAll() {{
   renderCommanderSlot();
   renderDeckList();
   renderStats();
+  scheduleMarkFillersCheck();
+}}
+
+// The Mark slot fillers button only shows when it would do something: a commander deck with cards EDHREC doesn't
+// list for that commander that don't carry the Slot filler pill yet (decks built or saved before the pill existed, or
+// cards added by hand). Checked with the server a moment after the deck changes, and only when the deck did change.
+let markFillersTimer = null, markFillersSig = '', markFillersSeq = 0;
+function scheduleMarkFillersCheck() {{
+  clearTimeout(markFillersTimer);
+  markFillersTimer = setTimeout(checkMarkFillers, 1200);
+}}
+function checkMarkFillers() {{
+  const btn = document.getElementById('mark-fillers-btn');
+  if (!brew.commander || brew.format !== 'commander' || !brew.cards.length) {{ btn.style.display = 'none'; markFillersSig = ''; return; }}
+  const sig = [brew.commander.name, brew.edhrec_theme || '', brew.cards.map(c => normalizeName(c.name)).sort().join(','), brew.cards.filter(c => c.filler).length].join('|');
+  if (sig === markFillersSig) return;
+  markFillersSig = sig;
+  const mine = ++markFillersSeq;
+  fetch('/builder/mark-fillers', {{
+    method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
+    body: JSON.stringify({{ cards: brew.cards, commander: brew.commander, edhrec_theme: brew.edhrec_theme }}),
+  }})
+    .then(r => r.json())
+    .then(data => {{
+      if (mine !== markFillersSeq) return; // the deck changed again while this was running
+      if (data.error || data.problem || !data.fillers) {{ btn.style.display = 'none'; return; }}
+      const flagged = new Set(brew.cards.filter(c => c.filler).map(c => normalizeName(c.name)));
+      const unmarked = Object.keys(data.fillers).filter(n => !flagged.has(normalizeName(n)));
+      document.getElementById('mark-fillers-count').textContent = unmarked.length ? '(' + unmarked.length + ')' : '';
+      btn.style.display = unmarked.length ? '' : 'none';
+    }})
+    .catch(() => {{ btn.style.display = 'none'; markFillersSig = ''; }});
 }}
 
 fetch('/builder/collection-data')

@@ -1052,12 +1052,20 @@ def deck_filler_flags(entries: list[CardEntry], edhrec_theme: str | None = None)
         return {"fillers": {}, "checked": 0, "problem": view.get("problem") or "EDHREC has no data for this commander."}
     budget_alt = budget_alt_data_in_index()
     role_members = _role_member_names(budget_alt["groups"], budget_alt["tag_labels"])
+
+    def _subtypes(type_line: str) -> set[str]:
+        return {w for face in type_line.split("//") if "Creature" in face and "—" in face for w in face.split("—", 1)[1].split()}
+
+    # A creature type the commander's own text names ("an Angel, Demon, or Dragon") is the deck's theme: Suggest counts
+    # those creatures as fitting, so they aren't filler even when EDHREC doesn't list them.
+    commander_text = ((gameplay_data_in_index().get(normalize_name(commander.name)) or {}).get("oracle_text") or "")
+    themed = {t for e in entries for t in _subtypes(e.type_line) if re.search(r"\b" + re.escape(t) + r"s?\b", commander_text)}
     fillers, checked = {}, 0
     for e in entries:
         if e.section == "commander" or ("Basic" in e.type_line and "Land" in e.type_line):
             continue
         checked += 1
-        if normalize_name(e.name) in tracked:
+        if normalize_name(e.name) in tracked or _subtypes(e.type_line) & themed:
             continue
         role = _card_role(e.name, categorize(e.type_line), role_members)
         fillers[e.name] = {"role": role, "note": f"not on EDHREC's list for your commander's decks; picked to fill {role}"}
