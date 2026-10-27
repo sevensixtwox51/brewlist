@@ -4082,7 +4082,11 @@ function importPlan() {{
 function refreshImportStatus() {{
   const plan = importPlan();
   const box = document.getElementById('import-first-commander');
-  const looksLikeCopy = !plan.parsed.sawCommanderHeader && plan.first && isCommanderEligible(plan.first) && plan.total >= 99;
+  // A whole deck led by its commander (Copy Decklist), or a lone commander-eligible card
+  // pasted to start a deck -- unless that would swap out the commander of a deck being added to.
+  const justOneCard = plan.parsed.entries.length === 1 && plan.total === 1
+    && (!brew.commander || document.getElementById('import-replace').checked);
+  const looksLikeCopy = !plan.parsed.sawCommanderHeader && plan.first && isCommanderEligible(plan.first) && (plan.total >= 99 || justOneCard);
   box.disabled = plan.parsed.sawCommanderHeader || !plan.first || !isCommanderEligible(plan.first);
   if (plan.parsed.sawCommanderHeader) box.checked = false;
   else if (importText.dataset.touched !== '1') box.checked = !!looksLikeCopy;
@@ -4147,6 +4151,7 @@ document.getElementById('import-close').addEventListener('click', closeImport);
 document.getElementById('import-cancel').addEventListener('click', closeImport);
 document.getElementById('import-go').addEventListener('click', runImport);
 importText.addEventListener('input', refreshImportStatus);
+document.getElementById('import-replace').addEventListener('change', refreshImportStatus);
 document.getElementById('import-first-commander').addEventListener('change', () => {{ importText.dataset.touched = '1'; }});
 document.addEventListener('keydown', (e) => {{ if (e.key === 'Escape' && importModal.classList.contains('show')) closeImport(); }});
 
