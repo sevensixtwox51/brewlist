@@ -1564,7 +1564,7 @@ IMAGE_VERSION_RECENT_DAYS = 60
 IMAGE_VERSION_REFRESH_SECONDS = 24 * 3600
 
 
-IMAGE_VERSION_SYNC_SECONDS = 3.0   # how long a page load will wait on Scryfall for printings it has never looked up
+IMAGE_VERSION_SYNC_SECONDS = 1.0   # how long a page load will wait on Scryfall for printings it has never looked up
 _image_version_lock = threading.Lock()
 _image_version_refreshing = False
 
