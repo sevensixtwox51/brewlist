@@ -1564,10 +1564,77 @@ IMAGE_VERSION_RECENT_DAYS = 60
 IMAGE_VERSION_REFRESH_SECONDS = 24 * 3600
 
 
+IMAGE_VERSION_SYNC_SECONDS = 3.0   # how long a page load will wait on Scryfall for printings it has never looked up
+_image_version_lock = threading.Lock()
+_image_version_refreshing = False
+
+
+def _fetch_image_versions(ids: list[str], path: str, budget: float | None = None) -> list[str]:
+    """Look the given printings up on Scryfall and merge them into the cache
+    file. Stops after `budget` seconds (None = no limit) or on a network
+    failure; returns the ids it did not get to."""
+    import time as _time
+    started = _time.time()
+    for i in range(0, len(ids), 75):
+        if budget is not None and _time.time() - started > budget:
+            return ids[i:]
+        chunk = ids[i:i + 75]
+        try:
+            req = urllib.request.Request(
+                "https://api.scryfall.com/cards/collection",
+                data=json.dumps({"identifiers": [{"id": sid} for sid in chunk]}).encode(),
+                headers={"User-Agent": "brewlist/1.0 (personal use)", "Accept": "application/json", "Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                found = json.loads(resp.read().decode("utf-8")).get("data") or []
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+            return ids[i:]
+        with _image_version_lock:
+            try:
+                with open(path, encoding="utf-8") as f:
+                    cache = json.load(f)
+            except (OSError, ValueError):
+                cache = {}
+            now = _time.time()
+            for card in found:
+                uris = card.get("image_uris") or ((card.get("card_faces") or [{}])[0].get("image_uris")) or {}
+                uri = uris.get("small") or ""
+                cache[card["id"]] = {"v": uri.split("?", 1)[1] if "?" in uri else "", "t": now}
+            try:
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                tmp = f"{path}.{os.getpid()}.tmp"
+                with open(tmp, "w", encoding="utf-8") as f:
+                    json.dump(cache, f)
+                os.replace(tmp, path)
+            except OSError:
+                pass
+        _time.sleep(0.11)  # Scryfall asks for <=10 requests/second
+    return []
+
+
+def _refresh_image_versions_async(ids: list[str], path: str) -> None:
+    global _image_version_refreshing
+    if not ids or _image_version_refreshing:
+        return
+    _image_version_refreshing = True
+
+    def _run() -> None:
+        global _image_version_refreshing
+        try:
+            _fetch_image_versions(ids, path)
+        finally:
+            _image_version_refreshing = False
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
 def scryfall_image_versions(printings: list[tuple[str, str]], path: str = IMAGE_VERSIONS_PATH) -> dict[str, str]:
     """{scryfall_id: version} for the given (scryfall_id, set_code) printings
-    that belong to sets released within IMAGE_VERSION_RECENT_DAYS. Network
-    failures fall back to whatever is cached; never raises."""
+    that belong to sets released within IMAGE_VERSION_RECENT_DAYS. Never raises
+    and never makes a page wait long: versions already cached are used even
+    when a day old (they are refreshed in the background), and printings never
+    looked up before get a few seconds of the page load, the rest finishing in
+    the background."""
     import datetime as _dt
     import time as _time
     sets = sets_data_in_index()
@@ -1578,41 +1645,22 @@ def scryfall_image_versions(printings: list[tuple[str, str]], path: str = IMAGE_
     }
     if not recent:
         return {}
-    try:
-        with open(path, encoding="utf-8") as f:
-            cache = json.load(f)
-    except (OSError, ValueError):
-        cache = {}
+
+    def _read() -> dict:
+        try:
+            with open(path, encoding="utf-8") as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            return {}
+
+    cache = _read()
     now = _time.time()
-    need = [sid for sid in recent if now - (cache.get(sid) or {}).get("t", 0) > IMAGE_VERSION_REFRESH_SECONDS]
-    changed = False
-    for i in range(0, len(need), 75):
-        chunk = need[i:i + 75]
-        try:
-            req = urllib.request.Request(
-                "https://api.scryfall.com/cards/collection",
-                data=json.dumps({"identifiers": [{"id": sid} for sid in chunk]}).encode(),
-                headers={"User-Agent": "brewlist/1.0 (personal use)", "Accept": "application/json", "Content-Type": "application/json"},
-            )
-            with urllib.request.urlopen(req, timeout=20) as resp:
-                found = json.loads(resp.read().decode("utf-8")).get("data") or []
-        except (urllib.error.URLError, TimeoutError, OSError, ValueError):
-            break
-        for card in found:
-            uris = card.get("image_uris") or ((card.get("card_faces") or [{}])[0].get("image_uris")) or {}
-            uri = uris.get("small") or ""
-            cache[card["id"]] = {"v": uri.split("?", 1)[1] if "?" in uri else "", "t": now}
-            changed = True
-        _time.sleep(0.11)  # Scryfall asks for <=10 requests/second
-    if changed:
-        try:
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            tmp = f"{path}.{os.getpid()}.tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(cache, f)
-            os.replace(tmp, path)
-        except OSError:
-            pass
+    missing = [sid for sid in recent if sid not in cache]
+    stale = [sid for sid in recent if sid in cache and now - (cache[sid] or {}).get("t", 0) > IMAGE_VERSION_REFRESH_SECONDS]
+    leftover = _fetch_image_versions(missing, path, IMAGE_VERSION_SYNC_SECONDS) if missing else []
+    if missing:
+        cache = _read()
+    _refresh_image_versions_async(leftover + stale, path)
     return {sid: cache[sid]["v"] for sid in recent if (cache.get(sid) or {}).get("v")}
 
 
