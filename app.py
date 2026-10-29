@@ -2165,6 +2165,34 @@ document.getElementById('collection-grid').addEventListener('mousemove', (e) => 
 }});
 
 const hoverPreview = document.getElementById('hover-preview');
+// On a slow connection the full-size image takes a while, and sweeping the mouse over
+// tiles used to start a download for every tile passed -- the one you stopped on waited
+// in line behind them. Now: the thumbnail already on screen (blurry, but instant) shows
+// right away, the full image is only requested once the mouse settles for a moment, one
+// request at a time (a new one cancels the old), and a card seen before shows instantly.
+let hoverWant = null, hoverTimer = null;
+const hoverSeen = new Set();
+const hoverLoader = new Image();
+function cancelHoverLoad() {{
+  clearTimeout(hoverTimer);
+  hoverLoader.onload = null; hoverLoader.onerror = null;
+  hoverWant = null;
+}}
+function wantHoverImage(full, placeholder) {{
+  if (full === hoverWant) return;
+  cancelHoverLoad();
+  hoverWant = full;
+  if (hoverSeen.has(full)) {{ hoverPreview.src = full; hoverPreview.classList.add('show'); return; }}
+  if (placeholder) {{ hoverPreview.src = placeholder; hoverPreview.classList.add('show'); }}
+  else hoverPreview.classList.remove('show');
+  hoverTimer = setTimeout(() => {{
+    hoverLoader.onload = () => {{
+      hoverSeen.add(full);
+      if (hoverWant === full) {{ hoverPreview.src = full; hoverPreview.classList.add('show'); }}
+    }};
+    hoverLoader.src = full;
+  }}, 120);
+}}
 function setupHoverPreview(container) {{
   container.addEventListener('mousemove', (e) => {{
     // Only the card image itself triggers the preview -- hovering the
@@ -2176,6 +2204,7 @@ function setupHoverPreview(container) {{
     // used there instead.
     const thumb = e.target.closest('.card-thumb[data-full]');
     let full = thumb ? thumb.dataset.full : null;
+    let placeholder = (thumb && thumb.complete && thumb.naturalWidth) ? thumb.currentSrc || thumb.src : null;
     if (!full) {{
       const row = e.target.closest('[data-full]');
       const rowThumb = row && row.querySelector('.card-thumb');
@@ -2183,9 +2212,8 @@ function setupHoverPreview(container) {{
         full = row.dataset.full;
       }}
     }}
-    if (!full) {{ hoverPreview.classList.remove('show'); return; }}
-    hoverPreview.src = full;
-    hoverPreview.classList.add('show');
+    if (!full) {{ cancelHoverLoad(); hoverPreview.classList.remove('show'); return; }}
+    wantHoverImage(full, placeholder);
     const pad = 18, w = 240, h = Math.round(w * 1.4);
     let x = e.clientX + pad;
     let y = e.clientY + pad;
@@ -2194,7 +2222,7 @@ function setupHoverPreview(container) {{
     hoverPreview.style.left = x + 'px';
     hoverPreview.style.top = Math.max(0, y) + 'px';
   }});
-  container.addEventListener('mouseleave', () => hoverPreview.classList.remove('show'));
+  container.addEventListener('mouseleave', () => {{ cancelHoverLoad(); hoverPreview.classList.remove('show'); }});
 }}
 setupHoverPreview(document.getElementById('collection-grid'));
 setupHoverPreview(document.getElementById('commander-slot-wrap'));

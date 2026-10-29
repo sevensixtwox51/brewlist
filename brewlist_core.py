@@ -3640,6 +3640,31 @@ viewDensityBtns.forEach(btn => {{
 }});
 
 const hoverPreview = document.getElementById('hover-preview');
+// Slow connections: show the thumbnail already on screen at once, request the full image only
+// once the mouse settles (one request at a time, a new one cancels the old), remember what was seen.
+let hoverWant = null, hoverTimer = null;
+const hoverSeen = new Set();
+const hoverLoader = new Image();
+function cancelHoverLoad() {{
+  clearTimeout(hoverTimer);
+  hoverLoader.onload = null; hoverLoader.onerror = null;
+  hoverWant = null;
+}}
+function wantHoverImage(full, placeholder) {{
+  if (full === hoverWant) return;
+  cancelHoverLoad();
+  hoverWant = full;
+  if (hoverSeen.has(full)) {{ hoverPreview.src = full; hoverPreview.classList.add('show'); return; }}
+  if (placeholder) {{ hoverPreview.src = placeholder; hoverPreview.classList.add('show'); }}
+  else hoverPreview.classList.remove('show');
+  hoverTimer = setTimeout(() => {{
+    hoverLoader.onload = () => {{
+      hoverSeen.add(full);
+      if (hoverWant === full) {{ hoverPreview.src = full; hoverPreview.classList.add('show'); }}
+    }};
+    hoverLoader.src = full;
+  }}, 120);
+}}
 function bindHoverPreview(img) {{
   img.addEventListener('mouseenter', () => {{
     hoverPreview.src = img.dataset.full;
@@ -3677,9 +3702,8 @@ document.body.addEventListener('mousemove', (e) => {{
       full = tile.dataset.full;
     }}
   }}
-  if (!full) {{ hoverPreview.classList.remove('show'); return; }}
-  hoverPreview.src = full;
-  hoverPreview.classList.add('show');
+  if (!full) {{ cancelHoverLoad(); hoverPreview.classList.remove('show'); return; }}
+  wantHoverImage(full, (thumb && thumb.complete && thumb.naturalWidth) ? thumb.currentSrc || thumb.src : null);
   const pad = 18, w = 240, h = Math.round(w * 1.4);
   let x = e.clientX + pad;
   let y = e.clientY + pad;
