@@ -2291,7 +2291,10 @@ function clearCommander() {{ brew.commander = null; brew.edhrec_theme = ''; rend
 // EDHREC's list for this commander), so the deck list can still mark it after it has
 // left the suggestion list. Saved with the deck; extra fields are ignored elsewhere.
 function fillerFields(card) {{
-  return card.basis === 'filler' ? {{ filler: true, fill_role: card.role || '', fill_note: card.reason || '' }} : {{}};
+  if (card.basis === 'filler') return {{ filler: true, fill_role: card.role || '', fill_note: card.reason || '' }};
+  // Picked for a reason Suggest knows (combo, synergy, theme, a fixing land...): remembered so the Mark slot
+  // fillers check never second-guesses it with its own, cruder test.
+  return card.basis && card.basis !== 'other' ? {{ not_filler: true }} : {{}};
 }}
 
 function addCard(card, qty) {{
@@ -2416,8 +2419,8 @@ document.getElementById('mark-fillers-btn').addEventListener('click', () => {{
       let marked = 0;
       brew.cards.forEach(c => {{
         const f = byName[normalizeName(c.name)];
-        if (f) {{ c.filler = true; c.fill_role = f.role; c.fill_note = f.note; marked += 1; }}
-        else {{ delete c.filler; delete c.fill_role; delete c.fill_note; }}
+        if (f) {{ c.filler = true; c.fill_role = f.role; c.fill_note = f.note; delete c.not_filler; marked += 1; }}
+        else {{ delete c.filler; delete c.fill_role; delete c.fill_note; c.not_filler = true; }}
       }});
       renderAll();
       showError(marked ? `Marked ${{marked}} of ${{data.checked}} cards as slot filler.` : `No slot filler: all ${{data.checked}} cards are on EDHREC's list for this commander.`);
@@ -3075,9 +3078,10 @@ function renderAll() {{
   scheduleMarkFillersCheck();
 }}
 
-// The Mark slot fillers button only shows when it would do something: a commander deck with cards EDHREC doesn't
-// list for that commander that don't carry the Slot filler pill yet (decks built or saved before the pill existed, or
-// cards added by hand). Checked with the server a moment after the deck changes, and only when the deck did change.
+// The Mark slot fillers button is only for decks with no record of why each card was picked: ones built or saved
+// before the Slot filler pill existed, or put together by hand. A deck Suggest built (or one already marked) carries
+// that record on its cards (filler / not_filler), so the button never appears for it. Checked with the server a moment
+// after the deck changes, and only when the deck did change.
 let markFillersTimer = null, markFillersSig = '', markFillersSeq = 0;
 function scheduleMarkFillersCheck() {{
   clearTimeout(markFillersTimer);
@@ -3086,6 +3090,7 @@ function scheduleMarkFillersCheck() {{
 function checkMarkFillers() {{
   const btn = document.getElementById('mark-fillers-btn');
   if (!brew.commander || brew.format !== 'commander' || !brew.cards.length) {{ btn.style.display = 'none'; markFillersSig = ''; return; }}
+  if (brew.cards.some(c => c.filler || c.not_filler)) {{ btn.style.display = 'none'; markFillersSig = ''; return; }}
   const sig = [brew.commander.name, brew.edhrec_theme || '', brew.cards.map(c => normalizeName(c.name)).sort().join(','), brew.cards.filter(c => c.filler).length].join('|');
   if (sig === markFillersSig) return;
   markFillersSig = sig;
@@ -3098,10 +3103,9 @@ function checkMarkFillers() {{
     .then(data => {{
       if (mine !== markFillersSeq) return; // the deck changed again while this was running
       if (data.error || data.problem || !data.fillers) {{ btn.style.display = 'none'; return; }}
-      const flagged = new Set(brew.cards.filter(c => c.filler).map(c => normalizeName(c.name)));
-      const unmarked = Object.keys(data.fillers).filter(n => !flagged.has(normalizeName(n)));
-      document.getElementById('mark-fillers-count').textContent = unmarked.length ? '(' + unmarked.length + ')' : '';
-      btn.style.display = unmarked.length ? '' : 'none';
+      const count = Object.keys(data.fillers).length;
+      document.getElementById('mark-fillers-count').textContent = count ? '(' + count + ')' : '';
+      btn.style.display = count ? '' : 'none';
     }})
     .catch(() => {{ btn.style.display = 'none'; markFillersSig = ''; }});
 }}

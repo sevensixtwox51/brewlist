@@ -1038,6 +1038,45 @@ def mana_fixes(
     return swaps
 
 
+def _cards_fitting_themes(entries: list[CardEntry], view: dict, budget_alt: dict, role_members: dict) -> set[str]:
+    """Normalized names of the deck's Synergy-role cards that fit one of the commander's EDHREC themes: carrying the
+    theme's Oracle Tags, or belonging to its tribe. The same two tests Suggest uses to give a card the "fits this
+    commander's theme" standing (so it is not slot filler even when EDHREC's per-commander list doesn't reach it)."""
+    gameplay = gameplay_data_in_index()
+    candidates = []
+    for e in entries:
+        if e.section == "commander":
+            continue
+        g = gameplay.get(normalize_name(e.name)) or {}
+        candidates.append({"name": e.name, "type_line": e.type_line, "oracle_text": g.get("oracle_text") or "", "category": categorize(e.type_line)})
+    profile = view.get("profile") or {}
+    fits: set[str] = set()
+
+    def _is_synergy(c: dict) -> bool:
+        return _card_role(c["name"], c["category"], role_members) == "Synergy"
+
+    groups, tag_labels = budget_alt.get("groups") or {}, budget_alt.get("tag_labels") or {}
+    label_to_id = {label: tag_id for tag_id, label in tag_labels.items()}
+    for theme in _edhrec_theme_names(profile):
+        theme_names = {entry[0] for label in CURATED_THEMES.get(theme, []) for entry in (groups.get(label_to_id.get(label)) or []) if entry}
+        fits |= {normalize_name(c["name"]) for c in candidates if normalize_name(c["name"]) in theme_names and _is_synergy(c)}
+
+    subtypes = {t for c in candidates for t in ((c["type_line"].lower().split("\u2014", 1)[1].split()) if "\u2014" in c["type_line"] and "creature" in c["type_line"].lower() else [])}
+    themes = profile.get("themes") or []
+    biggest = (themes[0].get("count") or 0) if themes else 0
+    labels = [(view.get("deck_type") or {}).get("value")] + [t.get("value") for t in themes[:3] if biggest and (t.get("count") or 0) >= biggest * 0.5]
+    seen: set[str] = set()
+    for label in labels:
+        tribe = _tribe_for_theme(label or "", subtypes)
+        if not tribe or tribe in seen:
+            continue
+        seen.add(tribe)
+        members = _tribe_members(candidates, tribe, changelings=True)
+        if 1 <= len(members) <= 80:
+            fits |= {normalize_name(c["name"]) for c in candidates if normalize_name(c["name"]) in members and _is_synergy(c)}
+    return fits
+
+
 def deck_filler_flags(entries: list[CardEntry], edhrec_theme: str | None = None) -> dict | None:
     """Which cards of a finished deck are only slot filler -- EDHREC doesn't list them for this commander's
     decks (the same test Suggest uses for its "Slot filler" pill). For decks saved before the pill existed.
@@ -1060,12 +1099,23 @@ def deck_filler_flags(entries: list[CardEntry], edhrec_theme: str | None = None)
     # those creatures as fitting, so they aren't filler even when EDHREC doesn't list them.
     commander_text = ((gameplay_data_in_index().get(normalize_name(commander.name)) or {}).get("oracle_text") or "")
     themed = {t for e in entries for t in _subtypes(e.type_line) if re.search(r"\b" + re.escape(t) + r"s?\b", commander_text)}
+    fits_theme = _cards_fitting_themes(entries, view, budget_alt, role_members)
+    identity = set((gameplay_data_in_index().get(normalize_name(commander.name)) or {}).get("color_identity") or [])
+
+    def _fixes_colors(e: CardEntry) -> bool:
+        # A land making two or more of the commander's colors is in the deck to fix, which Suggest's mana step does
+        # whether or not EDHREC lists it -- not slot filler.
+        if "Land" not in e.type_line:
+            return False
+        row = {**(gameplay_data_in_index().get(normalize_name(e.name)) or {}), "type_line": e.type_line}
+        return len(_reliable_land(row)[0] & identity) >= 2
+
     fillers, checked = {}, 0
     for e in entries:
         if e.section == "commander" or ("Basic" in e.type_line and "Land" in e.type_line):
             continue
         checked += 1
-        if normalize_name(e.name) in tracked or _subtypes(e.type_line) & themed:
+        if normalize_name(e.name) in tracked or normalize_name(e.name) in fits_theme or _subtypes(e.type_line) & themed or _fixes_colors(e):
             continue
         role = _card_role(e.name, categorize(e.type_line), role_members)
         fillers[e.name] = {"role": role, "note": f"not on EDHREC's list for your commander's decks; picked to fill {role}"}
