@@ -1044,6 +1044,14 @@ body::after {
   background: color-mix(in srgb, var(--bg) 68%, transparent);
   z-index: -1; pointer-events: none;
 }
+.more-menu { position:relative; }
+.more-menu > summary { list-style:none; user-select:none; }
+.more-menu > summary::-webkit-details-marker { display:none; }
+.more-menu[open] > summary { color:var(--accent); border-color:var(--accent); }
+.more-list { position:absolute; right:0; top:calc(100% + 6px); z-index:70; min-width:190px; display:flex; flex-direction:column; gap:2px; padding:6px;
+  background:var(--bg-elevated); border:1px solid var(--card-border); border-radius:10px; box-shadow:var(--shadow); }
+.more-list .btn { border:none; text-align:left; justify-content:flex-start; width:100%; white-space:nowrap; }
+.more-list .btn:hover { background:var(--card-bg); }
 .builder-top { display:flex; flex-direction:column; gap:14px; }
 .builder-top-row { display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; }
 .builder-top-row.builder-settings { justify-content:space-between; }
@@ -1667,9 +1675,14 @@ def render_builder_page(deck_id: str | None = None) -> str:
         <button type="button" class="btn" id="save-btn">Save</button>
         <span id="save-label" class="hint" style="margin:0;display:none;"></span>
         <button type="button" class="btn ghost small" id="report-btn">View full report</button>
-        <button type="button" class="btn ghost small" id="copy-decklist-btn" title="Copies a plain-text decklist (with your exact printings) you can paste into Moxfield or Archidekt to import">&#128203; Copy Decklist</button>
-        <button type="button" class="btn ghost small" id="import-decklist-btn" title="Paste a decklist (for example one you copied earlier) to rebuild the deck from your collection">&#128229; Import Decklist</button>
-        <button type="button" class="btn ghost small" id="export-csv-btn" title="Downloads a CSV grouped like a physical store's binders, so you can find these cards in your own collection">&#128190; Export CSV</button>
+        <details class="more-menu" id="more-menu">
+          <summary class="btn ghost small" title="Copy, import or export this deck">More &#9662;</summary>
+          <div class="more-list">
+            <button type="button" class="btn ghost small" id="copy-decklist-btn" title="Copies a plain-text decklist (with your exact printings) you can paste into Moxfield or Archidekt to import">&#128203; Copy Decklist</button>
+            <button type="button" class="btn ghost small" id="import-decklist-btn" title="Paste a decklist (for example one you copied earlier) to rebuild the deck from your collection">&#128229; Import Decklist</button>
+            <button type="button" class="btn ghost small" id="export-csv-btn" title="Downloads a CSV grouped like a physical store's binders, so you can find these cards in your own collection">&#128190; Export CSV</button>
+          </div>
+        </details>
       </div>
     </div>
     <div class="builder-top-row builder-actions">
@@ -4276,6 +4289,9 @@ function runImport() {{
   if (trimmed.length) html += '<div class="filler-note"><b>Trimmed to what the deck can hold (copies you own / allowed):</b> ' + trimmed.map(escapeHtml).join(', ') + '.</div>';
   panel.innerHTML = html;
 }}
+const moreMenu = document.getElementById('more-menu');
+document.addEventListener('click', (e) => {{ if (moreMenu.open && (!moreMenu.contains(e.target) || e.target.closest('.more-list .btn'))) moreMenu.open = false; }});
+document.addEventListener('keydown', (e) => {{ if (e.key === 'Escape') moreMenu.open = false; }});
 document.getElementById('import-decklist-btn').addEventListener('click', openImport);
 document.getElementById('import-close').addEventListener('click', closeImport);
 document.getElementById('import-cancel').addEventListener('click', closeImport);
