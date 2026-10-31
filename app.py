@@ -81,6 +81,7 @@ from deck_builder import (
     suggest_builder_cards,
     suggest_replacements,
 )
+import tag_synergy
 from edhrec_data import bulk_commander_popularity, commander_data_problem, commander_profile, commander_theme_page
 from edhrec_data import refresh_all as edhrec_refresh_all
 from edhrec_data import top_list_status as edhrec_top_list_status
@@ -1667,6 +1668,39 @@ body.gallery .builder-tile.in-deck::after { content:"\2713"; position:absolute; 
 .stat-color .mana-icon { width:18px; height:18px; }
 .stat-color b { font-family:var(--serif); font-size:1.05rem; font-weight:600; }
 .stat-tile.span2 { grid-column:span 2; }
+/* ---- Tag search and the "works with" window ---- */
+.tag-search input[type=text] { width:230px; }
+.tag-chips { display:inline-flex; flex-wrap:wrap; gap:5px; align-items:center; }
+.tag-chip { display:inline-block; max-width:100%; padding:1px 8px; border-radius:999px; border:1px solid var(--card-border); background:transparent; color:var(--text-dim); font-family:inherit; font-size:0.68rem; line-height:1.5; cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.tag-chip:hover { color:var(--accent); border-color:var(--accent); }
+.tag-chip.on { color:var(--accent); border-color:var(--accent); background:color-mix(in srgb, var(--accent) 12%, transparent); }
+.tag-chip.static { cursor:default; }
+.tag-chip.static:hover { color:var(--text-dim); border-color:var(--card-border); }
+.tile-tags { display:flex; flex-wrap:wrap; gap:4px; margin-top:5px; }
+body.compact .tile-tags, body.gallery .tile-tags { display:none; }
+.syn-btn { font-size:0.7rem; }
+.syn-box { max-width:min(1180px, 96vw); height:min(90vh, 900px); max-height:none; }
+.syn-source { margin:0 0 6px; }
+.syn-source-name { font-family:var(--serif); font-size:1.5rem; font-weight:600; }
+.syn-source-tags { display:flex; flex-wrap:wrap; gap:5px; margin-top:6px; }
+.syn-count { font-family:inherit; font-size:0.74rem; font-weight:400; color:var(--text-dim); margin-left:8px; }
+.syn-why { margin:0 0 10px; }
+.syn-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:14px; margin-bottom:8px; }
+.syn-tile { display:flex; flex-direction:column; gap:4px; padding:6px 6px 9px; border:2px solid transparent; border-radius:12px; transition:transform .15s ease, background .15s ease, border-color .15s ease; }
+.syn-tile:hover { transform:translateY(-3px); background:var(--bg-elevated); }
+.syn-tile.in-deck { border-color:var(--owned); background:color-mix(in srgb, var(--owned) 7%, var(--bg-elevated)); }
+.syn-tile .syn-img { width:100%; height:auto; aspect-ratio:488 / 680; border-radius:4.75% / 3.4%; box-shadow:0 3px 10px rgba(0,0,0,0.45); display:block; }
+.syn-name { font-family:var(--serif); font-size:0.88rem; font-weight:600; line-height:1.2; margin-top:4px; }
+.syn-reason { font-size:0.68rem; color:var(--text-dim); line-height:1.3; flex:1; }
+.syn-add { margin-top:3px; }
+.tag-pill { padding:0 8px; border-radius:999px; border:1px solid var(--card-border); background:transparent; color:var(--text-dim); font-family:inherit; font-size:0.68rem; line-height:1.6; cursor:pointer; white-space:nowrap; }
+.tag-pill:hover, .tag-pill.on { color:var(--accent); border-color:var(--accent); }
+.tag-pill.on { background:color-mix(in srgb, var(--accent) 12%, transparent); }
+.tag-popover { display:none; overflow-y:auto; position:fixed; z-index:280; width:340px; max-width:calc(100vw - 16px); padding:10px 12px 12px; background:var(--bg-elevated); border:1px solid var(--card-border); border-radius:12px; box-shadow:var(--shadow); }
+.tag-popover.show { display:block; }
+.tag-popover h5 { margin:0 0 8px; font-family:var(--serif); font-size:0.95rem; font-weight:600; }
+.tag-popover-chips { display:flex; flex-wrap:wrap; gap:5px; }
+.tag-count { opacity:0.65; font-variant-numeric:tabular-nums; margin-left:2px; }
 """
 
 COLOR_LABELS = {"W": "White", "U": "Blue", "B": "Black", "R": "Red", "G": "Green"}
@@ -1870,6 +1904,8 @@ def render_builder_page(deck_id: str | None = None) -> str:
           <input type="text" id="search" placeholder="Search your collection...">
           <select id="filter-category"><option value="">All types</option><option value="Commander">Commander</option>{category_options}</select>
           <select id="filter-color"><option value="">Any color</option><option value="C">Colorless</option><optgroup label="One-Color">{color_options}</optgroup>{color_family_optgroups}</select>
+          <div class="theme-picker tag-search"><input type="text" id="tag-input" placeholder="Search by tag (sacrifice outlet, landfall...)" autocomplete="off" title="Scryfall's Oracle Tags: what a card does. Pick one or more to show only the cards you own that have them."><div class="theme-dropdown" id="tag-dropdown"></div></div>
+          <span class="tag-chips" id="tag-chips"></span>
           <span class="color-pips" id="color-pips" title="Click colors to filter; click again to clear"><button type="button" class="color-pip" data-c="W" aria-label="White"><img src="/static/mana/W.svg" alt=""></button><button type="button" class="color-pip" data-c="U" aria-label="Blue"><img src="/static/mana/U.svg" alt=""></button><button type="button" class="color-pip" data-c="B" aria-label="Black"><img src="/static/mana/B.svg" alt=""></button><button type="button" class="color-pip" data-c="R" aria-label="Red"><img src="/static/mana/R.svg" alt=""></button><button type="button" class="color-pip" data-c="G" aria-label="Green"><img src="/static/mana/G.svg" alt=""></button></span>
           <label class="exact-color-toggle" title="Only show cards whose color identity is exactly the selected color(s) -- e.g. true Grixis cards, not also mono-colored or two-color ones that merely fit within Grixis">
             <input type="checkbox" id="filter-color-exact" checked> Exact colors
@@ -2009,6 +2045,16 @@ def render_builder_page(deck_id: str | None = None) -> str:
     <div class="modal-footer">
       <button type="button" class="btn ghost small" id="print-battle-card-btn">&#128424; Print Battle Card</button>
     </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="synergy-modal">
+  <div class="modal-box syn-box">
+    <div class="modal-header">
+      <h3 id="synergy-title">Works with</h3>
+      <button type="button" class="modal-close" id="synergy-close" aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-body" id="synergy-body"></div>
   </div>
 </div>
 
@@ -3026,6 +3072,7 @@ function renderGrid() {{
     if (category === 'Commander' && !isCommanderEligible(card)) return false;
     if (category && category !== 'Commander' && card.category !== category) return false;
     if (!matchesColorFilter(card.color_identity, color, exactColor)) return false;
+    if (activeTags.size) {{ const have = cardTagMap[normalizeName(card.name)] || []; if (![...activeTags].every(t => have.includes(t))) return false; }}
     if (gridExcludedSetCodes.length && gridExcludedSetCodes.includes(card.set_code)) return false;
     return true;
   }});
@@ -3075,6 +3122,7 @@ function renderGrid() {{
         <div class="meta">${{card.type_line || 'Unknown type'}} &middot; CMC ${{card.cmc}} &middot; own ${{card.quantity}}</div>
         ${{warnHtml}}
         ${{popularityHtml}}
+        ${{tileTagChipsHtml(card)}}
       </div>
       <div class="tile-corner-actions">
         ${{manaCostPipsHtml(card.mana_cost)}}
@@ -3090,6 +3138,7 @@ function renderGrid() {{
       cmdBtn.addEventListener('click', () => setCommander(card));
       actions.appendChild(cmdBtn);
     }}
+    actions.appendChild(synergyButton(card.name));
     const addBtn = document.createElement('button');
     addBtn.type = 'button'; addBtn.className = 'btn ghost tile-icon-btn';
     const atMax = brew.format === 'commander' && !!inDeck && inDeck.quantity >= maxCopies(card.name);
@@ -3195,7 +3244,7 @@ function renderDeckList() {{
         onclick: () => removeCardAndAvoid(c.name),
       }});
       const removeBtn = Object.assign(document.createElement('button'), {{ className: 'btn danger small', textContent: 'Remove', onclick: () => removeCard(c.name) }});
-      controls.append(replaceBtn, avoidBtn, removeBtn);
+      controls.append(synergyButton(c.name), replaceBtn, avoidBtn, removeBtn);
       row.appendChild(controls);
       div.appendChild(row);
     }});
@@ -3429,6 +3478,7 @@ fetch('/builder/collection-data')
     for (const c of (data.cards || [])) if (c.scryfall_id && FLIP_LAYOUTS.includes(c.layout)) flippableIds.add(c.scryfall_id);
     annotateFilterCounts();
     renderAll();
+    loadTags();
   }})
   .catch(() => showError('Could not load your collection.'));
 
@@ -4503,6 +4553,144 @@ function runImport() {{
   if (trimmed.length) html += '<div class="filler-note"><b>Trimmed to what the deck can hold (copies you own / allowed):</b> ' + trimmed.map(escapeHtml).join(', ') + '.</div>';
   panel.innerHTML = html;
 }}
+
+// ---- Tag search and "works with" (tag_synergy.py): Scryfall's Oracle Tags for the cards you own ----
+let tagList = [], cardTagMap = {{}};
+const activeTags = new Set();
+function loadTags() {{
+  fetch('/builder/tags').then(r => r.json()).then(data => {{
+    tagList = data.tags || []; cardTagMap = data.cards || {{}};
+    renderGrid();
+  }}).catch(() => {{}});
+}}
+// One small "Tags" pill per tile (the tags themselves are in a popover, so tiles stay compact).
+function tileTagChipsHtml(card) {{
+  const have = (cardTagMap[normalizeName(card.name)] || []).filter(i => tagList[i]);
+  if (!have.length) return '';
+  const hit = have.some(i => activeTags.has(i));
+  return `<div class="tile-tags"><button type="button" class="tag-pill${{hit ? ' on' : ''}}" data-card="${{escapeHtml(card.name)}}" title="See this card's tags">&#127991;&#65039; Tags ${{have.length}}</button></div>`;
+}}
+function synergyButton(name) {{
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'btn ghost tile-icon-btn syn-btn'; b.textContent = '🔗';
+  b.title = 'Find cards in your collection that work with this one';
+  b.addEventListener('click', (e) => {{ e.stopPropagation(); openSynergy(name); }});
+  return b;
+}}
+const tagInput = document.getElementById('tag-input');
+const tagDropdown = document.getElementById('tag-dropdown');
+const tagChipsEl = document.getElementById('tag-chips');
+function renderTagChips() {{
+  tagChipsEl.innerHTML = [...activeTags].map(i => `<span class="tag-chip on removable" data-tag="${{i}}" title="Remove this tag filter">${{escapeHtml(tagList[i].label)}} &times;</span>`).join('');
+}}
+function setTag(i, on) {{
+  if (on) activeTags.add(i); else activeTags.delete(i);
+  renderTagChips(); renderGrid();
+}}
+function renderTagDropdown() {{
+  const words = tagInput.value.trim().toLowerCase().split(/\\s+/).filter(Boolean);
+  const matches = tagList.map((t, i) => [t, i]).filter(([t, i]) => !activeTags.has(i) && words.every(w => t.label.toLowerCase().includes(w))).slice(0, 40);
+  tagDropdown.innerHTML = matches.length
+    ? matches.map(([t, i]) => `<div class="theme-dropdown-item" data-tag="${{i}}"><span>${{escapeHtml(t.label)}}</span><span class="count">${{t.owned}} owned</span></div>`).join('')
+    : '<div class="theme-dropdown-empty">' + (tagList.length ? 'No matching tags among your cards' : 'Tags are still loading...') + '</div>';
+  tagDropdown.classList.add('show');
+}}
+tagInput.addEventListener('focus', renderTagDropdown);
+tagInput.addEventListener('input', renderTagDropdown);
+tagInput.addEventListener('blur', () => setTimeout(() => tagDropdown.classList.remove('show'), 150));
+tagDropdown.addEventListener('mousedown', (e) => {{
+  const item = e.target.closest('.theme-dropdown-item[data-tag]');
+  if (!item) return;
+  e.preventDefault();
+  tagInput.value = '';
+  setTag(Number(item.dataset.tag), true);
+  tagDropdown.classList.remove('show');
+}});
+tagChipsEl.addEventListener('click', (e) => {{ const c = e.target.closest('[data-tag]'); if (c) setTag(Number(c.dataset.tag), false); }});
+// The tags popover: all of a card's tags as clickable chips; picking one filters the grid to it.
+const tagPopover = document.createElement('div');
+tagPopover.className = 'tag-popover';
+document.body.appendChild(tagPopover);
+function closeTagPopover() {{ tagPopover.classList.remove('show'); }}
+function openTagPopover(anchor, name) {{
+  const have = (cardTagMap[normalizeName(name)] || []).filter(i => tagList[i]).sort((a, b) => tagList[a].owned - tagList[b].owned);
+  tagPopover.innerHTML = '<h5>Tags on ' + escapeHtml(name) + '</h5><div class="tag-popover-chips">'
+    + have.map(i => `<button type="button" class="tag-chip${{activeTags.has(i) ? ' on' : ''}}" data-tag="${{i}}" title="Show your ${{tagList[i].owned}} cards with this tag">${{escapeHtml(tagList[i].label)}} <span class="tag-count">${{tagList[i].owned}}</span></button>`).join('')
+    + '</div><div class="hint" style="margin:8px 0 0;">Click a tag to show your cards that have it.</div>';
+  tagPopover.classList.add('show');
+  placePopup(tagPopover, anchor, 340);
+}}
+tagPopover.addEventListener('click', (e) => {{
+  const c = e.target.closest('.tag-chip[data-tag]');
+  if (!c) return;
+  setTag(Number(c.dataset.tag), !activeTags.has(Number(c.dataset.tag)));
+  closeTagPopover();
+}});
+document.getElementById('collection-grid').addEventListener('click', (e) => {{
+  const pill = e.target.closest('.tag-pill');
+  if (!pill) return;
+  e.stopPropagation();
+  if (tagPopover.classList.contains('show') && tagPopover.dataset.owner === pill.dataset.card) {{ closeTagPopover(); return; }}
+  tagPopover.dataset.owner = pill.dataset.card;
+  openTagPopover(pill, pill.dataset.card);
+}});
+document.addEventListener('click', (e) => {{ if (!e.target.closest('.tag-popover, .tag-pill')) closeTagPopover(); }});
+document.addEventListener('keydown', (e) => {{ if (e.key === 'Escape') closeTagPopover(); }});
+document.getElementById('collection-grid').addEventListener('scroll', closeTagPopover);
+
+
+const synergyModal = document.getElementById('synergy-modal');
+const synergyBody = document.getElementById('synergy-body');
+let synergyRequest = 0;
+function synTileHtml(c) {{
+  const owned = collectionIndex[normalizeName(c.name)];
+  const inDeck = !!findCard(c.name);
+  return '<div class="syn-tile' + (inDeck ? ' in-deck' : '') + '" data-name="' + escapeHtml(c.name) + '" data-full="' + (scryfallImg(c.scryfall_id, 'normal') || '') + '">'
+    + thumbHtml(c.scryfall_id, 'card-thumb syn-img', c.layout)
+    + '<div class="syn-name">' + escapeHtml(c.name) + '</div>'
+    + '<div class="syn-reason">' + escapeHtml(c.reason) + '</div>'
+    + '<button type="button" class="btn ghost small syn-add"' + (inDeck || !owned ? ' disabled' : '') + '>' + (inDeck ? '\u2713 In deck' : '+ Add') + '</button></div>';
+}}
+function openSynergy(name) {{
+  const mine = ++synergyRequest;
+  document.getElementById('synergy-title').textContent = 'Works with ' + name;
+  synergyBody.innerHTML = brewingHtml('Looking through your collection&hellip;');
+  synergyModal.classList.add('show');
+  fetch('/builder/synergy', {{
+    method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
+    body: JSON.stringify({{ name: name, identity: (brew.format === 'commander' && brew.commander) ? brew.commander.color_identity : null, deck_names: brew.cards.map(c => c.name) }}),
+  }}).then(r => r.json()).then(data => {{
+    if (mine !== synergyRequest) return;
+    if (data.error) {{ synergyBody.innerHTML = '<div class="hint">' + escapeHtml(data.error) + '</div>'; return; }}
+    const tagChips = data.card.tags.map(t => '<span class="tag-chip static">' + escapeHtml(t) + '</span>').join('');
+    let html = '<div class="syn-source"><div class="syn-source-name">' + escapeHtml(data.card.name) + '</div>'
+      + (tagChips ? '<div class="syn-source-tags">' + tagChips + '</div>' : '<div class="hint" style="margin:0;">This card has no tags in Scryfall&#39;s data, so there is nothing to match it on.</div>') + '</div>';
+    data.groups.forEach(g => {{
+      html += '<h4 class="wz-group-title">' + escapeHtml(g.title) + ' <span class="syn-count">' + g.total + ' in your collection</span></h4>'
+        + '<div class="hint syn-why">' + escapeHtml(g.why) + '</div><div class="syn-grid">' + g.cards.map(synTileHtml).join('') + '</div>';
+    }});
+    if (data.similar.length) {{
+      html += '<h4 class="wz-group-title">Similar cards <span class="syn-count">' + data.similar_total + ' share its tags</span></h4>'
+        + '<div class="hint syn-why">Cards that share its rarer tags.</div><div class="syn-grid">' + data.similar.map(synTileHtml).join('') + '</div>';
+    }}
+    if (!data.groups.length && !data.similar.length) html += '<div class="hint">Nothing in your collection (within your commander&#39;s colors) shares this card&#39;s tags or pairs with it.</div>';
+    synergyBody.innerHTML = html;
+  }}).catch(() => {{ if (mine === synergyRequest) synergyBody.innerHTML = '<div class="hint">Could not reach the server.</div>'; }});
+}}
+synergyBody.addEventListener('click', (e) => {{
+  const add = e.target.closest('.syn-add');
+  if (!add || add.disabled) return;
+  const tile = add.closest('.syn-tile');
+  const card = collectionIndex[normalizeName(tile.dataset.name)];
+  if (!card) return;
+  addCard(card);
+  tile.classList.add('in-deck');
+  add.disabled = true; add.textContent = '\u2713 In deck';
+}});
+setupHoverPreview(synergyBody);
+document.getElementById('synergy-close').addEventListener('click', () => synergyModal.classList.remove('show'));
+synergyModal.addEventListener('click', (e) => {{ if (e.target === synergyModal) synergyModal.classList.remove('show'); }});
+
 const moreMenu = document.getElementById('more-menu');
 document.addEventListener('click', (e) => {{ if (moreMenu.open && (!moreMenu.contains(e.target) || e.target.closest('.more-list .btn'))) moreMenu.open = false; }});
 document.addEventListener('keydown', (e) => {{ if (e.key === 'Escape') moreMenu.open = false; }});
@@ -5351,6 +5539,38 @@ def builder_collection_data():
     cards = owned_collection_gameplay_view(owned, gameplay_data_in_index())
     image_versions = scryfall_image_versions([(c.get("scryfall_id"), c.get("set_code")) for c in cards])
     return jsonify(cards=cards, image_versions=image_versions)
+
+
+@app.route("/builder/tags", methods=["GET"])
+def builder_tags():
+    """Scryfall's Oracle Tags for the cards you own (see tag_synergy.tag_listing): the tag list with counts, and each
+    owned card's tags -- for the builder's tag search and the chips on tiles."""
+    if not os.path.isfile(COLLECTION_PATH):
+        return jsonify(tags=[], cards={})
+    try:
+        owned = load_collection(COLLECTION_PATH)
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+    rows = owned_collection_gameplay_view(owned, gameplay_data_in_index())
+    return jsonify(tag_synergy.tag_listing([r["name"] for r in rows]))
+
+
+@app.route("/builder/synergy", methods=["POST"])
+def builder_synergy():
+    """Owned cards that work with one card (see tag_synergy.related_cards). Body: {name, identity: [colors]|null,
+    deck_names: [names already in the deck]}."""
+    body = request.get_json(silent=True) or {}
+    name = (body.get("name") or "").strip()
+    if not name:
+        return jsonify(error="Pick a card first."), 400
+    try:
+        owned = load_collection(COLLECTION_PATH)
+    except (OSError, ValueError) as e:
+        return jsonify(error=str(e)), 400
+    rows = owned_collection_gameplay_view(owned, gameplay_data_in_index())
+    identity = set(body["identity"]) if isinstance(body.get("identity"), list) else None
+    deck_names = {normalize_name(n) for n in (body.get("deck_names") or [])}
+    return jsonify(tag_synergy.related_cards(name, rows, identity, deck_names))
 
 
 @app.route("/builder/commander-popularity", methods=["GET"])

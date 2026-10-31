@@ -129,6 +129,14 @@ page).
   Defaults to the well-known Command Zone-style EDH ratios (38 lands / 10
   ramp / 10 draw / 11 interaction / 30 synergy pieces out of a 99-card
   library, plus your 1 commander), adjustable under **Deck mix targets**.
+  **Search by tag** filters your collection with Scryfall's Oracle Tags (the
+  same data as `otag:` searches): type "sacrifice outlet" or "landfall", pick
+  one or more, and see only the cards you own that have them. Each tile has a
+  small **Tags** pill listing that card's tags, and the **link button** on a
+  tile or deck row opens "Works with...": owned cards that complement it
+  (sacrifice outlets with death payoffs, landfall with land ramp, reanimation
+  with graveyard fillers...) from a small curated list of tag pairs, plus
+  similar cards that share its rarer tags ([`tag_synergy.py`](tag_synergy.py)).
   An optional **Preferred theme** picker lets you steer Suggest toward a
   named EDH archetype (Voltron, Reanimator, Stax, Tokens, Group Hug, ...)
   from the very first click, instead of only ever discovering one
