@@ -382,7 +382,8 @@ input[type="text"], input[type="url"], input[type="file"] {
 .dz-title { font-family: var(--serif); font-size: 1.1rem; font-weight: 600; }
 .dz-sub { font-size: 0.8rem; color: var(--text-dim); }
 .dropzone.has-file .dz-icon { color: var(--owned); }
-.section-head { display: flex; align-items: baseline; justify-content: space-between; margin: 8px 0 14px; }
+.section-head { display: flex; align-items: center; justify-content: flex-start; flex-wrap: wrap; gap: 8px; margin: 8px 0 14px; }
+.section-head .hint-inline { margin-left: 0; }
 .section-head h2 { font-family: var(--serif); font-weight: 600; font-size: 1.25rem; margin: 0; letter-spacing: 0.01em; }
 .deck-grid { list-style: none; padding: 0; margin: 0 0 28px; display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
 .deck-tile { position: relative; border-radius: 12px; background: var(--bg-elevated); border: 1px solid var(--card-border); overflow: hidden;
@@ -416,6 +417,20 @@ input[type="text"], input[type="url"], input[type="file"] {
 .deck-tile.new-deck .t { font-family: var(--serif); font-size: 1.1rem; }
 .deck-tile.new-deck .s { font-size: 0.78rem; color: var(--text-dim); }
 .deck-tile.compare-deck .deck-art { height: 116px; }
+.kind-badge { position: absolute; top: 9px; left: 9px; z-index: 2; padding: 2px 9px; border-radius: 999px; font-size: 0.66rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; backdrop-filter: blur(4px); }
+.kind-badge.brew { background: color-mix(in srgb, var(--gold) 88%, #000); color: #241f00; }
+.kind-badge.compare { background: color-mix(in srgb, var(--series-a) 88%, #000); color: #04202e; }
+.deck-tile.compare-deck { border-color: color-mix(in srgb, var(--series-a) 45%, var(--card-border)); border-style: dashed; }
+.deck-tile.compare-deck .deck-art { filter: saturate(0.7); }
+.deck-tile.compare-deck:hover .deck-art { filter: none; }
+.deck-tile.compare-deck .deck-name { color: var(--series-a); }
+.kind-filter { display: inline-flex; border: 1px solid var(--card-border); border-radius: 999px; overflow: hidden; margin-left: auto; margin-right: 14px; }
+.kf-btn { border: none; background: transparent; color: var(--text-dim); padding: 5px 14px; font: inherit; font-size: 0.8rem; cursor: pointer; }
+.kf-btn span { opacity: 0.65; margin-left: 3px; font-variant-numeric: tabular-nums; }
+.kf-btn:hover { color: var(--text); }
+.kf-btn.active { background: color-mix(in srgb, var(--gold) 16%, transparent); color: var(--accent); font-weight: 600; }
+.kf-btn.compare.active { background: color-mix(in srgb, var(--series-a) 18%, transparent); color: var(--series-a); }
+.deck-tile.kind-hidden { display: none; }
 .compare-panel { background: var(--bg-elevated); border: 1px solid var(--card-border); border-top: 3px solid var(--gold); border-radius: 14px; padding: 18px 22px 16px; margin: 0 0 30px; box-shadow: var(--shadow); }
 .compare-title h2 { font-family: var(--serif); font-weight: 600; font-size: 1.25rem; margin: 0 0 2px; }
 .compare-title p { margin: 0 0 14px; color: var(--text-dim); font-size: 0.85rem; }
@@ -850,13 +865,15 @@ def render_decks_page(error: str | None = None, prefill_url: str = "") -> str:
             stripe = "".join(f'<span style="background:{_MANA_COLORS[c]}"></span>' for c in colors) if commander else '<span style="background:var(--card-border)"></span>'
             pips = "".join(f'<img src="/static/mana/{c}.svg" alt="{c}">' for c in colors) if commander else ""
             glow = _MANA_COLORS[colors[len(colors) // 2]] if commander else "var(--gold)"
+            deck_url = p.get("deck_url", deck_id)
+            source = "Archidekt" if "archidekt" in deck_url.lower() else "Moxfield"
             return (
-                f'<li class="deck-tile compare-deck" data-deck-id="{_esc(deck_id)}" data-need-art="{"" if art else "1"}" style="--tile-glow:{glow}">'
-                f'<a href="#" class="deck-link recent-deck-link" data-type="compare" data-url="{_esc(p.get("deck_url", deck_id))}" title="Loads this deck into the Compare form below">'
-                f'<div class="deck-art" style="{art_style}">{"" if art else "<div class=no-art>&#10070;</div>"}</div><div class="deck-stripe">{stripe}</div>'
+                f'<li class="deck-tile compare-deck" data-kind="compare" data-source="{source}" data-deck-id="{_esc(deck_id)}" data-need-art="{"" if art else "1"}" style="--tile-glow:{glow}">'
+                f'<a href="#" class="deck-link recent-deck-link" data-type="compare" data-url="{_esc(deck_url)}" title="A {source} deck compared against your collection -- click to load it into the Compare form above">'
+                f'<div class="deck-art" style="{art_style}"><span class="kind-badge compare">&#8644; Comparison</span>{"" if art else "<div class=no-art>&#10070;</div>"}</div><div class="deck-stripe">{stripe}</div>'
                 f'<div class="deck-body"><div class="deck-commander">{_esc(raw_name)}</div>'
-                f'<div class="deck-name">{_esc(commander.get("name") or "Comparison") if commander else "Comparison"} &middot; opens in the Compare form</div>'
-                f'<div class="deck-foot"><span class="pips">{pips}</span><span class="sep">{when}</span></div></div></a>{delete_btn}</li>'
+                f'<div class="deck-name">{source} deck{" &middot; " + _esc(commander.get("name")) if commander else ""}</div>'
+                f'<div class="deck-foot"><span class="pips">{pips}</span><span class="sep">compared {when}</span></div></div></a>{delete_btn}</li>'
             )
         commander = p.get("commander") or {}
         colors = [c for c in "WUBRG" if c in (commander.get("color_identity") or [])] or ["C"]
@@ -870,9 +887,9 @@ def render_decks_page(error: str | None = None, prefill_url: str = "") -> str:
         commander_name = _esc(commander.get("name") or raw_name)
         deck_label = _esc(raw_name) if commander and raw_name != commander.get("name") else ""
         return (
-            f'<li class="deck-tile" style="--tile-glow:{glow};--tile-base:{_MANA_COLORS[colors[0]]}55">'
-            f'<a href="/builder?id={_esc(deck_id)}" class="deck-link recent-deck-link" data-type="brew">'
-            f'<div class="deck-art" style="{art_style}">{"" if art else f"<div class=no-art>{commander_name[:1]}</div>"}</div>'
+            f'<li class="deck-tile brew-deck" data-kind="brew" style="--tile-glow:{glow};--tile-base:{_MANA_COLORS[colors[0]]}55">'
+            f'<a href="/builder?id={_esc(deck_id)}" class="deck-link recent-deck-link" data-type="brew" title="Your brew -- click to open it in the Deck Builder">'
+            f'<div class="deck-art" style="{art_style}"><span class="kind-badge brew">&#9874; Brew</span>{"" if art else f"<div class=no-art>{commander_name[:1]}</div>"}</div>'
             f'<div class="deck-stripe">{stripe}</div>'
             f'<div class="deck-body"><div class="deck-commander">{commander_name}</div>'
             f'<div class="deck-name">{deck_label or "&nbsp;"}</div>'
@@ -885,9 +902,15 @@ def render_decks_page(error: str | None = None, prefill_url: str = "") -> str:
         '<span class="plus">&#43;</span><span class="t">Brew something new</span><span class="s">Pick a commander to begin</span></a></li>'
     )
     items = "".join(_project_item(p) for p in projects[:24])
+    n_brews = sum(1 for p in projects[:24] if p.get("type") == "brew")
+    n_compare = len(projects[:24]) - n_brews
     projects_html = (
-        '<div class="section-head"><h2>Your brews</h2>'
-        f'<span class="hint-inline">{len(projects)} saved</span></div>'
+        '<div class="section-head"><h2>Your decks</h2>'
+        '<div class="kind-filter" id="kind-filter" role="group" aria-label="Show">'
+        f'<button type="button" class="kf-btn active" data-kind="all">All <span>{len(projects[:24])}</span></button>'
+        f'<button type="button" class="kf-btn" data-kind="brew">&#9874; Brews <span>{n_brews}</span></button>'
+        f'<button type="button" class="kf-btn compare" data-kind="compare">&#8644; Comparisons <span>{n_compare}</span></button>'
+        f'</div><span class="hint-inline">{len(projects)} saved</span></div>'
         f'<ul class="deck-grid">{new_tile}{items}</ul>'
     )
 
@@ -997,6 +1020,16 @@ document.querySelectorAll('.recent-deck-link').forEach(link => {{
   }});
 }});
 
+// All / Brews / Comparisons: shows one kind of deck tile (the "Brew something new" tile always stays). Remembered.
+const kindFilter = document.getElementById('kind-filter');
+function setKindFilter(kind) {{
+  kindFilter.querySelectorAll('.kf-btn').forEach(b => b.classList.toggle('active', b.dataset.kind === kind));
+  document.querySelectorAll('.deck-tile[data-kind]').forEach(t => t.classList.toggle('kind-hidden', kind !== 'all' && t.dataset.kind !== kind));
+  try {{ localStorage.setItem('brewlist-deck-kind', kind); }} catch (e) {{}}
+}}
+kindFilter.addEventListener('click', (e) => {{ const b = e.target.closest('.kf-btn'); if (b) setKindFilter(b.dataset.kind); }});
+try {{ const k = localStorage.getItem('brewlist-deck-kind'); if (k && ['all', 'brew', 'compare'].includes(k)) setKindFilter(k); }} catch (e) {{}}
+
 // Comparisons made before the tiles had art don't know their commander yet: ask once, one at a time, and fill in the tile.
 (async () => {{
   for (const tile of document.querySelectorAll('.deck-tile.compare-deck[data-need-art="1"]')) {{
@@ -1012,7 +1045,7 @@ document.querySelectorAll('.recent-deck-link').forEach(link => {{
       art.innerHTML = '';
       tile.querySelector('.deck-stripe').innerHTML = used.map(x => `<span style="background:${{HEX[x]}}"></span>`).join('');
       tile.querySelector('.pips').innerHTML = used.map(x => `<img src="/static/mana/${{x}}.svg" alt="${{x}}">`).join('');
-      tile.querySelector('.deck-name').innerHTML = (c.name || 'Comparison').replace(/</g, '&lt;') + ' &middot; opens in the Compare form';
+      tile.querySelector('.deck-name').innerHTML = (tile.dataset.source || 'Moxfield') + ' deck &middot; ' + (c.name || '').replace(/</g, '&lt;');
       tile.style.setProperty('--tile-glow', HEX[used[Math.floor(used.length / 2)]]);
     }} catch (e) {{ /* offline: the tile stays plain */ }}
   }}
