@@ -359,6 +359,15 @@ input[type="text"], input[type="url"], input[type="file"] {
 .progress-track { height: 8px; background: var(--card-border); border-radius: 4px; overflow: hidden; }
 .progress-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--owned), var(--accent)); transition: width 0.2s ease; }
 #progress-label { color: var(--text-dim); font-size: 0.85rem; margin-top: 8px; }
+.dropzone { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 26px 16px; margin: 0 0 16px; text-align: center;
+  border: 2px dashed color-mix(in srgb, var(--gold) 40%, var(--card-border)); border-radius: 12px; cursor: pointer; font-weight: 400;
+  transition: border-color .15s ease, background .15s ease; }
+.dropzone:hover, .dropzone.drag { border-color: var(--gold); background: color-mix(in srgb, var(--gold) 7%, transparent); }
+.dropzone input[type=file] { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 0; opacity: 0; cursor: pointer; }
+.dz-icon { font-size: 1.6rem; line-height: 1; color: var(--accent); }
+.dz-title { font-family: var(--serif); font-size: 1.1rem; font-weight: 600; }
+.dz-sub { font-size: 0.8rem; color: var(--text-dim); }
+.dropzone.has-file .dz-icon { color: var(--owned); }
 .section-head { display: flex; align-items: baseline; justify-content: space-between; margin: 8px 0 14px; }
 .section-head h2 { font-family: var(--serif); font-weight: 600; font-size: 1.25rem; margin: 0; letter-spacing: 0.01em; }
 .deck-grid { list-style: none; padding: 0; margin: 0 0 28px; display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
@@ -627,7 +636,12 @@ def render_setup_page(error: str | None = None) -> str:
   <form class="card" id="collection-form">
     <label for="manabox_csv">ManaBox collection export (.csv)</label>
     {collection_html}
-    <input type="file" id="manabox_csv" name="manabox_csv" accept=".csv" required>
+    <label class="dropzone" id="dropzone" for="manabox_csv">
+      <span class="dz-icon">&#8679;</span>
+      <span class="dz-title" id="dz-title">Drop your ManaBox export here</span>
+      <span class="dz-sub" id="dz-sub">or click to choose a .csv file</span>
+      <input type="file" id="manabox_csv" name="manabox_csv" accept=".csv" required>
+    </label>
     <button type="submit" class="btn" id="collection-submit-btn">Upload Collection</button>
     <div id="collection-upload-label" class="hint" style="display:none;margin-top:8px;"></div>
   </form>
@@ -652,6 +666,17 @@ def render_setup_page(error: str | None = None) -> str:
 <script>
 const errorBox = document.getElementById('error-box');
 
+const dropzone = document.getElementById('dropzone');
+const csvInput = document.getElementById('manabox_csv');
+function showChosenFile() {{
+  const f = csvInput.files && csvInput.files[0];
+  dropzone.classList.toggle('has-file', !!f);
+  document.getElementById('dz-title').textContent = f ? f.name : 'Drop your ManaBox export here';
+  document.getElementById('dz-sub').textContent = f ? (f.size < 1024 ? '<1' : (f.size / 1024).toFixed(0)) + ' KB \u2014 click Upload Collection to use it' : 'or click to choose a .csv file';
+}}
+csvInput.addEventListener('change', showChosenFile);
+['dragenter', 'dragover'].forEach(ev => dropzone.addEventListener(ev, () => dropzone.classList.add('drag')));
+['dragleave', 'drop'].forEach(ev => dropzone.addEventListener(ev, () => dropzone.classList.remove('drag')));
 const collectionForm = document.getElementById('collection-form');
 const collectionSubmitBtn = document.getElementById('collection-submit-btn');
 const collectionUploadLabel = document.getElementById('collection-upload-label');
@@ -1075,7 +1100,6 @@ body::after {
 .builder-filters .segmented, .builder-filters .seg-btn { height:38px; box-sizing:border-box; }
 .builder-filters .btn.small, .builder-filters .seg-btn { padding-top:0; padding-bottom:0; display:inline-flex; align-items:center; }
 .builder-filters .icon-btn { width:38px; padding:0; justify-content:center; }
-#view-density-toggle[data-mode="cards"] .icon-grid, #view-density-toggle[data-mode="compact"] .icon-list { display:none; }
 .builder-filters .set-selection-field, .builder-filters .exact-color-toggle { display:flex; align-items:center; }
 .builder-filters input[type=text] { flex:1 1 240px; min-width:200px; margin:0; }
 #commander-popularity-controls { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
@@ -1531,6 +1555,41 @@ body.compact .deck-row .card-thumb { display:none; }
   #battle-card .bc-badges span { display:inline-block; border:1px solid #999; border-radius:999px; padding:2px 9px; margin:0 6px 6px 0; font-size:0.78rem; }
   #battle-card .combo-pill { border:1px solid #999; background:none; color:#111; }
 }
+/* ---- Card images that pop: bigger thumbs with depth, a gallery view, color pips, a brewing animation ---- */
+body:not(.compact) .builder-tile { grid-template-columns:62px minmax(0,1fr) auto; }
+body:not(.compact) .builder-tile .card-thumb { width:62px; height:86px; border-radius:4.75% / 3.4%; box-shadow:0 3px 10px rgba(0,0,0,0.45); transition:transform .18s ease, box-shadow .18s ease; }
+body:not(.compact) .builder-tile:hover .card-thumb { transform:translateY(-2px) scale(1.06); box-shadow:0 10px 20px rgba(0,0,0,0.55), 0 0 0 1px color-mix(in srgb, var(--identity-glow, var(--gold)) 60%, transparent); }
+#view-density-toggle svg { display:none; }
+#view-density-toggle[data-mode="cards"] .icon-gallery, #view-density-toggle[data-mode="gallery"] .icon-list, #view-density-toggle[data-mode="compact"] .icon-grid { display:block; }
+body.gallery .collection-grid { grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:18px 14px; padding:10px 8px 10px 4px; }
+body.gallery .builder-tile { display:block; padding:0; background:none; border:none; box-shadow:none; border-radius:0; }
+body.gallery .builder-tile:hover { border:none; box-shadow:none; }
+body.gallery .builder-tile .thumb-wrap { display:block; width:100%; }
+body.gallery .builder-tile .card-thumb { display:block; width:100%; height:auto; aspect-ratio:488 / 680; border-radius:4.75% / 3.4%; box-shadow:0 4px 12px rgba(0,0,0,0.5); }
+body.gallery .builder-tile:hover .card-thumb { transform:translateY(-4px) scale(1.04); box-shadow:0 14px 26px rgba(0,0,0,0.55), 0 0 0 2px var(--identity-glow, var(--gold)); }
+body.gallery .builder-tile .tile-body { position:absolute; left:0; right:0; bottom:0; padding:34px 9px 9px; border-radius:0 0 5% 5% / 0 0 3.6% 3.6%; background:linear-gradient(transparent, rgba(0,0,0,0.9)); color:#fff; opacity:0; transition:opacity .15s ease; pointer-events:none; }
+body.gallery .builder-tile:hover .tile-body { opacity:1; transform:translateY(-4px) scale(1.04); transform-origin:bottom center; transition:opacity .15s ease, transform .18s ease; }
+body.gallery .builder-tile .tile-body .name { font-size:0.8rem; }
+body.gallery .builder-tile .tile-body .meta { color:#d8d0c0; font-size:0.68rem; }
+body.gallery .tile-corner-actions { display:flex; position:absolute; top:6px; right:6px; flex-direction:column; gap:4px; opacity:0; transition:opacity .15s ease; z-index:2; }
+body.gallery .builder-tile:hover .tile-corner-actions, body.gallery .builder-tile:focus-within .tile-corner-actions { opacity:1; }
+body.gallery .tile-corner-actions .mana-cost-pips { display:none; }
+body.gallery .tile-icon-btn { background:rgba(20,17,15,0.88); color:#fff; }
+body.gallery .builder-tile.in-deck::after { content:"\2713"; position:absolute; top:6px; left:6px; width:22px; height:22px; border-radius:50%; background:var(--owned); color:#06210f; font-weight:700; font-size:0.8rem; display:flex; align-items:center; justify-content:center; box-shadow:0 2px 6px rgba(0,0,0,0.5); pointer-events:none; }
+.color-pips { display:inline-flex; align-items:center; gap:3px; }
+.color-pip { width:30px; height:30px; padding:0; border-radius:50%; border:2px solid transparent; background:none; cursor:pointer; opacity:0.45; transition:opacity .12s ease, transform .12s ease, border-color .12s ease; display:flex; align-items:center; justify-content:center; }
+.color-pip img { width:24px; height:24px; display:block; }
+.color-pip:hover { opacity:0.85; transform:translateY(-1px); }
+.color-pip.on { opacity:1; border-color:var(--accent); box-shadow:0 0 10px -2px var(--accent); }
+.brewing { display:flex; flex-direction:column; align-items:center; gap:12px; padding:34px 6px; color:var(--text-dim); font-size:0.85rem; text-align:center; }
+.brewing .brew-pips { display:flex; gap:8px; }
+.brewing .brew-pips img { width:26px; height:26px; animation:brew-bob 1.2s ease-in-out infinite; }
+.brewing .brew-pips img:nth-child(2) { animation-delay:.12s; } .brewing .brew-pips img:nth-child(3) { animation-delay:.24s; }
+.brewing .brew-pips img:nth-child(4) { animation-delay:.36s; } .brewing .brew-pips img:nth-child(5) { animation-delay:.48s; }
+@keyframes brew-bob { 0%, 100% { transform:translateY(0); opacity:.55; } 40% { transform:translateY(-9px); opacity:1; } }
+@media (prefers-reduced-motion: reduce) { .brewing .brew-pips img { animation:none; opacity:.9; } .builder-tile .card-thumb, .color-pip { transition:none; } }
+.btn:active:not(:disabled) { transform:translateY(1px); }
+.btn.ghost:hover { background:color-mix(in srgb, var(--accent) 9%, transparent); }
 """
 
 COLOR_LABELS = {"W": "White", "U": "Blue", "B": "Black", "R": "Red", "G": "Green"}
@@ -1734,6 +1793,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
           <input type="text" id="search" placeholder="Search your collection...">
           <select id="filter-category"><option value="">All types</option><option value="Commander">Commander</option>{category_options}</select>
           <select id="filter-color"><option value="">Any color</option><option value="C">Colorless</option><optgroup label="One-Color">{color_options}</optgroup>{color_family_optgroups}</select>
+          <span class="color-pips" id="color-pips" title="Click colors to filter; click again to clear"><button type="button" class="color-pip" data-c="W" aria-label="White"><img src="/static/mana/W.svg" alt=""></button><button type="button" class="color-pip" data-c="U" aria-label="Blue"><img src="/static/mana/U.svg" alt=""></button><button type="button" class="color-pip" data-c="B" aria-label="Black"><img src="/static/mana/B.svg" alt=""></button><button type="button" class="color-pip" data-c="R" aria-label="Red"><img src="/static/mana/R.svg" alt=""></button><button type="button" class="color-pip" data-c="G" aria-label="Green"><img src="/static/mana/G.svg" alt=""></button></span>
           <label class="exact-color-toggle" title="Only show cards whose color identity is exactly the selected color(s) -- e.g. true Grixis cards, not also mono-colored or two-color ones that merely fit within Grixis">
             <input type="checkbox" id="filter-color-exact" checked> Exact colors
           </label>
@@ -1741,9 +1801,10 @@ def render_builder_page(deck_id: str | None = None) -> str:
             <button type="button" class="btn ghost small" id="grid-set-filter-btn">Set</button>
             <div class="set-selection-popup" id="grid-set-filter-popup"></div>
           </div>
-          <button type="button" class="btn ghost icon-btn" id="view-density-toggle" data-mode="cards" title="Switch to compact list" aria-label="Switch to compact list">
+          <button type="button" class="btn ghost icon-btn" id="view-density-toggle" data-mode="cards" title="Switch to gallery view" aria-label="Switch to gallery view">
             <svg class="icon-list" viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M7 5h10M7 10h10M7 15h10"/><circle cx="3.2" cy="5" r="0.9" fill="currentColor" stroke="none"/><circle cx="3.2" cy="10" r="0.9" fill="currentColor" stroke="none"/><circle cx="3.2" cy="15" r="0.9" fill="currentColor" stroke="none"/></svg>
             <svg class="icon-grid" viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="2.5" width="6" height="6" rx="1.2"/><rect x="11.5" y="2.5" width="6" height="6" rx="1.2"/><rect x="2.5" y="11.5" width="6" height="6" rx="1.2"/><rect x="11.5" y="11.5" width="6" height="6" rx="1.2"/></svg>
+            <svg class="icon-gallery" viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="3" width="6" height="14" rx="1.2"/><rect x="11.5" y="3" width="6" height="14" rx="1.2"/></svg>
           </button>
         </div>
         <div id="commander-popularity-controls" style="display:none;">
@@ -2334,14 +2395,35 @@ document.getElementById('draw-hand-btn').addEventListener('click', drawSampleHan
 // One icon button: it shows the view a click switches TO (list icon while in
 // card tiles, tile icon while in the compact list).
 const densityBtn = document.getElementById('view-density-toggle');
-densityBtn.addEventListener('click', () => {{
-  const compact = !document.body.classList.contains('compact');
-  document.body.classList.toggle('compact', compact);
-  densityBtn.dataset.mode = compact ? 'compact' : 'cards';
-  const label = compact ? 'Switch to card tiles' : 'Switch to compact list';
-  densityBtn.title = label;
-  densityBtn.setAttribute('aria-label', label);
-}});
+// Three views of the collection: card tiles, a gallery of card images, and the compact list (which also
+// condenses the deck list and suggestions). One click moves to the next; the choice is remembered.
+const VIEW_MODES = ['cards', 'gallery', 'compact'];
+const VIEW_LABELS = {{ cards: 'Switch to gallery view', gallery: 'Switch to compact list', compact: 'Switch to card tiles' }};
+function setViewMode(mode) {{
+  document.body.classList.toggle('compact', mode === 'compact');
+  document.body.classList.toggle('gallery', mode === 'gallery');
+  densityBtn.dataset.mode = mode;
+  densityBtn.title = VIEW_LABELS[mode];
+  densityBtn.setAttribute('aria-label', VIEW_LABELS[mode]);
+  try {{ localStorage.setItem('brewlist-view-mode', mode); }} catch (e) {{}}
+}}
+densityBtn.addEventListener('click', () => setViewMode(VIEW_MODES[(VIEW_MODES.indexOf(densityBtn.dataset.mode) + 1) % VIEW_MODES.length]));
+try {{ const saved = localStorage.getItem('brewlist-view-mode'); if (VIEW_MODES.includes(saved)) setViewMode(saved); }} catch (e) {{}}
+// The five mana symbols drive the color filter above: pick any combination and the matching preset is selected.
+const colorSelect = document.getElementById('filter-color');
+const colorPips = [...document.querySelectorAll('#color-pips .color-pip')];
+function syncColorPips() {{
+  const v = colorSelect.value;
+  colorPips.forEach(b => b.classList.toggle('on', v !== 'C' && v.includes(b.dataset.c)));
+}}
+colorPips.forEach(b => b.addEventListener('click', () => {{
+  const on = new Set(colorPips.filter(x => x.classList.contains('on')).map(x => x.dataset.c));
+  if (on.has(b.dataset.c)) on.delete(b.dataset.c); else on.add(b.dataset.c);
+  const match = [...colorSelect.options].find(o => o.value && o.value !== 'C' && o.value.length === on.size && [...on].every(c => o.value.includes(c)));
+  colorSelect.value = match ? match.value : '';
+  colorSelect.dispatchEvent(new Event('change'));
+}}));
+colorSelect.addEventListener('change', syncColorPips);
 
 function findCard(name) {{
   const nm = normalizeName(name);
@@ -2875,6 +2957,7 @@ function renderGrid() {{
     const legality = legalityFor(card);
     const warnHtml = (legality && legality !== 'Legal') ? `<div class="warn">&#9888; ${{legality}} in ${{brew.format === 'commander' ? 'Commander' : brew.target_format}}</div>` : '';
     const inDeck = findCard(card.name);
+    if (inDeck) tile.classList.add('in-deck');
     // Rank only -- not the raw deck count. Most owned commanders won't
     // place in a given window's Top 100 at all (see edhrec_data.py's
     // module docstring), so showing nothing for those is the honest
@@ -3089,14 +3172,28 @@ function renderStats() {{
     + (fillers ? `<span title="Cards added only to fill a slot (not on EDHREC's list for this commander) -- marked in the list below">slot filler <b>${{fillers}}</b></span>` : '');
 }}
 
+// A little mana-pip animation for the waits (Suggest, Quick suggest, combo checks) instead of plain text.
+function brewingHtml(text) {{
+  return '<div class="brewing"><div class="brew-pips">' + ['W', 'U', 'B', 'R', 'G'].map(c => '<img src="/static/mana/' + c + '.svg" alt="">').join('')
+    + '</div><div>' + text + '</div></div>';
+}}
+
 function parseManaPips(manaCost) {{
   const matches = (manaCost || '').match(/\\{{[^}}]+\\}}/g) || [];
   return matches.map(m => m.slice(1, -1));
 }}
 
 function manaPipSymbolUrl(token) {{
-  return `https://svgs.scryfall.io/card-symbols/${{token.replace('/', '').toUpperCase()}}.svg`;
+  return `/static/mana/${{token.replace('/', '').toUpperCase()}}.svg`;
 }}
+// A symbol that isn't saved locally (a rare hybrid or Un-card symbol) falls back to Scryfall's copy.
+document.addEventListener('error', (e) => {{
+  const img = e.target;
+  if (img && img.tagName === 'IMG' && img.src.includes('/static/mana/') && !img.dataset.fellBack) {{
+    img.dataset.fellBack = '1';
+    img.src = 'https://svgs.scryfall.io/card-symbols/' + img.src.split('/').pop();
+  }}
+}}, true);
 
 function libraryCards() {{
   // The commander never gets drawn/shuffled (starts in the command zone) --
@@ -3410,7 +3507,7 @@ function wizardTotalSelected() {{ return wizard.steps.reduce((n, s) => n + wizar
 
 function wizardLoadPools(requestId) {{
   wizard.choosing = false;
-  wizardBody.innerHTML = '<div class="hint wz-loading">Building your suggestions&hellip; (checking your collection and EDHREC, may take a few seconds)</div>';
+  wizardBody.innerHTML = brewingHtml('Brewing your suggestions&hellip; <span style="opacity:.75">(checking your collection and EDHREC, may take a few seconds)</span>');
   document.getElementById('wizard-steps').innerHTML = '';
   setWizardFooter({{ back: false, next: false, accept: false, status: '' }});
   fetch('/builder/suggest-pools', {{
@@ -3452,7 +3549,7 @@ function openWizard() {{
   // Commander decks first ask which way to build the commander (EDHREC's
   // tags for it), since each has its own synergies -- skipped when EDHREC
   // lists fewer than two, and never allowed to block the suggestions.
-  wizardBody.innerHTML = '<div class="hint wz-loading">Looking up how this commander is built on EDHREC&hellip;</div>';
+  wizardBody.innerHTML = brewingHtml('Looking up how this commander is built on EDHREC&hellip;');
   fetch('/builder/deck-types', {{
     method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
     body: JSON.stringify({{ commander: brew.commander, details: true }}),
@@ -3871,7 +3968,7 @@ suggestBtn.addEventListener('click', () => {{
   // flight" fix as Optimize -- usually fast (local heuristics), but a
   // commander whose EDHREC synergy data isn't cached yet costs a real
   // live fetch first.
-  document.getElementById('suggestions-panel').innerHTML = '<div class="hint" style="margin:0;">Finding suggestions...</div>';
+  document.getElementById('suggestions-panel').innerHTML = brewingHtml('Finding suggestions&hellip;');
   const batchBody = JSON.stringify({{
     cards: brew.cards, commander: brew.commander, format: brew.format, target_format: brew.target_format,
     mix_targets: brew.mix_targets, mix_auto: mixAuto, intended_bracket: brew.intended_bracket,
@@ -4018,7 +4115,7 @@ optimizeBtn.addEventListener('click', () => {{
   // click had cleared it (usually blank), so a slow-but-working request
   // looked indistinguishable from "nothing happened." Same loading-hint
   // pattern the Analyze modal's own live Commander Spellbook call uses.
-  document.getElementById('suggestions-panel').innerHTML = '<div class="hint" style="margin:0;">Checking Commander Spellbook for combos... (live API call, may take a few seconds)</div>';
+  document.getElementById('suggestions-panel').innerHTML = brewingHtml('Checking Commander Spellbook for combos&hellip; <span style="opacity:.75">(live API call, may take a few seconds)</span>');
   fetch('/builder/optimize', {{
     method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
     body: JSON.stringify({{
