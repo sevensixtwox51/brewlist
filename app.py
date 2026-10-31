@@ -273,14 +273,16 @@ PAGE_STYLE = """
   --text: #ece3d0; --text-dim: #9b8f7a; --accent: #e9c46a; --owned: #6fcf8a;
   --missing: #e8776a; --gold: #e9c46a; --shadow: 0 4px 16px rgba(0,0,0,0.4);
   --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+  --series-a: #6fa8c9;
 }
 @media (prefers-color-scheme: light) {
   :root {
     --bg: #f6f0e4; --bg-elevated: #fffaf0; --card-bg: #fffaf0; --card-border: #e3d7bd;
     --text: #2a2218; --text-dim: #7a6c55; --accent: #9a6a14; --owned: #2f8a4a;
-    --missing: #c0392b; --gold: #e0b04a; --shadow: 0 2px 10px rgba(60,40,10,0.1);
+    --missing: #c0392b; --gold: #e0b04a; --shadow: 0 2px 10px rgba(60,40,10,0.1); --series-a: #2f7ea1;
   }
 }
+a { color: var(--accent); }
 * { box-sizing: border-box; }
 body {
   margin: 0; background: var(--bg) radial-gradient(ellipse 80% 320px at 50% 0, color-mix(in srgb, var(--gold) 9%, transparent), transparent) no-repeat;
@@ -1353,12 +1355,12 @@ a.unowned-badge:hover { background:color-mix(in srgb, var(--gold) 28%, transpare
 .curve-col { flex:1; display:flex; flex-direction:column; align-items:center; height:100%; }
 .curve-bar-wrap { flex:1; width:100%; display:flex; flex-direction:column-reverse; align-items:stretch; min-height:0; }
 .curve-bar { width:100%; }
-.curve-bar.permanents { background:var(--accent); }
+.curve-bar.permanents { background:var(--series-a); }
 .curve-bar.spells { background:var(--gold); }
 .curve-label { font-size:0.68rem; color:var(--text-dim); margin-top:3px; }
 .chart-legend { display:flex; gap:12px; font-size:0.72rem; color:var(--text-dim); margin:6px 0 8px; flex-wrap:wrap; }
 .chart-legend .swatch { width:9px; height:9px; border-radius:2px; display:inline-block; margin-right:4px; }
-.chart-legend .swatch.permanents { background:var(--accent); }
+.chart-legend .swatch.permanents { background:var(--series-a); }
 .chart-legend .swatch.spells { background:var(--gold); }
 .chart-legend .swatch.pips { background:var(--accent); }
 .color-breakdown { display:flex; flex-direction:column; gap:6px; margin-bottom:8px; }

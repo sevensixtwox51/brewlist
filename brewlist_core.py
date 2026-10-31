@@ -2691,33 +2691,37 @@ HTML_TEMPLATE = """<!doctype html>
 <title>{title}</title>
 <style>
 :root {{
-  --bg: #0f1117;
-  --bg-elevated: #171a23;
-  --card-bg: #1c1f2a;
-  --card-border: #2a2f3d;
-  --text: #e8e9ee;
-  --text-dim: #8b90a3;
-  --accent: #7dd3fc;
-  --owned: #4ade80;
-  --missing: #fb7185;
-  --gold: #facc15;
-  --shadow: 0 4px 16px rgba(0,0,0,0.35);
+  --bg: #14110f;
+  --bg-elevated: #1e1a17;
+  --card-bg: #241f1b;
+  --card-border: #3a322a;
+  --text: #ece3d0;
+  --text-dim: #9b8f7a;
+  --accent: #e9c46a;
+  --owned: #6fcf8a;
+  --missing: #e8776a;
+  --gold: #e9c46a;
+  --shadow: 0 4px 16px rgba(0,0,0,0.4);
+  --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+  --series-a: #6fa8c9;
 }}
 @media (prefers-color-scheme: light) {{
   :root {{
-    --bg: #f4f5f8;
-    --bg-elevated: #ffffff;
-    --card-bg: #ffffff;
-    --card-border: #e2e4ea;
-    --text: #1a1c23;
-    --text-dim: #63677a;
-    --accent: #0284c7;
-    --owned: #16a34a;
-    --missing: #e11d48;
-    --gold: #ca8a04;
-    --shadow: 0 2px 10px rgba(20,20,30,0.08);
+    --bg: #f6f0e4;
+    --bg-elevated: #fffaf0;
+    --card-bg: #fffaf0;
+    --card-border: #e3d7bd;
+    --text: #2a2218;
+    --text-dim: #7a6c55;
+    --accent: #9a6a14;
+    --owned: #2f8a4a;
+    --missing: #c0392b;
+    --gold: #e0b04a;
+    --shadow: 0 2px 10px rgba(60,40,10,0.1);
+    --series-a: #2f7ea1;
   }}
 }}
+a {{ color: var(--accent); }}
 * {{ box-sizing: border-box; }}
 body {{
   margin: 0;
@@ -2794,8 +2798,13 @@ header {{
 }}
 header h1 {{
   margin: 0 0 4px;
-  font-size: 1.4rem;
+  font-family: var(--serif);
+  font-weight: 600;
+  font-size: 1.6rem;
+  letter-spacing: 0.02em;
+  color: var(--accent);
 }}
+h2, .modal h2 {{ font-family: var(--serif); font-weight: 600; letter-spacing: 0.01em; }}
 header .source a {{
   color: var(--text-dim);
   font-size: 0.85rem;
@@ -2957,6 +2966,8 @@ details.bucket {{
 details.bucket > summary {{
   cursor: pointer;
   padding: 12px 16px;
+  font-family: var(--serif);
+  font-size: 1.05rem;
   font-weight: 600;
   list-style: none;
   display: flex;
@@ -3229,13 +3240,13 @@ a.badge:hover {{ text-decoration: underline; }}
 .curve-col {{ flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%; }}
 .curve-bar-wrap {{ flex: 1; width: 100%; display: flex; flex-direction: column-reverse; align-items: stretch; min-height: 0; }}
 .curve-bar {{ width: 100%; }}
-.curve-bar.permanents {{ background: var(--accent); }}
+.curve-bar.permanents {{ background: var(--series-a); }}
 .curve-bar.spells {{ background: var(--gold); }}
 .curve-label {{ font-size: 0.75rem; color: var(--text-dim); margin-top: 4px; }}
 .chart-legend {{ display: flex; gap: 14px; font-size: 0.75rem; color: var(--text-dim); margin-top: 8px; flex-wrap: wrap; }}
 .chart-legend span {{ display: inline-flex; align-items: center; gap: 5px; }}
 .chart-legend .swatch {{ width: 10px; height: 10px; border-radius: 2px; display: inline-block; }}
-.chart-legend .swatch.permanents {{ background: var(--accent); }}
+.chart-legend .swatch.permanents {{ background: var(--series-a); }}
 .chart-legend .swatch.spells {{ background: var(--gold); }}
 .chart-legend .swatch.pips {{ background: var(--accent); }}
 .chart-legend .swatch.sources {{ background: var(--owned); }}
