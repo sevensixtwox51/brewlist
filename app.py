@@ -1654,6 +1654,19 @@ body.gallery .builder-tile.in-deck::after { content:"\2713"; position:absolute; 
 #analyze-modal #rule0-list { columns:2 340px; column-gap:24px; margin-top:6px; }
 #analyze-modal #rule0-list li { break-inside:avoid; }
 @media (max-width: 900px) { .an-grid { columns:1; } #analyze-modal #pitch-block { display:block !important; } }
+.stat-tiles { display:grid; grid-template-columns:repeat(auto-fit, minmax(132px, 1fr)); gap:10px; margin:0 0 14px; }
+.stat-tile { background:var(--bg-elevated); border:1px solid var(--card-border); border-radius:10px; padding:10px 12px 11px; min-width:0; }
+.stat-value { font-family:var(--serif); font-size:1.9rem; font-weight:600; line-height:1.05; color:var(--accent); font-variant-numeric:tabular-nums; }
+.stat-tile.good .stat-value, .stat-colors b.good { color:var(--owned); }
+.stat-tile.ok .stat-value, .stat-colors b.ok { color:var(--gold); }
+.stat-tile.bad .stat-value, .stat-colors b.bad { color:var(--missing); }
+.stat-label { margin-top:5px; font-size:0.7rem; text-transform:uppercase; letter-spacing:0.07em; color:var(--text-dim); }
+.stat-sub { margin-top:2px; font-size:0.72rem; color:var(--text-dim); line-height:1.3; }
+.stat-colors { display:flex; flex-wrap:wrap; gap:6px 12px; margin-top:4px; }
+.stat-color { display:inline-flex; align-items:center; gap:5px; }
+.stat-color .mana-icon { width:18px; height:18px; }
+.stat-color b { font-family:var(--serif); font-size:1.05rem; font-weight:600; }
+.stat-tile.span2 { grid-column:span 2; }
 """
 
 COLOR_LABELS = {"W": "White", "U": "Blue", "B": "Black", "R": "Red", "G": "Green"}
@@ -4911,6 +4924,14 @@ function loadLandCurve(requestSeq) {{
     }})
     .catch(() => analyzeStage(requestSeq, 'land', false));
 }}
+// A headline number with a label and a line of detail -- the stat tiles at the top of the Analyze panels.
+// `cls` colors the number: good / ok / bad (judged against a standard) or nothing (neutral).
+function statTile(value, label, sub, cls, tip) {{
+  return `<div class="stat-tile ${{cls || ''}}"${{tip ? ` title="${{escapeHtml(tip)}}"` : ''}}><div class="stat-value">${{value}}</div>`
+    + `<div class="stat-label">${{label}}</div>${{sub ? `<div class="stat-sub">${{sub}}</div>` : ''}}</div>`;
+}}
+function statTilesHtml(tiles) {{ return '<div class="stat-tiles">' + tiles.filter(Boolean).join('') + '</div>'; }}
+
 function renderManaSim(sim) {{
   const row = (label, pct, good, tip) => {{
     const cls = pct >= good ? 'near' : (pct >= good - 8 ? 'over' : 'under');
@@ -4922,16 +4943,22 @@ function renderManaSim(sim) {{
     'In ' + sim.on_curve[t] + '% of ' + sim.games + ' games you have at least ' + t + ' mana available on turn ' + t
     + ' (average ' + sim.avg_mana[t] + '). Counts land drops, tapped lands, and the mana rocks, dorks and land-fetching spells cast along the way.')).join('');
   const colors = Object.entries(sim.color_by_turn_4).map(([c, p]) => (SOURCE_COLOR_HEX[c] ? `<span style="color:${{SOURCE_COLOR_HEX[c]}}">&#9679;</span> ${{p}}%` : '')).join(' &nbsp; ');
-  const cmd = sim.commander
-    ? `<li><b>${{escapeHtml(sim.commander.name)}}</b> (mana value ${{sim.commander.mv}}) can be cast on curve in <b>${{sim.commander.on_curve}}%</b> of games, and within two turns of that in <b>${{sim.commander.within_two}}%</b>.</li>` : '';
+  const good = (v, hi, mid) => v >= hi ? 'good' : (v >= mid ? 'ok' : 'bad');
+  const colorTile = `<div class="stat-tile span2" title="Chance each colour is available by turn 4"><div class="stat-colors">`
+    + Object.entries(sim.color_by_turn_4).map(([c, p]) => (SOURCE_COLOR_HEX[c] ? `<span class="stat-color"><img class="mana-icon" src="/static/mana/${{c}}.svg" alt="${{c}}"><b class="${{good(p, 94, 85)}}">${{p}}%</b></span>` : '')).join('')
+    + `</div><div class="stat-label">Colour available by turn 4</div></div>`;
+  const tiles = statTilesHtml([
+    sim.commander ? statTile(sim.commander.on_curve + '%', 'Commander on curve', 'mana value ' + sim.commander.mv + ' &middot; within two turns of that: ' + sim.commander.within_two + '%', good(sim.commander.on_curve, 80, 65),
+      sim.commander.name + ' can be cast on curve in ' + sim.commander.on_curve + '% of games.') : '',
+    statTile(sim.avg_opening_lands, 'Opening lands', 'average &middot; ' + sim.mulligan_rate + '% of games mulligan (the first is free)', '', 'Opening hands average ' + sim.avg_opening_lands + ' lands.'),
+    statTile(sim.stuck_on_two_turn_4 + '%', 'Stuck on turn 4', 'with two mana or less', sim.stuck_on_two_turn_4 <= 3 ? 'good' : (sim.stuck_on_two_turn_4 <= 8 ? 'ok' : 'bad'), 'Games with two mana or less on turn 4.'),
+    colorTile,
+  ]);
   document.getElementById('mana-sim-heading').style.display = '';
   document.getElementById('mana-sim').innerHTML =
-    `<p class="hint" style="margin:0 0 8px;">${{sim.games.toLocaleString()}} simulated games of just the mana game (${{sim.lands}} lands, ${{sim.ramp}} mana rocks, dorks and land-fetching spells, plus your card draw): chance of having at least as much mana as the turn number.</p>`
-    + curve
-    + `<ul class="rule0-list" style="margin-top:10px;">${{cmd}}`
-    + `<li>Opening hands average <b>${{sim.avg_opening_lands}}</b> lands; <b>${{sim.mulligan_rate}}%</b> of games mulligan (the first one is free); <b>${{sim.stuck_on_two_turn_4}}%</b> are stuck on two mana or less on turn 4.</li>`
-    + `<li>Chance each colour is available by turn 4: ${{colors}}</li></ul>`
-    + `<p class="hint" style="margin:6px 0 0;">Mana only &mdash; no spells are cast but ramp. It plays lands that enter tapped as tapped; checked against Karsten&rsquo;s land-only table with untapped basics, it agrees to within a point.</p>`;
+    `<p class="hint" style="margin:0 0 10px;">${{sim.games.toLocaleString()}} simulated games of just the mana game (${{sim.lands}} lands, ${{sim.ramp}} mana rocks, dorks and land-fetching spells, plus your card draw): chance of having at least as much mana as the turn number.</p>`
+    + tiles + curve
+    + `<p class="hint" style="margin:10px 0 0;">Mana only &mdash; no spells are cast but ramp. It plays lands that enter tapped as tapped; checked against Karsten&rsquo;s land-only table with untapped basics, it agrees to within a point.</p>`;
 }}
 
 // Synergy packages (synergy.deck_synergy_packages): what the deck is built around, as enablers (cards that
@@ -5007,9 +5034,21 @@ function renderResilience(res) {{
   const advice = (res.protection + res.recursion === 0)
     ? `Nothing in the deck protects the board or brings it back, so a wipe on turn ${{res.wipe_turn}} costs ${{wipeDelay === null ? 'the game' : wipeDelay + ' turn' + (wipeDelay === 1 ? '' : 's')}}.`
     : `${{res.protection}} protection spell${{res.protection === 1 ? '' : 's'}} and ${{res.recursion}} reanimation spell${{res.recursion === 1 ? '' : 's'}} soften a wipe: it costs ${{wipeDelay === null ? 'the game' : wipeDelay + ' turn' + (wipeDelay === 1 ? '' : 's')}}.`;
+  const delayTile = (label, s, tip) => {{
+    const d = delta(s);
+    const value = d === null ? 'Rarely' : (d <= 0 ? 'No delay' : '+' + d + (d === 1 ? ' turn' : ' turns'));
+    return statTile(value, label, s.by_10 + '% still kill by turn 10', d === null ? 'bad' : (d <= 1 ? 'good' : (d <= 2 ? 'ok' : 'bad')), tip);
+  }};
+  const tiles = statTilesHtml([
+    delayTile('Spot removal', res.spot, 'Each turn from turn 3 there is a ' + Math.round(res.spot_chance * 100) + '% chance an opponent removes your best creature.'),
+    delayTile('Board wipe T' + res.wipe_turn, res.wipe, 'Every creature and token dies at the start of turn ' + res.wipe_turn + ' unless protected.'),
+    delayTile('Wipe + spot', res.both, 'Both in the same game, the closest of these to a real table.'),
+    delayTile('Commander removed', res.commander, 'Removed each time it is cast (twice), and recasting costs {2} more.'),
+  ]);
   document.getElementById('resilience-heading').style.display = '';
   document.getElementById('resilience').innerHTML =
-    `<p class="hint" style="margin:0 0 8px;">The same Turn Clock when opponents interact (${{res.games.toLocaleString()}} games each). Bars show the chance of a kill by turn 10; the number after the turn is how many turns later than with no interaction.</p>`
+    `<p class="hint" style="margin:0 0 10px;">The same Turn Clock when opponents interact (${{res.games.toLocaleString()}} games each): how many turns later the kill comes than with no interaction (turn ${{base.median_turn || '?'}}).</p>`
+    + tiles
     + row('No interaction', base, 'The baseline Turn Clock.')
     + row('Spot removal (' + Math.round(res.spot_chance * 100) + '% each turn)', res.spot, 'From turn 3, each turn there is a ' + Math.round(res.spot_chance * 100) + '% chance an opponent removes your best creature.')
     + row('Board wipe on turn ' + res.wipe_turn, res.wipe, 'Every creature and token dies at the start of turn ' + res.wipe_turn + ', unless a protection spell is in hand; reanimation spells bring creatures back. Planeswalkers, artifacts and enchantments survive.')
@@ -5028,16 +5067,22 @@ function renderTurnClock(clock) {{
       + `<span class="shape-count" style="white-space:nowrap;min-width:150px;" title="${{escapeHtml('Chance the deck has killed all ' + clock.opponents + ' opponents (' + clock.life * clock.opponents + ' damage spread across them) by turn ' + t + '.')}}">${{pct}}% &middot; table ${{clock.table_by_turn[t]}}%</span></div>`;
   }}).join('');
   const never = clock.kill_rate < 60;
-  const headline = clock.median_turn
-    ? `Kills one opponent on turn <b>${{clock.median_turn}}</b> in half of games` + (clock.fast_turn ? ` (the fastest tenth by turn <b>${{clock.fast_turn}}</b>` + (clock.slow_turn ? `, the slowest tenth by turn <b>${{clock.slow_turn}}</b>` : '') + ')' : '') + '.'
-    : `Fewer than half of games kill an opponent by turn ${{clock.max_turn}}.`;
-  const tableLine = clock.table_median_turn ? ` The whole table of ${{clock.opponents}} is dead by turn <b>${{clock.table_median_turn}}</b> in half of games.` : (clock.table_kill_rate ? ` All ${{clock.opponents}} opponents are dead by turn ${{clock.max_turn}} in ${{clock.table_kill_rate}}% of games.` : '');
+  const tiles = statTilesHtml([
+    statTile(clock.median_turn ? 'Turn ' + clock.median_turn : '&mdash;', 'Kills one opponent',
+      clock.median_turn ? 'in half of games' + (clock.fast_turn ? ' &middot; fastest tenth by turn ' + clock.fast_turn : '') + (clock.slow_turn ? ', slowest tenth by turn ' + clock.slow_turn : '') : 'fewer than half of games by turn ' + clock.max_turn,
+      '', 'The turn by which half of the simulated games have dealt ' + clock.life + ' damage to one do-nothing opponent.'),
+    statTile(clock.table_median_turn ? 'Turn ' + clock.table_median_turn : clock.table_kill_rate + '%', 'Whole table dead',
+      clock.table_median_turn ? 'all ' + clock.opponents + ' opponents, in half of games' : 'of games by turn ' + clock.max_turn + ' (all ' + clock.opponents + ' opponents)', '',
+      'Chance the deck kills all ' + clock.opponents + ' opponents (' + clock.life * clock.opponents + ' damage spread across them).'),
+    statTile(clock.kill_rate + '%', 'Games that kill', 'one opponent by turn ' + clock.max_turn, '', 'Share of simulated games that kill an opponent within ' + clock.max_turn + ' turns.'),
+    clock.combos ? statTile(clock.combo_kill_rate + '%', 'End by combo', clock.combos + ' assembled game-ending combo' + (clock.combos === 1 ? '' : 's'), '', 'Share of games that end with an assembled combo.') : '',
+  ]);
   document.getElementById('turn-clock-heading').style.display = '';
   document.getElementById('turn-clock').innerHTML =
-    `<p class="hint" style="margin:0 0 8px;">${{headline}}${{tableLine}} ${{clock.games.toLocaleString()}} simulated games against opponents at ${{clock.life}} life who block nothing and remove nothing. Commander damage (21) counts as a kill.</p>`
+    `<p class="hint" style="margin:0 0 10px;">${{clock.games.toLocaleString()}} simulated games against opponents at ${{clock.life}} life who block nothing and remove nothing. Commander damage (21) counts as a kill.</p>`
+    + tiles
     + bars
     + (never ? `<p class="hint" style="margin:8px 0 0;"><b>Most games never kill.</b> The clock reads combat, tokens, equipment and auras, team boosts, extra combats, damage that scales with the board, direct life loss and the combos you've already assembled, so a deck that wins another way looks slower than it is.</p>` : '')
-    + (clock.combos ? `<p class="hint" style="margin:8px 0 0;">${{clock.combos}} assembled game-ending combo${{clock.combos === 1 ? '' : 's'}} counted: ${{clock.combo_kill_rate}}% of games end by combo.</p>` : '')
     + `<p class="hint" style="margin:6px 0 0;">A ruler for comparing builds, not a prediction: it can't read choices and targeting, or abilities that cost more than mana and tapping (sacrifice, discard, life).</p>`;
 }}
 
