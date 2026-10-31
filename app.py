@@ -1411,15 +1411,31 @@ body.compact .tile-corner-actions { align-self:center; }
 body.compact .collection-grid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
 body.compact .deck-row .card-thumb { display:none; }
 #deck-type-select { padding:8px 10px; border-radius:8px; border:1px solid var(--card-border); background:var(--bg); color:var(--text); font-size:0.85rem; max-width:260px; }
-.wz-types { display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:10px; margin-top:6px; }
-.wz-type { border:2px solid var(--card-border); border-radius:10px; padding:10px 12px; cursor:pointer; background:var(--bg); opacity:0.75; transition:opacity .12s, border-color .12s; }
-.wz-type:hover { opacity:1; }
-.wz-type.selected { opacity:1; border-color:var(--accent); background:color-mix(in srgb, var(--accent) 8%, var(--bg)); }
-.wz-type-head { display:flex; align-items:baseline; gap:8px; }
-.wz-type-count { margin-left:auto; font-size:0.75rem; color:var(--text-dim); font-variant-numeric:tabular-nums; }
-.wz-type-tag { font-size:0.65rem; padding:0 6px; border-radius:999px; border:1px solid var(--accent); color:var(--accent); }
-.wz-type-stats { margin-top:4px; font-size:0.75rem; color:var(--text-dim); }
-.wz-type-cards { margin-top:6px; font-size:0.75rem; line-height:1.3; }
+.wz-types { display:grid; grid-template-columns:repeat(auto-fill, minmax(290px, 1fr)); gap:14px; margin-top:8px; }
+.wz-type { position:relative; border:2px solid var(--card-border); border-radius:14px; padding:14px 14px 12px; cursor:pointer; background:var(--bg-elevated); opacity:0.82;
+  transition:opacity .15s ease, border-color .15s ease, transform .15s ease, box-shadow .15s ease; }
+.wz-type:hover { opacity:1; transform:translateY(-2px); border-color:color-mix(in srgb, var(--accent) 55%, var(--card-border)); }
+.wz-type.selected { opacity:1; border-color:var(--accent); background:color-mix(in srgb, var(--accent) 7%, var(--bg-elevated)); box-shadow:0 0 0 1px var(--accent), 0 8px 24px -10px var(--accent); }
+.wz-type-check { position:absolute; top:10px; right:10px; width:22px; height:22px; border-radius:50%; background:var(--accent); color:var(--bg); font-weight:700; font-size:0.8rem; display:none; align-items:center; justify-content:center; }
+.wz-type.selected .wz-type-check { display:flex; }
+.wz-type-head { display:flex; align-items:baseline; gap:8px; padding-right:26px; }
+.wz-type-head b { font-family:var(--serif); font-size:1.15rem; font-weight:600; }
+.wz-type-count { font-size:0.74rem; color:var(--text-dim); font-variant-numeric:tabular-nums; white-space:nowrap; }
+.wz-type-tag { font-size:0.65rem; padding:0 7px; border-radius:999px; border:1px solid var(--accent); color:var(--accent); white-space:nowrap; }
+.wz-type-share { display:flex; align-items:center; gap:10px; margin-top:6px; }
+.wz-share-bar { flex:1; height:5px; border-radius:3px; background:var(--card-border); overflow:hidden; }
+.wz-share-bar span { display:block; height:100%; border-radius:3px; background:var(--accent); }
+.wz-fan { display:flex; justify-content:center; align-items:flex-end; height:104px; margin:14px 0 8px; padding-left:28px; overflow:visible; }
+.wz-fan-card { width:60px; flex:0 0 60px; height:auto; aspect-ratio:488 / 680; margin-left:-28px; border-radius:4.75% / 3.4%; box-shadow:0 4px 12px rgba(0,0,0,0.55); background:var(--card-border);
+  transform:rotate(var(--tilt, 0deg)) translateY(calc(var(--tilt, 0deg) * var(--tilt, 0deg) * 0.12)); transform-origin:bottom center; transition:transform .2s ease, margin .2s ease, filter .2s ease; }
+.wz-fan-card.unowned { filter:saturate(0.4) brightness(0.82); }
+.wz-fan-card:not(.unowned) { box-shadow:0 4px 12px rgba(0,0,0,0.55), 0 0 0 1.5px var(--owned); }
+.wz-type:hover .wz-fan-card, .wz-type.selected .wz-fan-card { margin-left:-22px; }
+.wz-type:hover .wz-fan-card:hover { transform:rotate(0deg) translateY(-12px) scale(1.18); z-index:30 !important; filter:none; }
+.wz-type-own { font-size:0.74rem; color:var(--text-dim); text-align:center; }
+.wz-type-own b { color:var(--owned); }
+.wz-type-stats { margin-top:4px; font-size:0.72rem; color:var(--text-dim); text-align:center; }
+@media (prefers-reduced-motion: reduce) { .wz-type, .wz-fan-card { transition:none; } }
 .theme-picker { position:relative; }
 .theme-picker input[type=text] { width:200px; margin:0; padding:8px 12px; font-size:0.85rem; }
 .theme-dropdown {
@@ -3560,6 +3576,7 @@ function openWizard() {{
       const types = data.deck_types || [];
       if (types.length < 2) {{ wizardLoadPools(requestId); return; }}
       wizard.deckTypes = types;
+      wizard.deckTotal = data.total_decks || (types[0] && types[0].count) || 0;
       wizard.pickedType = (brew.edhrec_theme && types.some(t => t.slug === brew.edhrec_theme)) ? brew.edhrec_theme : types[0].slug;
       renderDeckTypeChoice();
     }})
@@ -3571,16 +3588,26 @@ function renderDeckTypeChoice() {{
   document.getElementById('wizard-title').textContent = 'Suggest cards — choose a deck type';
   document.getElementById('wizard-steps').innerHTML = '';
   const num = v => (v == null ? '?' : Math.round(v));
+  const total = wizard.deckTotal || 0;
+  const tilts = [-9, -5, -1.5, 1.5, 5, 9];
   const html = '<div class="hint wz-tip">EDHREC lists the ways players build <b>' + escapeHtml(brew.commander.name) + '</b>, and each has its own card synergies. '
     + 'Picking one keeps the suggestions to a single plan instead of mixing them. You can change it later from the Deck type menu.</div>'
-    + '<div class="wz-types">' + wizard.deckTypes.map((t, i) =>
-      '<div class="wz-type' + (t.slug === wizard.pickedType ? ' selected' : '') + '" data-type="' + escapeHtml(t.slug) + '">'
-      + '<div class="wz-type-head"><b>' + escapeHtml(t.value) + '</b>'
-      + (i === 0 ? ' <span class="wz-type-tag">most common</span>' : '')
-      + '<span class="wz-type-count">' + (t.count || 0).toLocaleString() + ' decks</span></div>'
-      + (t.avg_creatures != null ? '<div class="wz-type-stats">avg ' + num(t.avg_creatures) + ' creatures &middot; ' + num(t.avg_planeswalkers) + ' planeswalkers</div>' : '')
-      + ((t.top_cards || []).length ? '<div class="wz-type-cards">' + t.top_cards.map(escapeHtml).join(', ') + '</div>' : '')
-      + '</div>').join('') + '</div>';
+    + '<div class="wz-types">' + wizard.deckTypes.map((t, i) => {{
+      const names = t.top_cards || [], ids = t.top_card_ids || [];
+      const ownedCount = names.filter(n => collectionIndex[normalizeName(n)]).length;
+      const fan = names.map((n, j) => ids[j] ? '<img class="wz-fan-card' + (collectionIndex[normalizeName(n)] ? '' : ' unowned') + '" src="' + scryfallImg(ids[j], 'small')
+        + '" alt="" title="' + escapeHtml(n) + (collectionIndex[normalizeName(n)] ? '' : ' (not owned)') + '" style="--tilt:' + tilts[j % tilts.length] + 'deg;z-index:' + (10 - Math.abs(j - 2.5) * 2) + '" loading="lazy">' : '').join('');
+      const share = total && t.count ? Math.max(2, Math.round(t.count / total * 100)) : 0;
+      return '<div class="wz-type' + (t.slug === wizard.pickedType ? ' selected' : '') + '" data-type="' + escapeHtml(t.slug) + '">'
+        + '<span class="wz-type-check">&#10003;</span>'
+        + '<div class="wz-type-head"><b>' + escapeHtml(t.value) + '</b>' + (i === 0 ? ' <span class="wz-type-tag">most common</span>' : '') + '</div>'
+        + '<div class="wz-type-share"><span class="wz-share-bar"><span style="width:' + share + '%"></span></span>'
+        + '<span class="wz-type-count">' + (t.count || 0).toLocaleString() + ' decks' + (share ? ' &middot; ' + share + '%' : '') + '</span></div>'
+        + (fan ? '<div class="wz-fan">' + fan + '</div>' : '')
+        + (names.length ? '<div class="wz-type-own">You own <b>' + ownedCount + '</b> of its top ' + names.length + ' cards</div>' : '')
+        + (t.avg_creatures != null ? '<div class="wz-type-stats">avg ' + num(t.avg_creatures) + ' creatures &middot; ' + num(t.avg_planeswalkers) + ' planeswalkers</div>' : '')
+        + '</div>';
+    }}).join('') + '</div>';
   wizardBody.innerHTML = html;
   setWizardFooter({{ back: false, next: true, nextLabel: 'Continue →', accept: false, status: '' }});
 }}
@@ -5510,7 +5537,8 @@ def builder_deck_types():
                 "avg_planeswalkers": page.get("avg_planeswalkers"),
                 "avg_creatures": page.get("avg_creatures"),
                 "num_decks": page.get("num_decks"),
-                "top_cards": [c["name"] for c in cards[:5]],
+                "top_cards": [c["name"] for c in cards[:6]],
+                "top_card_ids": [(gameplay_data_in_index().get(normalize_name(c["name"])) or {}).get("scryfall_id") for c in cards[:6]],
             }
 
         with ThreadPoolExecutor(max_workers=6) as pool:
