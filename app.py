@@ -119,11 +119,14 @@ def load_project(deck_id: str) -> dict:
         return {}
 
 
-def save_project(deck_id: str, **fields) -> None:
+def save_project(deck_id: str, _touch: bool = True, **fields) -> None:
+    """Writes a project's fields; `_touch=False` leaves its "updated" time alone (background fill-ins that
+    shouldn't move a deck up the Recent list)."""
     project = load_project(deck_id)
     project.update(fields)
     project["deck_id"] = deck_id
-    project["updated"] = datetime.now(timezone.utc).isoformat()
+    if _touch or not project.get("updated"):
+        project["updated"] = datetime.now(timezone.utc).isoformat()
     with open(_project_path(deck_id), "w", encoding="utf-8") as f:
         json.dump(project, f, indent=2)
 
@@ -192,6 +195,15 @@ def _check_for_updates_on_launch() -> None:
         STARTUP_UPDATE.update(checked=True, **result)
 
 
+def _commander_summary(entries) -> dict | None:
+    """The deck's commander as the Decks page tile needs it (name, art id, colour identity), from a list of CardEntry."""
+    cmd = next((e for e in entries if e.section == "commander"), None)
+    if not cmd:
+        return None
+    row = gameplay_data_in_index().get(normalize_name(cmd.name)) or {}
+    return {"name": cmd.name, "scryfall_id": row.get("scryfall_id"), "color_identity": row.get("color_identity") or []}
+
+
 def _run_compare_job(job_id, entries, owned, break_out_basics, reserved,
                       deck_id, deck_name, deck_url, options, is_commander_format=False, stores=None):
     def _on_progress(done, total, stage=None):
@@ -207,7 +219,8 @@ def _run_compare_job(job_id, entries, owned, break_out_basics, reserved,
             entries, owned, ignore_basics=not break_out_basics, overrides=reserved,
             on_progress=_on_progress, is_commander_format=is_commander_format, stores=stores,
         )
-        save_project(deck_id, deck_name=deck_name, deck_url=deck_url, options=options, reserved=reserved)
+        save_project(deck_id, deck_name=deck_name, deck_url=deck_url, options=options, reserved=reserved,
+                     commander=_commander_summary(entries) or load_project(deck_id).get("commander"))
         html_report = render_html(
             deck_name, deck_url, deck_id, bucket_names, buckets, totals,
             overrides_endpoint=f"/api/overrides/{deck_id}",
@@ -404,6 +417,9 @@ input[type="text"], input[type="url"], input[type="file"] {
 .deck-tile.new-deck .s { font-size: 0.78rem; color: var(--text-dim); }
 .deck-tile.compare-deck .deck-art { height: 116px; }
 .compare-wrap { max-width: 680px; }
+#compare-form.flash { animation: form-flash 1.2s ease; }
+@keyframes form-flash { 0%, 60% { box-shadow: 0 0 0 2px var(--gold), 0 0 24px -4px var(--gold); } 100% { box-shadow: var(--shadow); } }
+@media (prefers-reduced-motion: reduce) { #compare-form.flash { animation: none; } }
 .ai-disclosure { display: flex; justify-content: center; align-items: center; gap: 14px; margin-top: 32px; }
 .ai-disclosure img { height: 24px; width: auto; display: block; }
 """
@@ -804,13 +820,21 @@ def render_decks_page(error: str | None = None, prefill_url: str = "") -> str:
             f'data-deck-id="{_esc(deck_id)}" data-deck-name="{_esc(raw_name)}" title="Delete this deck">&times;</button>'
         )
         if not is_brew:
+            commander = p.get("commander") or {}
+            colors = [c for c in "WUBRG" if c in (commander.get("color_identity") or [])] or ["C"]
+            cid = commander.get("scryfall_id") or ""
+            art = (f"https://cards.scryfall.io/art_crop/front/{cid[0]}/{cid[1]}/{cid}.jpg" if len(cid) > 2 else "")
+            art_style = f"background-image:url('{art}');" if art else ""
+            stripe = "".join(f'<span style="background:{_MANA_COLORS[c]}"></span>' for c in colors) if commander else '<span style="background:var(--card-border)"></span>'
+            pips = "".join(f'<img src="/static/mana/{c}.svg" alt="{c}">' for c in colors) if commander else ""
+            glow = _MANA_COLORS[colors[len(colors) // 2]] if commander else "var(--gold)"
             return (
-                '<li class="deck-tile compare-deck">'
-                f'<a href="#" class="deck-link recent-deck-link" data-type="compare" data-url="{_esc(p.get("deck_url", deck_id))}">'
-                '<div class="deck-art"><div class="no-art">&#10070;</div></div><div class="deck-stripe"><span style="background:var(--card-border)"></span></div>'
+                f'<li class="deck-tile compare-deck" data-deck-id="{_esc(deck_id)}" data-need-art="{"" if art else "1"}" style="--tile-glow:{glow}">'
+                f'<a href="#" class="deck-link recent-deck-link" data-type="compare" data-url="{_esc(p.get("deck_url", deck_id))}" title="Loads this deck into the Compare form below">'
+                f'<div class="deck-art" style="{art_style}">{"" if art else "<div class=no-art>&#10070;</div>"}</div><div class="deck-stripe">{stripe}</div>'
                 f'<div class="deck-body"><div class="deck-commander">{_esc(raw_name)}</div>'
-                '<div class="deck-name">Comparison</div>'
-                f'<div class="deck-foot"><span class="sep">{when}</span></div></div></a>{delete_btn}</li>'
+                f'<div class="deck-name">{_esc(commander.get("name") or "Comparison") if commander else "Comparison"} &middot; opens in the Compare form</div>'
+                f'<div class="deck-foot"><span class="pips">{pips}</span><span class="sep">{when}</span></div></div></a>{delete_btn}</li>'
             )
         commander = p.get("commander") or {}
         colors = [c for c in "WUBRG" if c in (commander.get("color_identity") or [])] or ["C"]
@@ -927,10 +951,34 @@ document.querySelectorAll('.recent-deck-link').forEach(link => {{
   link.addEventListener('click', (e) => {{
     if (link.dataset.type === 'brew') return; // real navigation to /builder?id=...
     e.preventDefault();
+    // A comparison isn't a saved deck to open: it fills the Compare form below, which then needs Compare pressed.
     moxfieldUrlInput.value = link.dataset.url;
-    moxfieldUrlInput.focus();
+    form.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
+    form.classList.remove('flash'); void form.offsetWidth; form.classList.add('flash');
+    submitBtn.focus({{ preventScroll: true }});
   }});
 }});
+
+// Comparisons made before the tiles had art don't know their commander yet: ask once, one at a time, and fill in the tile.
+(async () => {{
+  for (const tile of document.querySelectorAll('.deck-tile.compare-deck[data-need-art="1"]')) {{
+    try {{
+      const r = await fetch('/project/commander', {{ method: 'POST', headers: {{ 'Content-Type': 'application/json' }}, body: JSON.stringify({{ deck_id: tile.dataset.deckId }}) }});
+      const c = (await r.json()).commander;
+      if (!c || !c.scryfall_id) continue;
+      const id = c.scryfall_id, colors = ['W', 'U', 'B', 'R', 'G'].filter(x => (c.color_identity || []).includes(x));
+      const used = colors.length ? colors : ['C'];
+      const HEX = {{ W: '#e8dfb8', U: '#4a90c8', B: '#6b5a7a', R: '#d1553a', G: '#4f9a5a', C: '#9b9689' }};
+      const art = tile.querySelector('.deck-art');
+      art.style.backgroundImage = `url('https://cards.scryfall.io/art_crop/front/${{id[0]}}/${{id[1]}}/${{id}}.jpg')`;
+      art.innerHTML = '';
+      tile.querySelector('.deck-stripe').innerHTML = used.map(x => `<span style="background:${{HEX[x]}}"></span>`).join('');
+      tile.querySelector('.pips').innerHTML = used.map(x => `<img src="/static/mana/${{x}}.svg" alt="${{x}}">`).join('');
+      tile.querySelector('.deck-name').innerHTML = (c.name || 'Comparison').replace(/</g, '&lt;') + ' &middot; opens in the Compare form';
+      tile.style.setProperty('--tile-glow', HEX[used[Math.floor(used.length / 2)]]);
+    }} catch (e) {{ /* offline: the tile stays plain */ }}
+  }}
+}})();
 
 document.querySelectorAll('.delete-deck-btn').forEach(btn => {{
   btn.addEventListener('click', () => {{
@@ -5507,6 +5555,33 @@ def collection_upload():
     with open(COLLECTION_META_PATH, "w", encoding="utf-8") as f:
         json.dump(meta, f)
     return jsonify(ok=True, **meta)
+
+
+@app.route("/project/commander", methods=["POST"])
+def project_commander():
+    """Fills in the commander of a saved comparison made before its tile showed art (asks Moxfield/Archidekt once,
+    then keeps the answer with the project). A failed lookup is not retried for a day."""
+    body = request.get_json(silent=True) or {}
+    deck_id = body.get("deck_id") or ""
+    project = load_project(deck_id)
+    if not project or project.get("type") == "brew":
+        return jsonify(commander=None)
+    if project.get("commander"):
+        return jsonify(commander=project["commander"])
+    failed = project.get("commander_lookup_failed") or 0
+    if time.time() - failed < 86400:
+        return jsonify(commander=None)
+    try:
+        source, ref = parse_deck_ref(project.get("deck_url") or deck_id)
+        deck = fetch_deck(source, ref)
+        commander = _commander_summary(extract_entries(source, deck, False, False))
+    except Exception:  # noqa: BLE001 -- offline, deleted deck, site changed: the tile just stays plain
+        commander = None
+    if commander:
+        save_project(deck_id, _touch=False, commander=commander)
+    else:
+        save_project(deck_id, _touch=False, commander_lookup_failed=time.time())
+    return jsonify(commander=commander)
 
 
 @app.route("/project/delete", methods=["POST"])
