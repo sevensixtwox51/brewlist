@@ -1626,6 +1626,34 @@ body.gallery .builder-tile.in-deck::after { content:"\2713"; position:absolute; 
 @media (prefers-reduced-motion: reduce) { .brewing .brew-pips img { animation:none; opacity:.9; } .builder-tile .card-thumb, .color-pip { transition:none; } }
 .btn:active:not(:disabled) { transform:translateY(1px); }
 .btn.ghost:hover { background:color-mix(in srgb, var(--accent) 9%, transparent); }
+/* ---- Analyze modal: wide, two-column panels under a commander banner ---- */
+#analyze-modal .modal-box { max-width:min(1240px, 96vw); max-height:92vh; }
+#analyze-modal .modal-body { padding:16px 20px 20px; }
+.an-hero { position:relative; overflow:hidden; border-radius:12px; border:1px solid var(--card-border); min-height:96px; margin-bottom:12px; background:var(--bg) var(--hero-art, none) center 22% / cover; }
+.an-hero:empty { display:none; }
+.an-hero::before { content:""; position:absolute; inset:0; background:linear-gradient(90deg, color-mix(in srgb, var(--bg) 94%, transparent) 28%, color-mix(in srgb, var(--bg) 25%, transparent)); }
+.an-hero > * { position:relative; }
+.an-hero-text { padding:16px 18px; }
+.an-hero-label { font-size:0.66rem; text-transform:uppercase; letter-spacing:0.12em; color:var(--accent); }
+.an-hero-name { font-family:var(--serif); font-size:1.7rem; font-weight:600; line-height:1.1; margin:3px 0 8px; }
+.an-hero .mana-icon { width:20px; height:20px; }
+.an-hero-stripe { position:absolute; left:0; right:0; bottom:0; height:4px; display:flex; }
+.an-hero-stripe span { flex:1; }
+#analyze-badges { margin-bottom:14px; }
+.an-panel { background:var(--card-bg); border:1px solid var(--card-border); border-radius:12px; padding:14px 16px 16px; margin-bottom:16px; }
+.an-panel:has(> h4[style*="none"]) { display:none; }
+.an-panel > h4.analysis-heading, .an-panel > h4.analysis-heading:first-child { margin:0 0 12px; padding-bottom:7px; border-bottom:1px solid var(--card-border); font-family:var(--serif); font-size:1.1rem; font-weight:600; color:var(--accent); letter-spacing:0.01em; }
+.an-grid { columns:2 440px; column-gap:16px; }
+.an-grid > .an-panel { break-inside:avoid; }
+#analyze-modal #pitch-block { display:grid !important; grid-template-columns:1fr 1fr; gap:4px 20px; align-items:start; }
+#analyze-modal #pitch-block > :nth-child(-n+3) { grid-column:1; }
+#analyze-modal #pitch-block > :nth-child(n+4) { grid-column:2; }
+#analyze-modal #pitch-block > :nth-child(1), #analyze-modal #pitch-block > :nth-child(4) { grid-row:1; margin-top:0 !important; }
+#analyze-modal #pitch-block > :nth-child(2), #analyze-modal #pitch-block > :nth-child(5) { grid-row:2; }
+#analyze-modal #pitch-block > :nth-child(3) { grid-row:3; }
+#analyze-modal #rule0-list { columns:2 340px; column-gap:24px; margin-top:6px; }
+#analyze-modal #rule0-list li { break-inside:avoid; }
+@media (max-width: 900px) { .an-grid { columns:1; } #analyze-modal #pitch-block { display:block !important; } }
 """
 
 COLOR_LABELS = {"W": "White", "U": "Blue", "B": "Black", "R": "Red", "G": "Green"}
@@ -1879,24 +1907,26 @@ def render_builder_page(deck_id: str | None = None) -> str:
     </div>
     <div class="modal-body">
       <div id="analyze-busy" role="status" aria-live="polite"><span class="analyze-spinner"></span><span id="analyze-busy-text"></span></div>
+      <div class="an-hero" id="analyze-hero"></div>
       <div id="analyze-badges"></div>
-      <div id="ai-summary-block" style="display:none;">
+      <div id="ai-summary-block" class="an-panel" style="display:none;">
         <h4 class="analysis-heading">&#10024; AI Summary</h4>
         <p class="hint" id="ai-summary-text" style="margin:0 0 12px;"></p>
       </div>
-      <div id="further-optimizations-block" style="display:none;">
+      <div id="further-optimizations-block" class="an-panel" style="display:none;">
         <h4 class="analysis-heading">&#10003; Optimizations applied
           <button type="button" class="btn ghost small" id="further-optimizations-clear" style="margin-left:8px;" title="Clear this list (the cards stay in the deck)">Clear</button>
         </h4>
         <p class="hint" style="margin:0 0 4px;">Swaps you applied from Optimize Deck &mdash; already done, nothing left to do.</p>
         <ul class="rule0-list" id="further-optimizations-list"></ul>
       </div>
-      <div id="maybeboard-block" style="display:none;">
+      <div id="maybeboard-block" class="an-panel" style="display:none;">
         <h4 class="analysis-heading">&#128064; Maybeboard</h4>
         <p class="hint" style="margin:0 0 8px;">Candidates the AI found but wasn't confident enough to commit as a direct swap -- not part of the deck.</p>
         <div id="maybeboard-list"></div>
       </div>
 
+      <section class="an-panel an-rule0">
       <h4 class="analysis-heading">Rule 0 summary</h4>
       <div id="pitch-block" style="margin:0 0 12px;">
         <label for="rule0-pitch" class="hint" style="margin:0 0 4px;display:block;">Your pitch &mdash; what you'd say at the table. Saved with the deck; shown on the battle card and in the report.</label>
@@ -1910,23 +1940,36 @@ def render_builder_page(deck_id: str | None = None) -> str:
         <textarea id="rule0-house-rules" rows="2" placeholder="e.g. &ldquo;Happy to skip extra turns. Please don't Rhystic me on turn 1.&rdquo;" style="width:100%;box-sizing:border-box;padding:8px 10px;border-radius:8px;border:1px solid var(--card-border);background:var(--bg);color:var(--text);font:inherit;font-size:0.85rem;line-height:1.45;resize:vertical;"></textarea>
       </div>
       <ul class="rule0-list" id="rule0-list"></ul>
+      </section>
+      <div class="an-grid">
 
+      <section class="an-panel">
       <h4 class="analysis-heading">&#9878;&#65039; Deck Shape</h4>
       <p class="hint" style="margin:0 0 8px;">Actual card counts against your Deck mix targets (the template you picked; Command Zone by default) &mdash; guidelines, not hard walls.</p>
       <div id="deck-shape-breakdown"></div>
 
+      </section>
+      <section class="an-panel">
       <h4 class="analysis-heading" id="synergy-heading" style="display:none;">&#129513; Synergy Packages</h4>
       <div id="synergy-packages"></div>
 
+      </section>
+      <section class="an-panel">
       <h4 class="analysis-heading" id="mana-sim-heading" style="display:none;">&#127922; Mana Simulation</h4>
       <div id="mana-sim"></div>
 
+      </section>
+      <section class="an-panel">
       <h4 class="analysis-heading" id="turn-clock-heading" style="display:none;">&#9201;&#65039; Turn Clock</h4>
       <div id="turn-clock"></div>
 
+      </section>
+      <section class="an-panel">
       <h4 class="analysis-heading" id="resilience-heading" style="display:none;">&#128737;&#65039; Resilience</h4>
       <div id="resilience"></div>
 
+      </section>
+      <section class="an-panel">
       <h4 class="analysis-heading">&#128202; Mana Curve &amp; Colors</h4>
       <div class="analysis-stat-line" id="analysis-stat-line"></div>
       <div class="curve-chart" id="curve-chart"></div>
@@ -1936,13 +1979,19 @@ def render_builder_page(deck_id: str | None = None) -> str:
       </div>
       <div class="color-breakdown" id="color-breakdown"></div>
 
+      </section>
+      <section class="an-panel">
       <h4 class="analysis-heading">&#127183; Sample Opening Hand</h4>
       <div class="analysis-stat-line" id="sample-hand-stat"></div>
       <button type="button" class="btn ghost small" id="draw-hand-btn">Draw / Deal Another Hand</button>
       <div class="sample-hand-cards" id="sample-hand-cards"></div>
 
+      </section>
+      <section class="an-panel">
       <h4 class="analysis-heading">&#128279; Combo Reference</h4>
       <div id="combo-reference"></div>
+      </section>
+      </div>
     </div>
     <div class="modal-footer">
       <button type="button" class="btn ghost small" id="print-battle-card-btn">&#128424; Print Battle Card</button>
@@ -4718,6 +4767,15 @@ analyzeBtn.addEventListener('click', () => {{
   lastPitchDraft = '';
   analyzeModal.classList.add('show');
   document.getElementById('analyze-modal-title').textContent = brew.deck_name || document.getElementById('deck-name').value || 'Analyze Deck';
+  const hero = document.getElementById('analyze-hero');
+  if (brew.format === 'commander' && brew.commander) {{
+    const art = scryfallImg(brew.commander.scryfall_id, 'art_crop');
+    hero.style.setProperty('--hero-art', art ? `url('${{art}}')` : 'none');
+    hero.innerHTML = `<div class="an-hero-text"><div class="an-hero-label">Commander</div><div class="an-hero-name">${{escapeHtml(brew.commander.name)}}</div>${{colorIconsHtml(brew.commander.color_identity)}}</div>`
+      + `<div class="an-hero-stripe">${{identityColors(brew.commander.color_identity).map(c => `<span style="background:${{MANA_HEX[c]}}"></span>`).join('')}}</div>`;
+  }} else {{
+    hero.innerHTML = '';
+  }}
   document.getElementById('ai-summary-block').style.display = brew.ai_summary ? 'block' : 'none';
   document.getElementById('ai-summary-text').textContent = brew.ai_summary || '';
   document.getElementById('further-optimizations-clear').onclick = () => {{
