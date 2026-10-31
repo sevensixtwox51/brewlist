@@ -430,7 +430,8 @@ input[type="text"], input[type="url"], input[type="file"] {
 .kf-btn:hover { color: var(--text); }
 .kf-btn.active { background: color-mix(in srgb, var(--gold) 16%, transparent); color: var(--accent); font-weight: 600; }
 .kf-btn.compare.active { background: color-mix(in srgb, var(--series-a) 18%, transparent); color: var(--series-a); }
-.deck-tile.kind-hidden { display: none; }
+.deck-tile.kind-hidden, .deck-tile.more-hidden { display: none; }
+.show-more { text-align: center; margin: -10px 0 30px; }
 .compare-panel { background: var(--bg-elevated); border: 1px solid var(--card-border); border-top: 3px solid var(--gold); border-radius: 14px; padding: 18px 22px 16px; margin: 0 0 30px; box-shadow: var(--shadow); }
 .compare-title h2 { font-family: var(--serif); font-weight: 600; font-size: 1.25rem; margin: 0 0 2px; }
 .compare-title p { margin: 0 0 14px; color: var(--text-dim); font-size: 0.85rem; }
@@ -901,17 +902,24 @@ def render_decks_page(error: str | None = None, prefill_url: str = "") -> str:
         '<li class="deck-tile new-deck"><a href="/builder" class="deck-link">'
         '<span class="plus">&#43;</span><span class="t">Brew something new</span><span class="s">Pick a commander to begin</span></a></li>'
     )
-    items = "".join(_project_item(p) for p in projects[:24])
-    n_brews = sum(1 for p in projects[:24] if p.get("type") == "brew")
-    n_compare = len(projects[:24]) - n_brews
+    shown_first = 24
+    # Every saved deck gets a tile; the ones past the first page start hidden behind "Show more".
+    items = "".join(
+        _project_item(p).replace('<li class="deck-tile', '<li class="deck-tile more-hidden', 1) if i >= shown_first else _project_item(p)
+        for i, p in enumerate(projects)
+    )
+    n_more = max(0, len(projects) - shown_first)
+    n_brews = sum(1 for p in projects if p.get("type") == "brew")
+    n_compare = len(projects) - n_brews
     projects_html = (
         '<div class="section-head"><h2>Your decks</h2>'
         '<div class="kind-filter" id="kind-filter" role="group" aria-label="Show">'
-        f'<button type="button" class="kf-btn active" data-kind="all">All <span>{len(projects[:24])}</span></button>'
+        f'<button type="button" class="kf-btn active" data-kind="all">All <span>{len(projects)}</span></button>'
         f'<button type="button" class="kf-btn" data-kind="brew">&#9874; Brews <span>{n_brews}</span></button>'
         f'<button type="button" class="kf-btn compare" data-kind="compare">&#8644; Comparisons <span>{n_compare}</span></button>'
         f'</div><span class="hint-inline">{len(projects)} saved</span></div>'
         f'<ul class="deck-grid">{new_tile}{items}</ul>'
+        + (f'<div class="show-more"><button type="button" class="btn ghost" id="show-more-btn">Show {n_more} more deck{"s" if n_more != 1 else ""}</button></div>' if n_more else "")
     )
 
     selected_stores = set(load_store_prefs())
@@ -1020,19 +1028,15 @@ document.querySelectorAll('.recent-deck-link').forEach(link => {{
   }});
 }});
 
-// All / Brews / Comparisons: shows one kind of deck tile (the "Brew something new" tile always stays). Remembered.
-const kindFilter = document.getElementById('kind-filter');
-function setKindFilter(kind) {{
-  kindFilter.querySelectorAll('.kf-btn').forEach(b => b.classList.toggle('active', b.dataset.kind === kind));
-  document.querySelectorAll('.deck-tile[data-kind]').forEach(t => t.classList.toggle('kind-hidden', kind !== 'all' && t.dataset.kind !== kind));
-  try {{ localStorage.setItem('brewlist-deck-kind', kind); }} catch (e) {{}}
-}}
-kindFilter.addEventListener('click', (e) => {{ const b = e.target.closest('.kf-btn'); if (b) setKindFilter(b.dataset.kind); }});
-try {{ const k = localStorage.getItem('brewlist-deck-kind'); if (k && ['all', 'brew', 'compare'].includes(k)) setKindFilter(k); }} catch (e) {{}}
-
 // Comparisons made before the tiles had art don't know their commander yet: ask once, one at a time, and fill in the tile.
-(async () => {{
-  for (const tile of document.querySelectorAll('.deck-tile.compare-deck[data-need-art="1"]')) {{
+// Only visible tiles are asked about (the rest wait for "Show more").
+let artFillRunning = false;
+async function fillMissingArt() {{
+  if (artFillRunning) return;
+  artFillRunning = true;
+  for (const tile of document.querySelectorAll('.deck-tile.compare-deck[data-need-art="1"]:not(.more-hidden)')) {{
+    if (tile.dataset.artChecked) continue;
+    tile.dataset.artChecked = '1';
     try {{
       const r = await fetch('/project/commander', {{ method: 'POST', headers: {{ 'Content-Type': 'application/json' }}, body: JSON.stringify({{ deck_id: tile.dataset.deckId }}) }});
       const c = (await r.json()).commander;
@@ -1042,14 +1046,37 @@ try {{ const k = localStorage.getItem('brewlist-deck-kind'); if (k && ['all', 'b
       const HEX = {{ W: '#e8dfb8', U: '#4a90c8', B: '#6b5a7a', R: '#d1553a', G: '#4f9a5a', C: '#9b9689' }};
       const art = tile.querySelector('.deck-art');
       art.style.backgroundImage = `url('https://cards.scryfall.io/art_crop/front/${{id[0]}}/${{id[1]}}/${{id}}.jpg')`;
-      art.innerHTML = '';
+      art.querySelectorAll('.no-art').forEach(n => n.remove());
       tile.querySelector('.deck-stripe').innerHTML = used.map(x => `<span style="background:${{HEX[x]}}"></span>`).join('');
       tile.querySelector('.pips').innerHTML = used.map(x => `<img src="/static/mana/${{x}}.svg" alt="${{x}}">`).join('');
       tile.querySelector('.deck-name').innerHTML = (tile.dataset.source || 'Moxfield') + ' deck &middot; ' + (c.name || '').replace(/</g, '&lt;');
       tile.style.setProperty('--tile-glow', HEX[used[Math.floor(used.length / 2)]]);
     }} catch (e) {{ /* offline: the tile stays plain */ }}
   }}
-}})();
+  artFillRunning = false;
+}}
+fillMissingArt();
+
+function revealAllDecks() {{
+  document.querySelectorAll('.deck-tile.more-hidden').forEach(t => t.classList.remove('more-hidden'));
+  const more = document.querySelector('.show-more');
+  if (more) more.remove();
+  fillMissingArt();
+}}
+const showMoreBtn = document.getElementById('show-more-btn');
+if (showMoreBtn) showMoreBtn.addEventListener('click', revealAllDecks);
+
+// All / Brews / Comparisons: shows one kind of deck tile (the "Brew something new" tile always stays). Remembered.
+const kindFilter = document.getElementById('kind-filter');
+function setKindFilter(kind) {{
+  kindFilter.querySelectorAll('.kf-btn').forEach(b => b.classList.toggle('active', b.dataset.kind === kind));
+  document.querySelectorAll('.deck-tile[data-kind]').forEach(t => t.classList.toggle('kind-hidden', kind !== 'all' && t.dataset.kind !== kind));
+  if (kind !== 'all') revealAllDecks();   // asking for one kind means all of it, not just the first page
+  try {{ localStorage.setItem('brewlist-deck-kind', kind); }} catch (e) {{}}
+}}
+kindFilter.addEventListener('click', (e) => {{ const b = e.target.closest('.kf-btn'); if (b) setKindFilter(b.dataset.kind); }});
+try {{ const k = localStorage.getItem('brewlist-deck-kind'); if (k && ['all', 'brew', 'compare'].includes(k)) setKindFilter(k); }} catch (e) {{}}
+
 
 document.querySelectorAll('.delete-deck-btn').forEach(btn => {{
   btn.addEventListener('click', () => {{
