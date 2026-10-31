@@ -3422,6 +3422,66 @@ footer {{
   margin-top: 12px;
   justify-content: flex-end;
 }}
+
+/* ---- Report restyle: hero + stat tiles, richer card tiles, gallery view, colour pips, analysis panels ---- */
+.hero {{ max-width: 1100px; margin: 0 auto; padding: 18px 24px 0; }}
+.hero-banner {{ position: relative; overflow: hidden; border-radius: 14px; border: 1px solid var(--card-border); min-height: 104px; margin-bottom: 14px; background: var(--bg-elevated) var(--hero-art, none) center 22% / cover; }}
+.hero-banner::before {{ content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, color-mix(in srgb, var(--bg) 94%, transparent) 28%, color-mix(in srgb, var(--bg) 22%, transparent)); }}
+.hero-banner > * {{ position: relative; }}
+.hero-text {{ padding: 16px 20px; }}
+.hero-label {{ font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.12em; color: var(--accent); }}
+.hero-name {{ font-family: var(--serif); font-size: 1.9rem; font-weight: 600; line-height: 1.1; margin: 3px 0 8px; }}
+.hero-banner .mana-icon {{ width: 20px; height: 20px; }}
+.hero-stripe {{ position: absolute; left: 0; right: 0; bottom: 0; height: 4px; display: flex; }}
+.hero-stripe span {{ flex: 1; }}
+.stat-tiles {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }}
+.stat-tile {{ background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 12px 14px 13px; box-shadow: var(--shadow); min-width: 0; }}
+.stat-tile .stat-value {{ font-family: var(--serif); font-size: 2.1rem; font-weight: 600; line-height: 1.05; font-variant-numeric: tabular-nums; }}
+.stat-tile.owned .stat-value {{ color: var(--owned); }}
+.stat-tile.missing .stat-value {{ color: var(--missing); }}
+.stat-tile.cost .stat-value {{ color: var(--gold); }}
+.stat-tile.value .stat-value, .stat-tile.completion .stat-value {{ color: var(--accent); }}
+.stat-tile.value {{ cursor: pointer; transition: transform .15s ease, border-color .15s ease; }}
+.stat-tile.value:hover {{ transform: translateY(-2px); border-color: var(--accent); }}
+.stat-tile .stat-label {{ margin-top: 5px; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-dim); }}
+.stat-tile .stat-sub {{ margin-top: 2px; font-size: 0.74rem; color: var(--text-dim); }}
+.stat-tile .progress {{ margin-top: 8px; }}
+.hero-badges {{ display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; margin-top: 14px; }}
+.color-pips {{ display: inline-flex; align-items: center; gap: 3px; }}
+.color-pip {{ width: 30px; height: 30px; padding: 0; border-radius: 50%; border: 2px solid transparent; background: none; cursor: pointer; opacity: 0.45; display: flex; align-items: center; justify-content: center; transition: opacity .12s ease, transform .12s ease, border-color .12s ease; }}
+.color-pip img {{ width: 24px; height: 24px; display: block; }}
+.color-pip:hover {{ opacity: 0.85; transform: translateY(-1px); }}
+.color-pip.on {{ opacity: 1; border-color: var(--accent); box-shadow: 0 0 10px -2px var(--accent); }}
+.card {{ transition: transform .15s ease, box-shadow .15s ease; }}
+.card:hover {{ transform: translateY(-2px); box-shadow: 0 8px 22px rgba(0,0,0,0.4); }}
+body:not(.compact):not(.gallery) .card .card-thumb {{ width: 62px; height: 86px; border-radius: 4.75% / 3.4%; box-shadow: 0 3px 10px rgba(0,0,0,0.45); transition: transform .18s ease, box-shadow .18s ease; }}
+body:not(.compact):not(.gallery) .card:hover .card-thumb {{ transform: scale(1.06); box-shadow: 0 8px 18px rgba(0,0,0,0.55); }}
+.card-name {{ font-family: var(--serif); font-size: 1rem; }}
+.card.missing .qty {{ color: var(--missing); }}
+.card .override-toggle {{ position: absolute; top: 6px; right: 8px; z-index: 3; width: auto; margin: 0; padding: 2px 9px; border: 1px solid var(--card-border); border-radius: 999px; background: var(--bg-elevated); opacity: 0; transition: opacity .15s ease; }}
+.card:hover .override-toggle, .card .override-toggle:focus-within, .card .override-toggle:has(input:checked) {{ opacity: 1; }}
+@media (hover: none) {{ .card .override-toggle {{ opacity: 1; }} }}
+body.gallery .grid {{ grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 18px 14px; padding: 10px 16px 18px; }}
+body.gallery .card {{ padding: 0; gap: 0; background: none; box-shadow: none; border-left: none; border-radius: 0; }}
+body.gallery .card:hover {{ box-shadow: none; }}
+body.gallery .card-main {{ display: block; }}
+body.gallery .thumb-wrap {{ display: block; }}
+body.gallery .card .card-thumb {{ display: block; width: 100%; height: auto; aspect-ratio: 488 / 680; border-radius: 4.75% / 3.4%; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }}
+body.gallery .card:hover .card-thumb {{ transform: translateY(-4px) scale(1.04); box-shadow: 0 14px 26px rgba(0,0,0,0.55), 0 0 0 2px var(--accent); }}
+body.gallery .card.missing .card-thumb {{ outline: 2px solid var(--missing); outline-offset: -2px; filter: saturate(0.75); }}
+body.gallery .card-body {{ position: absolute; left: 0; right: 0; bottom: 0; padding: 36px 9px 9px; border-radius: 0 0 5% 5% / 0 0 3.6% 3.6%; background: linear-gradient(transparent, rgba(0,0,0,0.92)); color: #fff; opacity: 0; transition: opacity .15s ease; flex-direction: column; align-items: stretch; gap: 6px; pointer-events: none; }}
+body.gallery .card:hover .card-body {{ opacity: 1; pointer-events: auto; transform: translateY(-4px) scale(1.04); transform-origin: bottom center; }}
+body.gallery .card-name {{ font-size: 0.82rem; }}
+body.gallery .qty {{ color: #d8d0c0; margin: 2px 0 0; font-size: 0.72rem; }}
+body.gallery .card.missing .qty {{ color: #ffb4a8; }}
+body.gallery .color-icons, body.gallery .mana-cost-pips, body.gallery .budget-alt-note, body.gallery .commander-sticker {{ display: none; }}
+body.gallery .card-prices {{ align-items: stretch; max-width: none; }}
+.an-panel {{ background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 14px 16px 16px; }}
+.an-panel > h4 {{ margin: 0 0 12px; padding-bottom: 7px; border-bottom: 1px solid var(--card-border); font-family: var(--serif); font-size: 1.05rem; font-weight: 600; color: var(--accent); }}
+.deck-analysis-body {{ grid-template-columns: 1fr; }}
+@media (min-width: 900px) {{ .deck-analysis-body {{ grid-template-columns: 1fr 1fr; }} .deck-analysis-body > .span-all, .deck-analysis-body > .ai-summary-note {{ grid-column: 1 / -1; }} }}
+.sample-hand.an-panel {{ grid-column: 1 / -1; }}
+details.combos-panel > summary {{ font-family: var(--serif); font-size: 1.08rem; }}
 </style>
 </head>
 <body{body_attrs}>
@@ -3434,29 +3494,17 @@ footer {{
     </div>
     {header_actions_html}
   </div>
-  <div class="stats">
-    <div class="stat owned">Owned <b id="stat-owned">{owned}</b></div>
-    <div class="stat missing">Missing <b id="stat-missing">{missing}</b></div>
-    <div class="stat cost">Est. cost to complete <b id="stat-cost-nonfoil">${cost_nonfoil:.2f}</b> non-foil &nbsp;/&nbsp; <b id="stat-cost-foil">${cost_foil:.2f}</b> foil</div>
-    <div class="stat value" id="deck-value-stat" title="Click for a per-card breakdown">Total deck value (today's market) <b id="stat-deck-value">${deck_value:.2f}</b> &nbsp;<span class="stat-sub">owned portion <span id="stat-owned-value">${owned_value:.2f}</span></span></div>
-    {game_changers_html}
-    {legality_html}
-    {bracket_tag_html}
-    {wotc_bracket_html}
-    <div class="progress-labeled" title="Share of this deck you already own">
-      <span class="progress-label">Deck completion <b id="progress-pct">{pct:.0f}%</b></span>
-      <div class="progress"><div id="progress-bar" style="width:{pct:.1f}%"></div></div>
-    </div>
-  </div>
   <div class="controls">
     <input id="search" type="search" placeholder="Filter cards by name...">
+    <span class="color-pips" id="color-pips" title="Click colors to show only cards of those colors; click again to clear">{color_pips_html}</span>
     <label class="toggle"><input type="checkbox" id="missing-only"> Show only missing</label>
     <div class="segmented" id="price-finish-toggle" title="Switches the buy links on missing cards between foil and non-foil pricing">
       <button type="button" class="seg-btn active" data-value="nonfoil">Non-foil</button>
       <button type="button" class="seg-btn" data-value="foil">Foil</button>
     </div>
-    <div class="segmented" id="view-density-toggle" title="Switches between full card tiles and a compact text list with mana-cost pips">
+    <div class="segmented" id="view-density-toggle" title="Switches between card tiles, a gallery of card images, and a compact text list with mana-cost pips">
       <button type="button" class="seg-btn active" data-value="cards">Cards</button>
+      <button type="button" class="seg-btn" data-value="gallery">Gallery</button>
       <button type="button" class="seg-btn" data-value="compact">Compact</button>
     </div>
     <div class="price-filter" title="Hide missing cards above this price (uses whichever finish is currently shown)">
@@ -3470,6 +3518,22 @@ footer {{
     {cheapest_pricing_html}
   </div>
 </header>
+<section class="hero">
+  {hero_banner_html}
+  <div class="stat-tiles">
+    <div class="stat-tile owned"><div class="stat-value" id="stat-owned">{owned}</div><div class="stat-label">Owned</div></div>
+    <div class="stat-tile missing"><div class="stat-value" id="stat-missing">{missing}</div><div class="stat-label">Missing</div></div>
+    <div class="stat-tile cost"><div class="stat-value" id="stat-cost-nonfoil">${cost_nonfoil:.2f}</div><div class="stat-label">To complete</div><div class="stat-sub">non-foil &middot; <span id="stat-cost-foil">${cost_foil:.2f}</span> foil</div></div>
+    <div class="stat-tile value" id="deck-value-stat" title="Click for a per-card breakdown"><div class="stat-value" id="stat-deck-value">${deck_value:.2f}</div><div class="stat-label">Deck value</div><div class="stat-sub">today&#39;s market &middot; owned <span id="stat-owned-value">${owned_value:.2f}</span></div></div>
+    <div class="stat-tile completion" title="Share of this deck you already own"><div class="stat-value" id="progress-pct">{pct:.0f}%</div><div class="stat-label">Complete</div><div class="progress"><div id="progress-bar" style="width:{pct:.1f}%"></div></div></div>
+  </div>
+  <div class="hero-badges">
+    {game_changers_html}
+    {legality_html}
+    {bracket_tag_html}
+    {wotc_bracket_html}
+  </div>
+</section>
 <main>
 {combos_html}
 {deck_analysis_html}
@@ -3591,6 +3655,7 @@ function updateShoppingButtonLabel() {{
   btn.textContent = '\U0001f6d2 Shopping List (' + count + (count === 1 ? ' card)' : ' cards)');
 }}
 
+const activeColors = new Set();
 function applyFilter() {{
   const q = search.value.trim().toLowerCase();
   const onlyMissing = missingOnly.checked;
@@ -3603,6 +3668,8 @@ function applyFilter() {{
     const isMissing = card.classList.contains('missing');
     const matchesText = !q || name.includes(q);
     const matchesMissing = !onlyMissing || isMissing;
+    const ci = card.dataset.ci || '';
+    const matchesColor = !activeColors.size || [...activeColors].some(c => ci.includes(c));
 
     let matchesPrice = true;
     if (isMissing && !noLimit) {{
@@ -3611,7 +3678,7 @@ function applyFilter() {{
       matchesPrice = price === null || price <= maxPrice;
     }}
 
-    card.classList.toggle('hidden', !(matchesText && matchesMissing && matchesPrice));
+    card.classList.toggle('hidden', !(matchesText && matchesMissing && matchesPrice && matchesColor));
   }});
   document.querySelectorAll('details.bucket').forEach(section => {{
     const visible = section.querySelectorAll('.card:not(.hidden)').length;
@@ -3647,6 +3714,17 @@ viewDensityBtns.forEach(btn => {{
     viewDensityBtns.forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     document.body.classList.toggle('compact', btn.dataset.value === 'compact');
+    document.body.classList.toggle('gallery', btn.dataset.value === 'gallery');
+  }});
+}});
+
+// The five colour symbols filter the cards: pick any (a card matches if it has one of them), click again to clear.
+document.querySelectorAll('#color-pips .color-pip').forEach(btn => {{
+  btn.addEventListener('click', () => {{
+    const c = btn.dataset.c;
+    if (activeColors.has(c)) activeColors.delete(c); else activeColors.add(c);
+    btn.classList.toggle('on', activeColors.has(c));
+    applyFilter();
   }});
 }});
 
@@ -4195,6 +4273,9 @@ if (shutdownBtn) {{
 }}"""
 
 
+_HERO_MANA_HEX = {"W": "#e8dfb8", "U": "#4a90c8", "B": "#6b5a7a", "R": "#d1553a", "G": "#4f9a5a", "C": "#9b9689"}
+
+
 def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[str],
                  buckets: dict[str, list[CardResult]], totals: dict,
                  overrides_endpoint: str | None = None, is_commander_format: bool = False,
@@ -4415,6 +4496,25 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
         _thumb_html(_display_scryfall_id(r), css_class="card-thumb commander-thumb") for r in commanders
     )
 
+    hero_banner_html = ""
+    if commanders:
+        c0 = commanders[0]
+        hero_sid = _display_scryfall_id(c0)
+        hero_art = scryfall_image_url(hero_sid, size="art_crop")
+        hero_colors = [c for c in WUBRG if c in c0.entry.color_identity] or ["C"]
+        hero_style = f' style="--hero-art: url(\'{html.escape(hero_art)}\');"' if hero_art else ""
+        hero_pips = "".join(f'<img class="mana-icon" src="{html.escape(mana_symbol_url(c))}" alt="{c}" loading="lazy">' for c in hero_colors)
+        hero_stripe = "".join(f'<span style="background:{_HERO_MANA_HEX[c]}"></span>' for c in hero_colors)
+        hero_banner_html = (
+            f'<div class="hero-banner"{hero_style}><div class="hero-text"><div class="hero-label">Commander</div>'
+            f'<div class="hero-name">{html.escape(c0.entry.name)}</div><span class="color-icons">{hero_pips}</span></div>'
+            f'<div class="hero-stripe">{hero_stripe}</div></div>'
+        )
+    color_pips_html = "".join(
+        f'<button type="button" class="color-pip" data-c="{c}" aria-label="{n}"><img src="{html.escape(mana_symbol_url(c))}" alt="" loading="lazy"></button>'
+        for c, n in (("W", "White"), ("U", "Blue"), ("B", "Black"), ("R", "Red"), ("G", "Green"))
+    )
+
     body_attrs = ""
     if commanders:
         bg_url = scryfall_image_url(_display_scryfall_id(commanders[0]), size="large")
@@ -4539,7 +4639,8 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
   {ai_summary_html}
   {further_optimizations_html}
   {maybeboard_html}
-  <div>
+  <div class="an-panel">
+    <h4>Mana curve</h4>
     <div class="analysis-stat-line">
       Average mana value: <b>{avg_with_lands:.2f}</b> with lands / <b>{avg_without_lands:.2f}</b> without &middot;
       Median: <b>{median_with_lands:.2f}</b> with lands / <b>{median_without_lands:.2f}</b> without &middot;
@@ -4551,14 +4652,16 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
       <span><span class="swatch spells"></span>Instants/Sorceries</span>
     </div>
   </div>
-  <div>
+  <div class="an-panel">
+    <h4>Colors</h4>
     <div class="color-breakdown">{color_rows_html}</div>
     <div class="chart-legend">
       <span><span class="swatch pips"></span>% of mana-cost symbols</span>
       <span><span class="swatch sources"></span>% of mana sources (heuristic)</span>
     </div>
   </div>
-  <div class="sample-hand">
+  <div class="sample-hand an-panel">
+    <h4>Sample opening hand</h4>
     <div class="analysis-stat-line">Average number of lands in opening hand: <b>{avg_lands_in_hand:.2f}</b></div>
     <div class="sample-hand-actions">
       <button type="button" class="btn ghost" id="draw-hand-btn">&#127183; Draw / Deal Another Hand</button>
@@ -4783,7 +4886,7 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
                     f' &middot; {r.reserved} reserved for another deck' if r.reserved > 0 else ''
                 )
                 card_tiles.append(f"""
-<div class="card owned{foil_class}" data-name="{name_esc.lower()}" data-qty="{e.quantity}" data-display-name="{name_esc}" data-owned-value="{r.owned_value:.2f}" data-reserved-qty="{reserved_flag}" {shop_data_attrs}{card_full_attr}>
+<div class="card owned{foil_class}" data-ci="{''.join(card_colors)}" data-name="{name_esc.lower()}" data-qty="{e.quantity}" data-display-name="{name_esc}" data-owned-value="{r.owned_value:.2f}" data-reserved-qty="{reserved_flag}" {shop_data_attrs}{card_full_attr}>
   <label class="override-toggle">
     <input type="checkbox" class="need-override"{reserved_checked}> Need another copy (used elsewhere)
   </label>
@@ -4808,7 +4911,7 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
             else:
                 have_str = f" &middot; have {r.have}" if r.have else ""
                 card_tiles.append(f"""
-<div class="card missing{foil_class}" data-name="{name_esc.lower()}" data-qty="{r.shortfall}" data-display-name="{name_esc}" {shop_data_attrs}{card_full_attr}>
+<div class="card missing{foil_class}" data-ci="{''.join(card_colors)}" data-name="{name_esc.lower()}" data-qty="{r.shortfall}" data-display-name="{name_esc}" {shop_data_attrs}{card_full_attr}>
   <div class="card-main">
     {commander_sticker_html}
     {thumb_html}
@@ -4899,6 +5002,8 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
         shopping_button=shopping_button,
         instore_button=instore_button,
         commander_thumbs_html=commander_thumbs_html,
+        hero_banner_html=hero_banner_html,
+        color_pips_html=color_pips_html,
         slider_max=slider_max,
         value_box_ch=value_box_ch,
         body_attrs=body_attrs,
