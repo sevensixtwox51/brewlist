@@ -290,7 +290,7 @@ body {
 }
 main { max-width: 640px; margin: 0 auto; padding: 0 24px 80px; }
 main.wide { max-width: 1120px; }
-h1 { font-family: var(--serif); font-weight: 600; font-size: 2rem; letter-spacing: 0.02em; color: var(--gold); margin: 0 0 4px; line-height: 1.1; }
+h1 { font-family: var(--serif); font-weight: 600; font-size: 2rem; letter-spacing: 0.02em; color: var(--accent); margin: 0 0 4px; line-height: 1.1; }
 .wordmark { display: flex; align-items: center; gap: 12px; }
 .wordmark .pips { display: inline-flex; gap: 4px; }
 .wordmark .pips img { width: 16px; height: 16px; display: block; opacity: 0.9; }
@@ -376,7 +376,7 @@ input[type="text"], input[type="url"], input[type="file"] {
 .deck-stripe span { flex: 1; }
 .deck-body { padding: 10px 14px 14px; }
 .deck-commander { font-family: var(--serif); font-size: 1.12rem; font-weight: 600; line-height: 1.2; color: var(--text); }
-.deck-tile:hover .deck-commander { color: var(--gold); }
+.deck-tile:hover .deck-commander { color: var(--accent); }
 .deck-name { font-size: 0.8rem; color: var(--text-dim); margin: 2px 0 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .deck-foot { display: flex; align-items: center; gap: 8px; font-size: 0.75rem; color: var(--text-dim); }
 .deck-foot .pips { display: inline-flex; gap: 3px; }
@@ -386,7 +386,7 @@ input[type="text"], input[type="url"], input[type="file"] {
   background: color-mix(in srgb, var(--bg) 78%, transparent); backdrop-filter: blur(4px); }
 .deck-tile:hover .delete-deck-btn, .deck-tile .delete-deck-btn:focus-visible { opacity: 1; }
 .deck-tile.new-deck { background: transparent; border: 1.5px dashed color-mix(in srgb, var(--gold) 45%, var(--card-border)); box-shadow: none; display: flex; }
-.deck-tile.new-deck a.deck-link { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; width: 100%; min-height: 190px; color: var(--gold); text-align: center; padding: 16px; }
+.deck-tile.new-deck a.deck-link { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; width: 100%; min-height: 190px; color: var(--accent); text-align: center; padding: 16px; }
 .deck-tile.new-deck .plus { font-size: 2rem; line-height: 1; }
 .deck-tile.new-deck .t { font-family: var(--serif); font-size: 1.1rem; }
 .deck-tile.new-deck .s { font-size: 0.78rem; color: var(--text-dim); }
@@ -1171,8 +1171,26 @@ body.compact .thumb-wrap { display:none; }
   margin-bottom:10px; font-size:0.85rem; display:flex; justify-content:space-between; align-items:center; gap:8px;
 }
 .commander-slot .commander-info { display:flex; align-items:center; gap:8px; }
-.deck-group { margin-bottom:10px; }
-.deck-group h4 { margin: 0 0 4px; font-size:0.75rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.03em; }
+/* The chosen commander: its art as a banner, name in the serif face, color-identity stripe along the bottom. */
+.commander-slot.commander-banner {
+  position:relative; overflow:hidden; border:1px solid var(--card-border); min-height:88px; padding:12px 14px;
+  background:var(--bg-elevated) var(--cb-art) center 24% / cover;
+}
+.commander-banner::before { content:""; position:absolute; inset:0;
+  background:linear-gradient(90deg, color-mix(in srgb, var(--bg) 94%, transparent) 30%, color-mix(in srgb, var(--bg) 30%, transparent)); }
+.commander-banner > * { position:relative; }
+.commander-banner .card-thumb { display:none; }
+.commander-banner .cb-label { display:block; font-size:0.66rem; text-transform:uppercase; letter-spacing:0.1em; color:var(--accent); }
+.commander-banner .cb-name { display:block; font-family:var(--serif); font-size:1.2rem; font-weight:600; line-height:1.15; margin:2px 0 6px; }
+.commander-banner .cb-stripe { position:absolute; left:0; right:0; bottom:0; height:3px; display:flex; }
+.commander-banner .cb-stripe span { flex:1; }
+.commander-banner .mana-icon { width:18px; height:18px; }
+.commander-banner .btn { background:color-mix(in srgb, var(--bg) 72%, transparent); backdrop-filter:blur(3px); }
+.deck-panel::before { content:""; position:absolute; top:-1px; left:14px; right:14px; height:3px; border-radius:0 0 3px 3px; background:var(--identity-stripe, transparent); }
+.builder-tile { transition:border-color .15s ease, box-shadow .15s ease; }
+.builder-tile:hover { border-color:color-mix(in srgb, var(--identity-glow, var(--gold)) 75%, var(--card-border)); box-shadow:0 0 14px -6px var(--identity-glow, var(--gold)); }
+.deck-group { margin-bottom:12px; }
+.deck-group h4 { margin: 0 0 4px; padding-bottom:3px; font-family:var(--serif); font-size:0.82rem; font-weight:600; color:var(--accent); letter-spacing:0.04em; border-bottom:1px solid var(--card-border); }
 .deck-row { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:3px 0; border-bottom:1px solid var(--card-border); font-size:0.85rem; }
 .deck-row:last-child { border-bottom:none; }
 .deck-row .row-name { display:flex; align-items:center; gap:8px; min-width:0; }
@@ -1461,7 +1479,7 @@ body.compact .deck-row .card-thumb { display:none; }
   width:100%; max-width:640px; max-height:85vh; display:flex; flex-direction:column; overflow:hidden;
 }
 .modal-header { display:flex; align-items:center; justify-content:space-between; padding:14px 18px; border-bottom:1px solid var(--card-border); flex-shrink:0; }
-.modal-header h3 { margin:0; font-size:1.05rem; }
+.modal-header h3 { margin:0; font-family:var(--serif); font-size:1.15rem; font-weight:600; letter-spacing:0.01em; }
 .modal-close { background:none; border:none; color:var(--text-dim); font-size:1.4rem; line-height:1; cursor:pointer; padding:2px 6px; }
 .modal-close:hover { color:var(--text); }
 .modal-body { padding:16px 18px; overflow-y:auto; flex:1; }
@@ -2890,12 +2908,23 @@ function renderGrid() {{
   grid.appendChild(frag);
 }}
 
+const MANA_HEX = {{ W: '#e8dfb8', U: '#4a90c8', B: '#6b5a7a', R: '#d1553a', G: '#4f9a5a', C: '#9b9689' }};
+function identityColors(colorIdentity) {{
+  const colors = WUBRG.filter(c => (colorIdentity || []).includes(c));
+  return colors.length ? colors : ['C'];
+}}
 function updateCommanderBackdrop() {{
   const bg = (brew.format === 'commander' && brew.commander) ? scryfallImg(brew.commander.scryfall_id, 'large') : null;
+  const body = document.body.style;
   if (bg) {{
-    document.body.style.setProperty('--commander-bg-url', `url('${{bg}}')`);
+    body.setProperty('--commander-bg-url', `url('${{bg}}')`);
+    // The deck's color identity tints the panel's top edge and the tile hover glow.
+    const colors = identityColors(brew.commander.color_identity);
+    const step = 100 / colors.length;
+    body.setProperty('--identity-stripe', 'linear-gradient(90deg, ' + colors.map((c, i) => MANA_HEX[c] + ' ' + (i * step) + '% ' + ((i + 1) * step) + '%').join(', ') + ')');
+    body.setProperty('--identity-glow', MANA_HEX[colors[Math.floor(colors.length / 2)]]);
   }} else {{
-    document.body.style.removeProperty('--commander-bg-url');
+    ['--commander-bg-url', '--identity-stripe', '--identity-glow'].forEach(v => body.removeProperty(v));
   }}
 }}
 
@@ -2907,7 +2936,11 @@ function renderCommanderSlot() {{
     wrap.innerHTML = '<div class="commander-slot"><span class="hint" style="margin:0;">No commander chosen -- click &#9733; Commander on an eligible card.</span></div>';
     return;
   }}
-  wrap.innerHTML = `<div class="commander-slot" data-full="${{scryfallImg(brew.commander.scryfall_id, 'normal') || ''}}"><span class="commander-info">${{thumbHtml(brew.commander.scryfall_id, 'card-thumb small')}}<span><b>Commander:</b> ${{brew.commander.name}} ${{colorIconsHtml(brew.commander.color_identity)}}</span></span></div>`;
+  const art = scryfallImg(brew.commander.scryfall_id, 'art_crop');
+  const stripe = identityColors(brew.commander.color_identity).map(c => `<span style="background:${{MANA_HEX[c]}}"></span>`).join('');
+  wrap.innerHTML = `<div class="commander-slot commander-banner" data-full="${{scryfallImg(brew.commander.scryfall_id, 'normal') || ''}}"${{art ? ` style="--cb-art:url('${{art}}')"` : ''}}>`
+    + `<span class="commander-info">${{thumbHtml(brew.commander.scryfall_id, 'card-thumb small')}}<span><span class="cb-label">Commander</span><span class="cb-name">${{escapeHtml(brew.commander.name)}}</span>${{colorIconsHtml(brew.commander.color_identity)}}</span></span>`
+    + `<span class="cb-stripe">${{stripe}}</span></div>`;
   wrap.querySelector('.commander-slot').appendChild(Object.assign(document.createElement('button'), {{
     type: 'button', className: 'btn ghost small', textContent: 'Clear',
     onclick: clearCommander,
