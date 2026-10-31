@@ -3475,6 +3475,10 @@ body.gallery .card-name {{ font-size: 0.82rem; }}
 body.gallery .qty {{ color: #d8d0c0; margin: 2px 0 0; font-size: 0.72rem; }}
 body.gallery .card.missing .qty {{ color: #ffb4a8; }}
 body.gallery .color-icons, body.gallery .mana-cost-pips, body.gallery .budget-alt-note, body.gallery .commander-sticker {{ display: none; }}
+/* The flip button sits on the thumbnail's bottom-right corner: its original spot (top 45px, left 26px) was for the 48px thumbnail. */
+body:not(.compact):not(.gallery) .card-main > .flip-btn {{ top: 64px; left: 46px; z-index: 4; }}
+body.gallery .card-main > .flip-btn {{ top: auto; left: auto; right: 6px; bottom: 6px; z-index: 4; opacity: 0; transition: opacity .15s ease; }}
+body.gallery .card:hover .card-main > .flip-btn, body.gallery .card-main > .flip-btn:focus-visible {{ opacity: 1; }}
 body.gallery .card-prices {{ align-items: stretch; max-width: none; }}
 .an-panel {{ background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 14px 16px 16px; }}
 .an-panel > h4 {{ margin: 0 0 12px; padding-bottom: 7px; border-bottom: 1px solid var(--card-border); font-family: var(--serif); font-size: 1.05rem; font-weight: 600; color: var(--accent); }}
