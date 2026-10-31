@@ -416,7 +416,29 @@ input[type="text"], input[type="url"], input[type="file"] {
 .deck-tile.new-deck .t { font-family: var(--serif); font-size: 1.1rem; }
 .deck-tile.new-deck .s { font-size: 0.78rem; color: var(--text-dim); }
 .deck-tile.compare-deck .deck-art { height: 116px; }
-.compare-wrap { max-width: 680px; }
+.compare-panel { background: var(--bg-elevated); border: 1px solid var(--card-border); border-top: 3px solid var(--gold); border-radius: 14px; padding: 18px 22px 16px; margin: 0 0 30px; box-shadow: var(--shadow); }
+.compare-title h2 { font-family: var(--serif); font-weight: 600; font-size: 1.25rem; margin: 0 0 2px; }
+.compare-title p { margin: 0 0 14px; color: var(--text-dim); font-size: 0.85rem; }
+.compare-row { display: flex; gap: 10px; align-items: stretch; }
+.compare-row input[type="url"] { flex: 1; margin: 0; padding: 12px 14px; font-size: 1rem; }
+.compare-row .btn { padding: 0 28px; font-size: 1rem; }
+.compare-options { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; margin-top: 12px; }
+.opt-chip { display: inline-flex; align-items: center; gap: 7px; margin: 0; padding: 5px 13px; border: 1px solid var(--card-border); border-radius: 999px; font-size: 0.82rem; font-weight: 400; color: var(--text-dim); cursor: pointer; user-select: none; transition: border-color .12s ease, color .12s ease, background .12s ease; }
+.opt-chip input { width: auto; margin: 0; accent-color: var(--gold); }
+.opt-chip:hover { color: var(--text); border-color: color-mix(in srgb, var(--gold) 55%, var(--card-border)); }
+.opt-chip:has(input:checked) { color: var(--text); border-color: var(--gold); background: color-mix(in srgb, var(--gold) 10%, transparent); }
+.store-pick { margin-left: auto; font-size: 0.82rem; color: var(--text-dim); }
+.store-pick > summary { cursor: pointer; list-style: none; padding: 5px 0; user-select: none; }
+.store-pick > summary::-webkit-details-marker { display: none; }
+.store-pick > summary::after { content: " ▾"; }
+.store-pick[open] > summary { color: var(--accent); }
+.store-pick .store-body { flex-basis: 100%; }
+.compare-options:has(.store-pick[open]) .store-pick { flex-basis: 100%; margin-left: 0; }
+.store-pick .store-body { margin-top: 8px; padding: 12px 14px 6px; background: var(--bg); border: 1px solid var(--card-border); border-radius: 10px; }
+.store-pick .store-grid { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
+.store-pick .hint { margin: 4px 0 6px; }
+@media (max-width: 640px) { .compare-row { flex-direction: column; } .compare-row .btn { padding: 11px 0; } .store-pick { margin-left: 0; } }
+
 #compare-form.flash { animation: form-flash 1.2s ease; }
 @keyframes form-flash { 0%, 60% { box-shadow: 0 0 0 2px var(--gold), 0 0 24px -4px var(--gold); } 100% { box-shadow: var(--shadow); } }
 @media (prefers-reduced-motion: reduce) { #compare-form.flash { animation: none; } }
@@ -889,6 +911,8 @@ def render_decks_page(error: str | None = None, prefill_url: str = "") -> str:
         )
 
     store_checkboxes_html = "".join(_store_checkbox(label) for label in PICKABLE_STORE_LABELS)
+    store_names_json = json.dumps({l: STORE_DISPLAY_NAMES[l] for l in PICKABLE_STORE_LABELS})
+    store_summary_text = _esc(", ".join(STORE_DISPLAY_NAMES[l] for l in PICKABLE_STORE_LABELS if l in selected_stores) or "no stores selected")
 
     header_html, footer_html = _page_chrome(
         "Compare a decklist against your collection, with live pricing.", error
@@ -909,26 +933,33 @@ def render_decks_page(error: str | None = None, prefill_url: str = "") -> str:
   <div style="margin-bottom:16px;">
     <a href="/" class="btn ghost small">&#9881; Collection &amp; Settings</a>
   </div>
-  {projects_html}
-  <div class="section-head"><h2>Compare a decklist</h2></div>
-  <form class="card compare-wrap" id="compare-form">
-    <label for="moxfield_url">Moxfield or Archidekt deck URL</label>
-    <input type="url" id="moxfield_url" name="moxfield_url" placeholder="https://moxfield.com/decks/... or https://archidekt.com/decks/..." value="{_esc(prefill_url)}" required>
-
-    <div class="checkbox-row"><input type="checkbox" id="include_sideboard" name="include_sideboard"><label for="include_sideboard" style="margin:0;font-weight:400;">Include sideboard cards</label></div>
-    <div class="checkbox-row"><input type="checkbox" id="include_maybeboard" name="include_maybeboard"><label for="include_maybeboard" style="margin:0;font-weight:400;">Include maybeboard cards</label></div>
-    <div class="checkbox-row"><input type="checkbox" id="break_out_basics" name="break_out_basics" checked><label for="break_out_basics" style="margin:0;font-weight:400;">Break out basic lands separately</label></div>
-
-    <label>Store pricing</label>
-    <div class="store-grid">{store_checkboxes_html}</div>
-    <div class="hint">Which stores to show prices from -- saved for next time.</div>
-
-    <button type="submit" class="btn" id="submit-btn">Compare</button>
+  <form class="compare-panel" id="compare-form">
+    <div class="compare-title">
+      <h2>Compare a decklist</h2>
+      <p>Paste a Moxfield or Archidekt link to see what you already own and what is missing, with live prices.</p>
+    </div>
+    <div class="compare-row">
+      <input type="url" id="moxfield_url" name="moxfield_url" placeholder="https://moxfield.com/decks/...  or  https://archidekt.com/decks/..." value="{_esc(prefill_url)}" required>
+      <button type="submit" class="btn" id="submit-btn">Compare</button>
+    </div>
+    <div class="compare-options">
+      <label class="opt-chip" title="Also compare the deck's sideboard cards"><input type="checkbox" id="include_sideboard" name="include_sideboard"> Sideboard</label>
+      <label class="opt-chip" title="Also compare the deck's maybeboard cards"><input type="checkbox" id="include_maybeboard" name="include_maybeboard"> Maybeboard</label>
+      <label class="opt-chip" title="List basic lands on their own lines instead of leaving them out"><input type="checkbox" id="break_out_basics" name="break_out_basics" checked> Basic lands listed</label>
+      <details class="store-pick" id="store-pick">
+        <summary id="store-summary" title="Which stores to show prices from">Prices from {store_summary_text}</summary>
+        <div class="store-body">
+          <div class="store-grid">{store_checkboxes_html}</div>
+          <div class="hint">Which stores to show prices from -- saved for next time.</div>
+        </div>
+      </details>
+    </div>
     <div id="progress-wrap">
       <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
       <div id="progress-label">Fetching deck from Moxfield&hellip;</div>
     </div>
   </form>
+  {projects_html}
   {footer_html}
 </main>
 <script>
@@ -940,6 +971,13 @@ function fmtIndexProgress(done, total) {{
 }}
 
 const form = document.getElementById('compare-form');
+// "Prices from ..." summary follows the store checkboxes.
+const STORE_NAMES = {store_names_json};
+function updateStoreSummary() {{
+  const picked = [...form.querySelectorAll('input[name="stores"]:checked')].map(i => STORE_NAMES[i.value] || i.value);
+  document.getElementById('store-summary').childNodes[0].textContent = 'Prices from ' + (picked.length ? picked.join(', ') : 'no stores selected');
+}}
+form.querySelectorAll('input[name="stores"]').forEach(i => i.addEventListener('change', updateStoreSummary));
 const submitBtn = document.getElementById('submit-btn');
 const progressWrap = document.getElementById('progress-wrap');
 const progressFill = document.getElementById('progress-fill');
