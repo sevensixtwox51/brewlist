@@ -1324,40 +1324,60 @@ a.unowned-badge:hover { background:color-mix(in srgb, var(--gold) 28%, transpare
 .wizard-box .modal-body { padding:10px 18px 18px; }
 .wizard-box .modal-footer { justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; }
 .wizard-box .modal-footer > .btn { margin:0; }
-.wz-steps { display:flex; gap:6px; flex-wrap:wrap; padding:10px 18px 0; flex-shrink:0; }
-.wz-chip { cursor:pointer; border:1px solid var(--card-border); background:transparent; color:var(--text-dim); border-radius:999px; padding:4px 12px; font-size:0.78rem; font-family:inherit; }
-.wz-chip:hover { color:var(--accent); border-color:var(--accent); }
-.wz-chip.active { background:color-mix(in srgb, var(--accent) 15%, transparent); color:var(--accent); border-color:var(--accent); font-weight:600; }
-.wz-chip-count { opacity:0.75; font-variant-numeric:tabular-nums; }
+#wizard-steps.wz-steps { display:flex; gap:8px; flex-wrap:wrap; padding:12px 18px 2px; flex-shrink:0; }
+.wz-chip { cursor:pointer; position:relative; display:flex; align-items:center; gap:9px; border:1px solid var(--card-border); background:var(--bg-elevated); color:var(--text-dim); border-radius:12px; padding:7px 14px 10px 8px; font-family:inherit; text-align:left; overflow:hidden; transition:border-color .15s ease, color .15s ease, transform .15s ease; }
+.wz-chip:hover { color:var(--text); border-color:color-mix(in srgb, var(--accent) 55%, var(--card-border)); transform:translateY(-1px); }
+.wz-chip.active { color:var(--text); border-color:var(--accent); background:color-mix(in srgb, var(--accent) 9%, var(--bg-elevated)); box-shadow:0 0 0 1px var(--accent); }
+.wz-chip-num { width:24px; height:24px; border-radius:50%; flex-shrink:0; display:flex; align-items:center; justify-content:center; font-size:0.75rem; font-weight:700; background:var(--card-border); color:var(--text); }
+.wz-chip.active .wz-chip-num { background:var(--accent); color:var(--bg); }
+.wz-chip.done .wz-chip-num { background:var(--owned); color:#06210f; }
+.wz-chip-text { display:flex; flex-direction:column; line-height:1.15; }
+.wz-chip-label { font-family:var(--serif); font-size:0.92rem; font-weight:600; }
+.wz-chip-count { font-size:0.7rem; opacity:0.8; font-variant-numeric:tabular-nums; }
+.wz-chip-bar { position:absolute; left:0; right:0; bottom:0; height:3px; background:var(--card-border); }
+.wz-chip-bar span { display:block; height:100%; background:var(--accent); transition:width .2s ease; }
+.wz-chip.done .wz-chip-bar span { background:var(--owned); }
 .wz-intro { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:6px; }
-.wz-blurb { flex:1 1 280px; margin:0 !important; }
-.wz-count { font-size:0.8rem; }
+.wz-blurb { flex:1 1 280px; margin:0 !important; font-family:var(--serif); font-style:italic; font-size:1.02rem !important; color:var(--text) !important; opacity:0.85; }
+.wz-count { font-size:0.8rem; display:flex; align-items:baseline; gap:10px; }
+.wz-count-big { display:inline-flex; align-items:baseline; gap:5px; font-family:var(--serif); }
+.wz-count-big b { font-size:1.9rem; line-height:1; font-weight:600; }
+.wz-count-big span { font-size:0.95rem; color:var(--text-dim); }
+.wz-count-note { max-width:220px; line-height:1.25; }
 .wz-count.under { color:var(--text-dim); }
 .wz-count.match { color:var(--owned); }
 .wz-count.over { color:var(--gold); }
 .wz-tools { display:flex; gap:6px; }
 .wz-tip { margin:2px 0 8px; font-size:0.75rem; }
 .wz-warn { margin:6px 0; padding:6px 10px; border-radius:8px; font-size:0.8rem; color:var(--gold); border:1px solid color-mix(in srgb, var(--gold) 45%, var(--card-border)); background:color-mix(in srgb, var(--gold) 8%, transparent); }
-.wz-group-title { margin:16px 0 6px; font-size:0.85rem; }
-.wz-sub { margin:12px 0 6px; font-size:0.72rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.04em; }
+.wz-group-title { margin:20px 0 10px; padding-bottom:5px; border-bottom:1px solid var(--card-border); font-family:var(--serif); font-size:1.08rem; font-weight:600; color:var(--accent); letter-spacing:0.02em; }
+.wz-sub { margin:18px 0 8px; font-family:var(--serif); font-style:italic; font-size:0.92rem; color:var(--text-dim); }
 .wz-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(136px, 1fr)); gap:10px; }
-.wz-tile { position:relative; border:2px solid var(--card-border); border-radius:10px; padding:6px; cursor:pointer; background:var(--bg); opacity:0.62; transition:opacity .12s, border-color .12s; }
-.wz-tile:hover { opacity:1; }
-.wz-tile.selected { opacity:1; border-color:var(--owned); background:color-mix(in srgb, var(--owned) 7%, var(--bg)); }
-.wz-tile.unowned.selected { border-color:var(--gold); background:color-mix(in srgb, var(--gold) 9%, var(--bg)); }
-.wz-tile .wz-img { width:100%; height:auto; aspect-ratio:488 / 680; border-radius:6px; display:block; }
+.wz-tile { position:relative; border:2px solid transparent; border-radius:12px; padding:6px 6px 8px; cursor:pointer; background:transparent; transition:transform .15s ease, border-color .15s ease, box-shadow .15s ease, background .15s ease; }
+.wz-tile .wz-img { filter:grayscale(0.55) brightness(0.72); transition:filter .15s ease, box-shadow .15s ease; box-shadow:0 3px 10px rgba(0,0,0,0.4); }
+.wz-tile .wz-name, .wz-tile .wz-reason { opacity:0.6; transition:opacity .15s ease; }
+.wz-tile:hover { transform:translateY(-3px); background:var(--bg-elevated); }
+.wz-tile:hover .wz-img, .wz-tile.selected .wz-img { filter:none; }
+.wz-tile:hover .wz-name, .wz-tile:hover .wz-reason, .wz-tile.selected .wz-name, .wz-tile.selected .wz-reason { opacity:1; }
+.wz-tile:hover .wz-img { box-shadow:0 12px 24px rgba(0,0,0,0.55); }
+.wz-tile.selected { border-color:var(--owned); background:color-mix(in srgb, var(--owned) 8%, var(--bg-elevated)); box-shadow:0 0 0 1px var(--owned), 0 10px 26px -12px var(--owned); }
+.wz-tile.unowned.selected { border-color:var(--gold); background:color-mix(in srgb, var(--gold) 9%, var(--bg-elevated)); box-shadow:0 0 0 1px var(--gold), 0 10px 26px -12px var(--gold); }
+.wz-tile .wz-img { width:100%; height:auto; aspect-ratio:488 / 680; border-radius:4.75% / 3.4%; display:block; }
 .wz-check { position:absolute; top:10px; left:10px; width:22px; height:22px; border-radius:50%; background:var(--owned); color:#06210f; font-weight:700; font-size:0.8rem; display:none; align-items:center; justify-content:center; z-index:2; }
 .wz-tile.selected .wz-check { display:flex; }
 .wz-tile.unowned.selected .wz-check { background:var(--gold); color:#241f00; }
 .wz-avoid { position:absolute; top:8px; right:8px; width:22px; height:22px; border-radius:50%; border:1px solid var(--card-border); background:var(--bg-elevated); cursor:pointer; font-size:0.7rem; line-height:1; padding:0; display:none; z-index:2; }
 .wz-tile:hover .wz-avoid { display:block; }
-.wz-name { margin-top:6px; font-size:0.8rem; font-weight:600; line-height:1.2; }
+.wz-name { margin-top:7px; font-family:var(--serif); font-size:0.88rem; font-weight:600; line-height:1.2; }
 .wz-gc { margin-left:5px; padding:0 4px; border-radius:4px; font-size:0.6rem; background:color-mix(in srgb, var(--accent) 22%, transparent); color:var(--accent); vertical-align:1px; }
 .wz-reason { margin:2px 0 0; font-size:0.7rem; color:var(--text-dim); line-height:1.25; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
 .wz-badge-row { margin-top:4px; }
 .wz-badge-row .unowned-badge { margin-left:0; }
 .wz-loading { padding:30px 6px; margin:0; }
-.wz-status { margin:0 !important; }
+.wz-status { margin:0 !important; display:flex; align-items:center; gap:10px; }
+.wz-deckbar { width:110px; height:6px; border-radius:3px; background:var(--card-border); overflow:hidden; flex-shrink:0; }
+.wz-deckbar span { display:block; height:100%; border-radius:3px; background:var(--owned); transition:width .2s ease; }
+.wz-deckbar.over span { background:var(--gold); }
 .wz-over { color:var(--gold); }
 /* Plain links inside the suggestions panel (the guided flow's "cards to
    pick up" list, Optimize's "(details)") had no color of their own, so they
@@ -1435,7 +1455,7 @@ body.compact .deck-row .card-thumb { display:none; }
 .wz-type-own { font-size:0.74rem; color:var(--text-dim); text-align:center; }
 .wz-type-own b { color:var(--owned); }
 .wz-type-stats { margin-top:4px; font-size:0.72rem; color:var(--text-dim); text-align:center; }
-@media (prefers-reduced-motion: reduce) { .wz-type, .wz-fan-card { transition:none; } }
+@media (prefers-reduced-motion: reduce) { .wz-type, .wz-fan-card, .wz-tile, .wz-chip { transition:none; } .wz-tile:hover, .wz-chip:hover { transform:none; } }
 .theme-picker { position:relative; }
 .theme-picker input[type=text] { width:200px; margin:0; padding:8px 12px; font-size:0.85rem; }
 .theme-dropdown {
@@ -3808,8 +3828,13 @@ function renderWizard() {{
   // Step chips: also the way to jump around / skip a step.
   document.getElementById('wizard-steps').innerHTML = wizard.steps.map((s, i) => {{
     const n = wizardStepSelectedCount(s);
-    return '<button type="button" class="wz-chip' + (i === wizard.idx ? ' active' : '') + '" data-step="' + i + '">'
-      + escapeHtml(wizardInfo(s.role).short) + ' <span class="wz-chip-count">' + n + '/' + s.needed + '</span></button>';
+    const done = s.needed > 0 && n >= s.needed;
+    const pct = s.needed ? Math.min(100, Math.round(n / s.needed * 100)) : 100;
+    return '<button type="button" class="wz-chip' + (i === wizard.idx ? ' active' : '') + (done ? ' done' : '') + '" data-step="' + i + '">'
+      + '<span class="wz-chip-num">' + (done ? '&#10003;' : (i + 1)) + '</span>'
+      + '<span class="wz-chip-text"><span class="wz-chip-label">' + escapeHtml(wizardInfo(s.role).short) + '</span>'
+      + '<span class="wz-chip-count">' + n + '/' + s.needed + '</span></span>'
+      + '<span class="wz-chip-bar"><span style="width:' + pct + '%"></span></span></button>';
   }}).join('');
 
   const n = wizardStepSelectedCount(step);
@@ -3832,7 +3857,7 @@ function renderWizard() {{
     ? ' &middot; <span class="filler-count" title="' + FILLER_TIP + '">' + fillerSelected + ' slot filler' + (fillerSelected === 1 ? '' : 's') + '</span>'
     : '';
   let html = edhrecBannerHtml(wizard.edhrecProblem) + '<div class="wz-intro"><span class="hint wz-blurb">' + escapeHtml(info.blurb) + '</span>'
-    + '<span class="wz-count ' + countClass + '"><b>' + n + '</b> selected (aiming for ' + step.needed + ') &middot; ' + countNote + fillerNote + '</span>'
+    + '<span class="wz-count ' + countClass + '"><span class="wz-count-big"><b>' + n + '</b><span>/ ' + step.needed + '</span></span><span class="wz-count-note">' + countNote + fillerNote + '</span></span>'
     + '<span class="wz-tools">' + (wizard.meta.deckType ? '<button type="button" class="btn ghost small" data-wz="type" title="Pick a different EDHREC deck type for this commander (restarts the suggestions)">Deck type: ' + escapeHtml(wizard.meta.deckType.value || '') + ' &#9662;</button>' : '')
     + '<button type="button" class="btn ghost small" data-wz="none">Select none</button>'
     + '<button type="button" class="btn ghost small" data-wz="reset">Reset to suggested</button></span></div>'
@@ -3866,7 +3891,8 @@ function renderWizard() {{
   const over = total > wizard.meta.libraryTarget;
   setWizardFooter({{
     back: wizard.idx > 0, next: true, accept: !last, nextLabel: last ? 'Add ' + wizardTotalSelected() + ' cards to deck' : 'Next →',
-    status: 'Deck will have <b' + (over ? ' class="wz-over"' : '') + '>' + total + '</b> / ' + wizard.meta.libraryTarget + ' cards' + (over ? ' (over)' : ''),
+    status: '<span class="wz-deckbar' + (over ? ' over' : '') + '"><span style="width:' + Math.min(100, Math.round(total / Math.max(1, wizard.meta.libraryTarget) * 100)) + '%"></span></span>'
+      + 'Deck will have <b' + (over ? ' class="wz-over"' : '') + '>' + total + '</b> / ' + wizard.meta.libraryTarget + ' cards' + (over ? ' (over)' : ''),
   }});
 }}
 
