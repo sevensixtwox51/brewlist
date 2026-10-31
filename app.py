@@ -269,25 +269,31 @@ def _run_brew_report_job(job_id, entries, owned, deck_id, deck_name, is_commande
 
 PAGE_STYLE = """
 :root {
-  --bg: #0f1117; --bg-elevated: #171a23; --card-bg: #1c1f2a; --card-border: #2a2f3d;
-  --text: #e8e9ee; --text-dim: #8b90a3; --accent: #7dd3fc; --owned: #4ade80;
-  --missing: #fb7185; --gold: #facc15; --shadow: 0 4px 16px rgba(0,0,0,0.35);
+  --bg: #14110f; --bg-elevated: #1e1a17; --card-bg: #241f1b; --card-border: #3a322a;
+  --text: #ece3d0; --text-dim: #9b8f7a; --accent: #e9c46a; --owned: #6fcf8a;
+  --missing: #e8776a; --gold: #e9c46a; --shadow: 0 4px 16px rgba(0,0,0,0.4);
+  --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
 }
 @media (prefers-color-scheme: light) {
   :root {
-    --bg: #f4f5f8; --bg-elevated: #ffffff; --card-bg: #ffffff; --card-border: #e2e4ea;
-    --text: #1a1c23; --text-dim: #63677a; --accent: #0284c7; --owned: #16a34a;
-    --missing: #e11d48; --gold: #ca8a04; --shadow: 0 2px 10px rgba(20,20,30,0.08);
+    --bg: #f6f0e4; --bg-elevated: #fffaf0; --card-bg: #fffaf0; --card-border: #e3d7bd;
+    --text: #2a2218; --text-dim: #7a6c55; --accent: #9a6a14; --owned: #2f8a4a;
+    --missing: #c0392b; --gold: #e0b04a; --shadow: 0 2px 10px rgba(60,40,10,0.1);
   }
 }
 * { box-sizing: border-box; }
 body {
-  margin: 0; background: var(--bg); color: var(--text);
+  margin: 0; background: var(--bg) radial-gradient(ellipse 80% 320px at 50% 0, color-mix(in srgb, var(--gold) 9%, transparent), transparent) no-repeat;
+  color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   line-height: 1.5;
 }
 main { max-width: 640px; margin: 0 auto; padding: 0 24px 80px; }
-h1 { font-size: 1.5rem; margin-bottom: 4px; }
+main.wide { max-width: 1120px; }
+h1 { font-family: var(--serif); font-weight: 600; font-size: 2rem; letter-spacing: 0.02em; color: var(--gold); margin: 0 0 4px; line-height: 1.1; }
+.wordmark { display: flex; align-items: center; gap: 12px; }
+.wordmark .pips { display: inline-flex; gap: 4px; }
+.wordmark .pips img { width: 16px; height: 16px; display: block; opacity: 0.9; }
 p.subtitle { color: var(--text-dim); margin-top: 0; }
 .card {
   background: var(--bg-elevated); border: 1px solid var(--card-border);
@@ -322,9 +328,9 @@ input[type="text"], input[type="url"], input[type="file"] {
   border: 1px solid var(--card-border); font-weight: 500;
 }
 .btn.ghost:hover { color: var(--accent); border-color: var(--accent); filter: none; }
-.page-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.page-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px 16px; flex-wrap: wrap; }
 .sticky-top {
-  position: sticky; top: 0; z-index: 50; background: var(--bg);
+  position: sticky; top: 0; z-index: 50; background: color-mix(in srgb, var(--bg) 90%, transparent); backdrop-filter: blur(8px);
   margin: 0 -24px; padding: 40px 24px 4px;
 }
 .header-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
@@ -351,9 +357,47 @@ input[type="text"], input[type="url"], input[type="file"] {
 .progress-track { height: 8px; background: var(--card-border); border-radius: 4px; overflow: hidden; }
 .progress-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--owned), var(--accent)); transition: width 0.2s ease; }
 #progress-label { color: var(--text-dim); font-size: 0.85rem; margin-top: 8px; }
+.section-head { display: flex; align-items: baseline; justify-content: space-between; margin: 8px 0 14px; }
+.section-head h2 { font-family: var(--serif); font-weight: 600; font-size: 1.25rem; margin: 0; letter-spacing: 0.01em; }
+.deck-grid { list-style: none; padding: 0; margin: 0 0 28px; display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+.deck-tile { position: relative; border-radius: 12px; background: var(--bg-elevated); border: 1px solid var(--card-border); overflow: hidden;
+  box-shadow: var(--shadow); transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease; animation: tile-in .35s ease both; }
+.deck-tile:nth-child(2) { animation-delay: .03s; } .deck-tile:nth-child(3) { animation-delay: .06s; } .deck-tile:nth-child(4) { animation-delay: .09s; }
+.deck-tile:nth-child(5) { animation-delay: .12s; } .deck-tile:nth-child(6) { animation-delay: .15s; } .deck-tile:nth-child(n+7) { animation-delay: .18s; }
+.deck-tile:hover { transform: translateY(-3px); border-color: var(--tile-glow, var(--gold));
+  box-shadow: 0 10px 26px rgba(0,0,0,0.45), 0 0 0 1px var(--tile-glow, var(--gold)), 0 0 22px -6px var(--tile-glow, var(--gold)); }
+@keyframes tile-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .deck-tile { animation: none; transition: none; } .deck-tile:hover { transform: none; } }
+.deck-tile a.deck-link { display: block; color: inherit; text-decoration: none; }
+.deck-art { height: 116px; background-color: var(--tile-base, var(--card-border)); background-size: cover; background-position: center 22%; position: relative; }
+.deck-art::after { content: ""; position: absolute; inset: 0; background: linear-gradient(to bottom, transparent 45%, var(--bg-elevated)); }
+.deck-art .no-art { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: var(--serif); font-size: 2.2rem; color: color-mix(in srgb, var(--text) 30%, transparent); }
+.deck-stripe { height: 4px; display: flex; }
+.deck-stripe span { flex: 1; }
+.deck-body { padding: 10px 14px 14px; }
+.deck-commander { font-family: var(--serif); font-size: 1.12rem; font-weight: 600; line-height: 1.2; color: var(--text); }
+.deck-tile:hover .deck-commander { color: var(--gold); }
+.deck-name { font-size: 0.8rem; color: var(--text-dim); margin: 2px 0 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.deck-foot { display: flex; align-items: center; gap: 8px; font-size: 0.75rem; color: var(--text-dim); }
+.deck-foot .pips { display: inline-flex; gap: 3px; }
+.deck-foot .pips img { width: 18px; height: 18px; display: block; }
+.deck-foot .sep { margin-left: auto; white-space: nowrap; }
+.deck-tile .delete-deck-btn { position: absolute; top: 8px; right: 8px; padding: 2px 9px; font-size: 1rem; line-height: 1.3; opacity: 0; transition: opacity .15s;
+  background: color-mix(in srgb, var(--bg) 78%, transparent); backdrop-filter: blur(4px); }
+.deck-tile:hover .delete-deck-btn, .deck-tile .delete-deck-btn:focus-visible { opacity: 1; }
+.deck-tile.new-deck { background: transparent; border: 1.5px dashed color-mix(in srgb, var(--gold) 45%, var(--card-border)); box-shadow: none; display: flex; }
+.deck-tile.new-deck a.deck-link { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; width: 100%; min-height: 190px; color: var(--gold); text-align: center; padding: 16px; }
+.deck-tile.new-deck .plus { font-size: 2rem; line-height: 1; }
+.deck-tile.new-deck .t { font-family: var(--serif); font-size: 1.1rem; }
+.deck-tile.new-deck .s { font-size: 0.78rem; color: var(--text-dim); }
+.deck-tile.compare-deck .deck-art { height: 116px; }
+.compare-wrap { max-width: 680px; }
 .ai-disclosure { display: flex; justify-content: center; align-items: center; gap: 14px; margin-top: 32px; }
 .ai-disclosure img { height: 24px; width: auto; display: block; }
 """
+
+
+_MANA_COLORS = {"W": "#e8dfb8", "U": "#4a90c8", "B": "#6b5a7a", "R": "#d1553a", "G": "#4f9a5a", "C": "#9b9689"}
 
 
 def _esc(s) -> str:
@@ -394,7 +438,7 @@ def _page_chrome(subtitle: str, error: str | None) -> tuple[str, str]:
   <div class="sticky-top">
     <div class="page-header">
       <div>
-        <h1>Brewlist</h1>
+        <div class="wordmark"><h1>Brewlist</h1><span class="pips" aria-hidden="true">{"".join(f'<img src="/static/mana/{c}.svg" alt="">' for c in "WUBRG")}</span></div>
         <p class="subtitle">{subtitle}</p>
       </div>
       <div class="header-actions">
@@ -726,31 +770,51 @@ def render_decks_page(error: str | None = None, prefill_url: str = "") -> str:
         is_brew = p.get("type") == "brew"
         deck_id = p.get("deck_id", "")
         raw_name = p.get("deck_name") or deck_id or "unknown"
-        label = _esc(raw_name)
-        if is_brew:
-            href = f'/builder?id={_esc(deck_id)}'
-            data_attrs = 'data-type="brew"'
-            label += ' <span class="hint-inline">(brew)</span>'
-        else:
-            href = "#"
-            data_attrs = f'data-type="compare" data-url="{_esc(p.get("deck_url", deck_id))}"'
-        return (
-            f'<li><a href="{href}" class="recent-deck-link" {data_attrs}>{label}</a>'
-            '<span class="deck-meta">'
-            f'<span class="when">{_esc((p.get("updated") or "")[:16].replace("T", " "))}</span>'
+        when = _esc((p.get("updated") or "")[:10])
+        delete_btn = (
             f'<button type="button" class="btn danger small delete-deck-btn" '
             f'data-deck-id="{_esc(deck_id)}" data-deck-name="{_esc(raw_name)}" title="Delete this deck">&times;</button>'
-            '</span>'
-            f'</li>'
+        )
+        if not is_brew:
+            return (
+                '<li class="deck-tile compare-deck">'
+                f'<a href="#" class="deck-link recent-deck-link" data-type="compare" data-url="{_esc(p.get("deck_url", deck_id))}">'
+                '<div class="deck-art"><div class="no-art">&#10070;</div></div><div class="deck-stripe"><span style="background:var(--card-border)"></span></div>'
+                f'<div class="deck-body"><div class="deck-commander">{_esc(raw_name)}</div>'
+                '<div class="deck-name">Comparison</div>'
+                f'<div class="deck-foot"><span class="sep">{when}</span></div></div></a>{delete_btn}</li>'
+            )
+        commander = p.get("commander") or {}
+        colors = [c for c in "WUBRG" if c in (commander.get("color_identity") or [])] or ["C"]
+        cid = commander.get("scryfall_id") or ""
+        art = (f"https://cards.scryfall.io/art_crop/front/{cid[0]}/{cid[1]}/{cid}.jpg" if len(cid) > 2 else "")
+        art_style = f"background-image:url('{art}');" if art else ""
+        count = sum(int(c.get("quantity") or 1) for c in (p.get("cards") or [])) + (1 if commander else 0)
+        stripe = "".join(f'<span style="background:{_MANA_COLORS[c]}"></span>' for c in colors)
+        pips = "".join(f'<img src="/static/mana/{c}.svg" alt="{c}">' for c in colors)
+        glow = _MANA_COLORS[colors[0]] if len(colors) == 1 else _MANA_COLORS[colors[len(colors) // 2]]
+        commander_name = _esc(commander.get("name") or raw_name)
+        deck_label = _esc(raw_name) if commander and raw_name != commander.get("name") else ""
+        return (
+            f'<li class="deck-tile" style="--tile-glow:{glow};--tile-base:{_MANA_COLORS[colors[0]]}55">'
+            f'<a href="/builder?id={_esc(deck_id)}" class="deck-link recent-deck-link" data-type="brew">'
+            f'<div class="deck-art" style="{art_style}">{"" if art else f"<div class=no-art>{commander_name[:1]}</div>"}</div>'
+            f'<div class="deck-stripe">{stripe}</div>'
+            f'<div class="deck-body"><div class="deck-commander">{commander_name}</div>'
+            f'<div class="deck-name">{deck_label or "&nbsp;"}</div>'
+            f'<div class="deck-foot"><span class="pips">{pips}</span><span class="sep">{count} cards &middot; {when}</span></div></div></a>'
+            f'{delete_btn}</li>'
         )
 
-    items = "".join(_project_item(p) for p in projects[:15])
-    projects_list_html = f'<ul class="project-list">{items}</ul>' if items else '<div class="hint" style="margin:0;">No decks yet.</div>'
+    new_tile = (
+        '<li class="deck-tile new-deck"><a href="/builder" class="deck-link">'
+        '<span class="plus">&#43;</span><span class="t">Brew something new</span><span class="s">Pick a commander to begin</span></a></li>'
+    )
+    items = "".join(_project_item(p) for p in projects[:24])
     projects_html = (
-        '<div class="card"><div class="page-header" style="margin-bottom:12px;">'
-        '<label style="margin:0;">Recent decks</label>'
-        '<a href="/builder" class="btn ghost small">&#43; New deck</a>'
-        f'</div>{projects_list_html}</div>'
+        '<div class="section-head"><h2>Your brews</h2>'
+        f'<span class="hint-inline">{len(projects)} saved</span></div>'
+        f'<ul class="deck-grid">{new_tile}{items}</ul>'
     )
 
     selected_stores = set(load_store_prefs())
@@ -788,13 +852,14 @@ def render_decks_page(error: str | None = None, prefill_url: str = "") -> str:
 <style>{PAGE_STYLE}</style>
 </head>
 <body>
-<main>
+<main class="wide">
   {header_html}
   <div style="margin-bottom:16px;">
     <a href="/" class="btn ghost small">&#9881; Collection &amp; Settings</a>
   </div>
   {projects_html}
-  <form class="card" id="compare-form">
+  <div class="section-head"><h2>Compare a decklist</h2></div>
+  <form class="card compare-wrap" id="compare-form">
     <label for="moxfield_url">Moxfield or Archidekt deck URL</label>
     <input type="url" id="moxfield_url" name="moxfield_url" placeholder="https://moxfield.com/decks/... or https://archidekt.com/decks/..." value="{_esc(prefill_url)}" required>
 
@@ -2025,7 +2090,7 @@ function colorIconsHtml(colorIdentity) {{
   const colors = WUBRG.filter(c => (colorIdentity || []).includes(c));
   if (!colors.length) return '';
   return '<span class="color-icons">' + colors.map(c =>
-    `<img class="mana-icon" src="https://svgs.scryfall.io/card-symbols/${{c}}.svg" alt="${{c}}" loading="lazy">`
+    `<img class="mana-icon" src="/static/mana/${{c}}.svg" alt="${{c}}" loading="lazy">`
   ).join('') + '</span>';
 }}
 
@@ -3048,7 +3113,7 @@ function renderDeckAnalysis() {{
   const totalPips = Math.max(1, Object.values(pips).reduce((s, v) => s + v, 0));
   document.getElementById('color-breakdown').innerHTML = WUBRG.map(c => `
     <div class="color-row">
-      <img class="mana-icon" src="https://svgs.scryfall.io/card-symbols/${{c}}.svg" alt="${{c}}" loading="lazy">
+      <img class="mana-icon" src="/static/mana/${{c}}.svg" alt="${{c}}" loading="lazy">
       <div class="color-bar-track" title="${{pips[c]}} pip(s) &middot; ${{Math.round(pips[c] / totalPips * 100)}}% of all symbols">
         <div class="color-bar" style="width:${{pips[c] / totalPips * 100}}%"></div>
       </div>
