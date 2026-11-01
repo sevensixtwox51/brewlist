@@ -129,6 +129,14 @@ page).
   Defaults to the well-known Command Zone-style EDH ratios (38 lands / 10
   ramp / 10 draw / 11 interaction / 30 synergy pieces out of a 99-card
   library, plus your 1 commander), adjustable under **Deck mix targets**.
+  **Engine commanders** (a commander whose EDHREC deck type is a plan its own
+  text takes part in: Teysa Karlov and Aristocrats, Kwia and Lifegain) get a
+  plan-aware Auto build: cards that work with that plan, as enablers or
+  payoffs, are ranked first, and six slots move from generic Interaction and
+  Draw to Synergy. The app builds the standard shape too and keeps the
+  plan-shifted one only if its goldfish kill-by-turn-8 odds are not clearly
+  lower, saying so when it falls back
+  ([`synergy.engine_plan`](synergy.py), `_plan_guard` in [`app.py`](app.py)).
   **Search by tag** filters your collection with Scryfall's Oracle Tags (the
   same data as `otag:` searches): type "sacrifice outlet" or "landfall", pick
   one or more, and see only the cards you own that have them. Each tile has a

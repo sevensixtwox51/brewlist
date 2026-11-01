@@ -1137,7 +1137,12 @@ def karsten_correction(entries: list[CardEntry], current_lands: int, adjust: int
     return {"Lands": corrected, "formula": k["lands_formula"], "avg_mv": k["avg_mv"], "cheap": k["cheap"]}
 
 
-def auto_deck_mix(commander_name: str | None, commander_card: dict | None, edhrec_theme: str | None = None, target_size: int = 100) -> dict:
+PLAN_SHIFT_INTERACTION, PLAN_SHIFT_DRAW = 4, 2   # slots an engine commander moves from generic roles to Synergy
+PLAN_MIN_INTERACTION, PLAN_MIN_DRAW = 10, 9         # never cut a role below this
+
+
+def auto_deck_mix(commander_name: str | None, commander_card: dict | None, edhrec_theme: str | None = None, target_size: int = 100,
+                  plan_shift: bool = True) -> dict:
     """The "Auto" preset: the Command Zone shape with Lands from Karsten's formula
     for this commander and deck type. Returns {"mix": {Lands, Ramp, Draw,
     Interaction}, "explain": str}."""
@@ -1168,8 +1173,27 @@ def auto_deck_mix(commander_name: str | None, commander_card: dict | None, edhre
         + f" -> {lands} lands. {note}; about {round(CHEAP_SHARE_OF_RAMP_DRAW * 100)}% of Ramp and Draw assumed cheap. "
         "Analyze checks the finished deck against the same formula."
     )
+    mix = {"Lands": lands, "Ramp": base["Ramp"], "Draw": base["Draw"], "Interaction": base["Interaction"]}
+    plan_note = None
+    if plan_shift and commander_name and commander_card:
+        import synergy  # imported here: synergy itself imports this module
+        plan = synergy.engine_plan(commander_name, (commander_card.get("oracle_text") or ""), deck_label)
+        if plan:
+            # An engine commander wants its slots for the engine: the generic removal and draw that fill out a standard shape
+            # (a lot of it slot filler) give some up, and the Synergy remainder grows by the same number.
+            cut_interaction = min(PLAN_SHIFT_INTERACTION, max(0, mix["Interaction"] - PLAN_MIN_INTERACTION))
+            cut_draw = min(PLAN_SHIFT_DRAW, max(0, mix["Draw"] - PLAN_MIN_DRAW))
+            mix["Interaction"] -= cut_interaction
+            mix["Draw"] -= cut_draw
+            if cut_interaction or cut_draw:
+                plan_note = (
+                    f"{commander_name.split(',')[0]} is built around {plan[0].lower()} ({deck_label} on EDHREC), so {cut_interaction + cut_draw} slots move from "
+                    f"Interaction ({base['Interaction']} to {mix['Interaction']}) and Draw ({base['Draw']} to {mix['Draw']}) to Synergy, "
+                    "and cards that work with that plan are ranked first."
+                )
     return {
-        "mix": {"Lands": lands, "Ramp": base["Ramp"], "Draw": base["Draw"], "Interaction": base["Interaction"]},
+        "mix": mix,
+        "plan_note": plan_note,
         "explain": explain,
         # The pieces of the sentence, so the UI can explain each number on hover.
         "formula": {
@@ -2578,6 +2602,24 @@ def suggest_builder_cards(
                     edhrec_theme_boost.add(nm)
                     if nm in _members:
                         tribal_boost.add(nm)
+
+    # A commander that is an engine for its EDHREC deck type (Teysa Karlov: Aristocrats, her text pays off creature deaths)
+    # wants cards that take part in that plan -- on either side, enabler or payoff -- ahead of generic picks. EDHREC's own list
+    # only runs ~250 cards deep and a collection rarely holds the top of it, so without this the Synergy slots go to whatever
+    # is popular and what gets drawn doesn't connect with the commander.
+    if deck_format == "commander" and commander_entry:
+        import synergy  # imported here: synergy itself imports this module
+        _plan_cmd = _find_commander_card(commander_entry.name, owned_view, gameplay) or {}
+        _plan = synergy.engine_plan(commander_entry.name, _plan_cmd.get("oracle_text") or "", (edhrec_view.get("deck_type") or {}).get("value"))
+        if _plan:
+            for c in candidates:
+                nm = normalize_name(c["name"])
+                if nm in theme_reason_by_name or _card_role(c["name"], c["category"], role_members) != "Synergy":
+                    continue
+                hit = synergy.card_plan_packages(c["name"], c.get("oracle_text") or "", c.get("type_line") or "", _plan)
+                if hit:
+                    theme_reason_by_name[nm] = f"works with {commander_entry.name.split(',')[0]}: {hit[0].lower()}"
+                    edhrec_theme_boost.add(nm)
 
     fit_tier: dict[str, int] = {}  # 0-3, filled once the backed picks are known (see below)
     fit_why: dict[str, str] = {}

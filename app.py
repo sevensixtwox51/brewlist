@@ -2366,7 +2366,7 @@ function karstenFormulaHtml(f) {{
 // the deck it just built disagrees with the estimate by 2+ lands; show that here.
 function applyMixCorrection(fix) {{
   if (!fix || !mixAuto) return;
-  setMixTargets({{ ...brew.mix_targets, Lands: fix.Lands }});
+  setMixTargets({{ ...brew.mix_targets, Lands: fix.Lands, Interaction: fix.Interaction !== undefined ? fix.Interaction : brew.mix_targets.Interaction, Draw: fix.Draw !== undefined ? fix.Draw : brew.mix_targets.Draw }});
   const box = document.getElementById('mix-auto-explain');
   if (fix.formula) {{
     box.innerHTML = 'Rebuilt with ' + fix.Lands + ' lands instead of ' + fix.was + ': the first pass came out at an average mana value of '
@@ -2392,7 +2392,8 @@ function refreshAutoMix() {{
       const box = document.getElementById('mix-auto-explain');
       if (data.formula) {{
         box.innerHTML = 'Karsten: ' + karstenFormulaHtml(data.formula) + '. '
-          + escapeHtml((data.formula.mv_source || '') + '; about ' + (data.formula.cheap_share || 43) + '% of Ramp and Draw assumed cheap. Analyze checks the finished deck against the same formula.');
+          + escapeHtml((data.formula.mv_source || '') + '; about ' + (data.formula.cheap_share || 43) + '% of Ramp and Draw assumed cheap. Analyze checks the finished deck against the same formula.')
+          + (data.plan_note ? '<br><b>Plan:</b> ' + escapeHtml(data.plan_note) : '');
       }} else {{
         box.textContent = data.explain || '';
       }}
@@ -5871,6 +5872,57 @@ def _excluded_card_names(body: dict) -> set[str] | None:
     return names or None
 
 
+def _clock_entries(wip_entries, suggestions, gameplay):
+    built = list(wip_entries) + [
+        CardEntry(name=s["name"], quantity=s.get("quantity", 1), type_line=s["type_line"], is_foil=False,
+                  section="mainboard", cmc=s.get("cmc") or 0)
+        for s in suggestions
+    ]
+    for e in built:
+        if not e.cmc and e.section != "commander":
+            e.cmc = (gameplay.get(normalize_name(e.name)) or {}).get("cmc") or 0
+    return built
+
+
+PLAN_CLOCK_TOLERANCE = 2.0  # points of "kills by turn 8" an engine plan may cost before the standard shape is kept
+
+
+def _plan_guard(body, commander, wip_entries, gameplay, mix_targets, suggestions, build, pools_out, meta_out):
+    """An engine commander's Auto mix moves slots from generic Interaction/Draw to Synergy (see deck_builder.auto_deck_mix).
+    That helps some decks and hurts others, and the goldfish is the only measure the app has, so build the standard shape too
+    and keep the plan-shifted build only if its kill-by-turn-8 odds aren't clearly lower. Returns (suggestions, mix_targets,
+    note-or-None); the note is set when the standard shape was kept."""
+    try:
+        card = gameplay.get(normalize_name(commander["name"]))
+        plain = auto_deck_mix(commander["name"], card, body.get("edhrec_theme") or None, plan_shift=False)["mix"]
+    except Exception:  # noqa: BLE001
+        return suggestions, mix_targets, None
+    if plain.get("Interaction") == mix_targets.get("Interaction") and plain.get("Draw") == mix_targets.get("Draw"):
+        return suggestions, mix_targets, None   # no plan shift in play for this commander
+    plain_mix = {**mix_targets, "Interaction": plain["Interaction"], "Draw": plain["Draw"]}
+    try:
+        alt = build(plain_mix, pools=None, meta={})
+        if not alt:
+            return suggestions, mix_targets, None
+        shifted_clock = simulate_turn_clock(_clock_entries(wip_entries, suggestions, gameplay), games=600)
+        plain_clock = simulate_turn_clock(_clock_entries(wip_entries, alt, gameplay), games=600)
+        shifted_t8 = (shifted_clock or {}).get("by_turn", {}).get(8)
+        plain_t8 = (plain_clock or {}).get("by_turn", {}).get(8)
+    except Exception:  # noqa: BLE001 -- a guardrail, never a reason to fail a build
+        return suggestions, mix_targets, None
+    if shifted_t8 is None or plain_t8 is None or shifted_t8 + PLAN_CLOCK_TOLERANCE >= plain_t8:
+        return suggestions, mix_targets, None
+    if pools_out is not None:
+        pools_out.clear()
+    if meta_out is not None:
+        meta_out.clear()
+    note = (
+        f"Kept the standard Interaction and Draw: giving more slots to {commander['name'].split(',')[0]}'s plan made the goldfish kill by turn 8 "
+        f"less likely ({shifted_t8:.0f}% against {plain_t8:.0f}%)."
+    )
+    return build(plain_mix), plain_mix, note
+
+
 def _run_suggest(body: dict, pools_out: dict | None = None, meta_out: dict | None = None):
     """Shared by /builder/suggest and /builder/suggest-pools: same request
     shape, same pipeline, so the guided flow can never drift from what the
@@ -5895,7 +5947,7 @@ def _run_suggest(body: dict, pools_out: dict | None = None, meta_out: dict | Non
     } or None
     target_size = 100 if deck_format == "commander" else 60
 
-    def _build(mix):
+    def _build(mix, pools=pools_out, meta=meta_out):
         return suggest_builder_cards(
             wip_entries, owned_view, deck_format, body.get("target_format"),
             target_size=target_size,
@@ -5913,12 +5965,16 @@ def _run_suggest(body: dict, pools_out: dict | None = None, meta_out: dict | Non
             excluded_set_codes=_excluded_set_codes(body),
             gameplay=gameplay,
             excluded_card_names=_excluded_card_names(body),
-            pools_out=pools_out,
+            pools_out=pools,
             edhrec_theme=body.get("edhrec_theme") or None,
-            meta_out=meta_out,
+            meta_out=meta,
         )
 
     suggestions = _build(mix_targets)
+    plan_kept_standard = None
+    if body.get("mix_auto") and deck_format == "commander" and mix_targets and suggestions and commander.get("name"):
+        suggestions, mix_targets, plan_kept_standard = _plan_guard(
+            body, commander, wip_entries, gameplay, mix_targets, suggestions, _build, pools_out, meta_out)
     # Auto (Karsten) mix: the Lands number was estimated before any cards were
     # picked. Check it against the deck that actually came out (real average mana
     # value, real cheap ramp/draw) and, if it is off by 2+ lands, rebuild once with
@@ -5957,6 +6013,12 @@ def _run_suggest(body: dict, pools_out: dict | None = None, meta_out: dict | Non
                 }
                 if pools_out is not None:
                     pools_out["mix_correction"] = meta_out["mix_correction"]
+    if plan_kept_standard and meta_out is not None:
+        fix = meta_out.setdefault("mix_correction", {"Lands": mix_targets.get("Lands"), "was": mix_targets.get("Lands")})
+        fix["Interaction"], fix["Draw"] = mix_targets["Interaction"], mix_targets["Draw"]
+        fix.setdefault("explain", plan_kept_standard)
+        if pools_out is not None:
+            pools_out["mix_correction"] = fix
     return suggestions, None
 
 

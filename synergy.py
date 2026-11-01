@@ -32,7 +32,8 @@ _PACKAGES = [
     ("Sacrifice and death triggers",
      [r"^[^:\n]*\bsacrifice (?:a|an|another|two|three|x|any number of|up to)\b[^:\n]*:"],
      [r"whenever (?:a|another|one or more)[^.,]*\b(?:creatures?|permanents?|artifacts?|nontoken creatures?)\b[^.,]*\b(?:you control )?dies?\b",
-      r"whenever you sacrifice", r"whenever [^.,]*\bis put into a graveyard from the battlefield", r"whenever (?:a|another) (?:creature|permanent) you control dies"],
+      r"whenever you sacrifice", r"whenever [^.,]*\bis put into a graveyard from the battlefield", r"whenever (?:a|another) (?:creature|permanent) you control dies",
+      r"creature dying", r"dying causes"],
      (), "sacrifice outlets and the cards that pay you when things die"),
     ("Graveyard recursion",
      [r"\bmills? (?:\w+ )?cards?", r"put the top [^.]*cards? of your library into your graveyard", r"\bsurveil\b", r"\bdredge\b", r"discard (?:a|up to|two|your)",
@@ -86,6 +87,58 @@ _COMPILED = [
     (name, [re.compile(p, re.M) for p in enablers], [re.compile(p, re.M) for p in payoffs], types, blurb)
     for name, enablers, payoffs, types, blurb in _PACKAGES
 ]
+
+# EDHREC deck types that name a package: a commander whose deck type is one of these, and whose own text takes part in
+# that package, is built around it (Teysa Karlov: Aristocrats, and her text pays off creature deaths).
+_DECK_TYPE_PACKAGE = {
+    "aristocrats": "Sacrifice and death triggers", "sacrifice": "Sacrifice and death triggers", "tokens": "Tokens", "go wide": "Tokens",
+    "reanimator": "Graveyard recursion", "graveyard": "Graveyard recursion", "+1/+1 counters": "+1/+1 counters", "counters": "+1/+1 counters",
+    "lifegain": "Lifegain", "landfall": "Landfall and extra lands", "artifacts": "Artifacts", "enchantments": "Enchantments", "enchantress": "Enchantments",
+    "blink": "Blink and enters-the-battlefield value", "flicker": "Blink and enters-the-battlefield value", "spellslinger": "Spells matter",
+}
+_BY_NAME = {name: (en, pay, types) for name, en, pay, types, _ in _COMPILED}
+
+
+def _card_text(name: str, oracle_text: str) -> str:
+    """Lowercased rules text with the card's own name replaced by "~" (the same reading deck_synergy_packages uses)."""
+    text = (oracle_text or "").lower()
+    short = name.split(",")[0]
+    for alias in sorted({name, short, short.split(" of ")[0]}, key=len, reverse=True):
+        text = text.replace(alias.lower(), "~")
+    return re.sub(r"\bthis (?:creature|permanent|artifact|enchantment|equipment|aura|spell|vehicle)\b", "~", text)
+
+
+def engine_plan(commander_name: str, commander_text: str, deck_type_label: str | None) -> list[str]:
+    """The packages this commander is built around: the one its EDHREC deck type names, kept only when the commander's own
+    text is part of it (as an enabler or a payoff), plus at most one more that its text pays off. Empty for a commander that
+    is not an engine for its deck type."""
+    pkg = _DECK_TYPE_PACKAGE.get((deck_type_label or "").strip().lower())
+    if not pkg or pkg not in _BY_NAME:
+        return []
+    en, pay, _ = _BY_NAME[pkg]
+    text = _card_text(commander_name, commander_text)
+    if not (_matches(en, text) or _matches(pay, text)):
+        return []
+    plan = [pkg]
+    # One more package the commander itself pays off (Teysa also rewards creature tokens), so its enablers count too.
+    for name, (_, other_pay, _) in _BY_NAME.items():
+        if name != pkg and _matches(other_pay, text):
+            plan.append(name)
+            break
+    return plan
+
+
+def card_plan_packages(name: str, oracle_text: str, type_line: str, plan: list[str]) -> list[str]:
+    """Which of the plan's packages this card takes part in, on either side (enabler or payoff)."""
+    text = _card_text(name, oracle_text)
+    out = []
+    for pkg in plan:
+        en, pay, types = _BY_NAME[pkg]
+        if (types and any(t in (type_line or "") for t in types)) or _matches(en, text) or _matches(pay, text):
+            out.append(pkg)
+    return out
+
+
 _MIN_PACKAGE_SIZE = 6      # enablers + payoffs for a package to count as something the deck is doing
 _PAYOFF_SHORT_RATIO = 0.3  # enablers below this share of the package: payoffs outnumber what feeds them
 
