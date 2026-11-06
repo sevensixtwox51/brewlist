@@ -1753,7 +1753,7 @@ body:not(.compact) .builder-tile .card-thumb { width:62px; height:86px; border-r
 body:not(.compact) .builder-tile:hover .card-thumb { transform:translateY(-2px) scale(1.06); box-shadow:0 10px 20px rgba(0,0,0,0.55), 0 0 0 1px color-mix(in srgb, var(--identity-glow, var(--gold)) 60%, transparent); }
 #view-density-toggle { display:inline-flex; align-items:center; justify-content:center; }
 #view-density-toggle svg { display:none; }
-#view-density-toggle[data-mode="cards"] .icon-gallery, #view-density-toggle[data-mode="gallery"] .icon-list, #view-density-toggle[data-mode="compact"] .icon-grid { display:block; }
+#view-density-toggle[data-mode="cards"] .icon-grid, #view-density-toggle[data-mode="gallery"] .icon-gallery, #view-density-toggle[data-mode="compact"] .icon-list { display:block; }
 body.gallery .collection-grid { grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:18px 14px; padding:10px 8px 10px 4px; }
 body.gallery .builder-tile { display:block; padding:0; background:none; border:none; box-shadow:none; border-radius:0; }
 body.gallery .builder-tile:hover { border:none; box-shadow:none; }
@@ -1882,6 +1882,16 @@ body.gallery .builder-tile:hover .thumb-col { transform:translateY(-4px) scale(1
 body.gallery .builder-tile:hover .thumb-col .card-thumb { transform:none; }
 .builder-tile > .ci-stripe, .builder-tile.foil > .ci-stripe { position:absolute; left:0; top:0; bottom:0; width:4px; border-radius:10px 0 0 10px; pointer-events:none; opacity:0.9; z-index:1; }
 body.gallery .builder-tile > .ci-stripe { display:none; }
+.view-menu { position:relative; display:inline-flex; }
+.view-list { display:none; position:absolute; right:0; top:calc(100% + 6px); z-index:70; min-width:230px; flex-direction:column; gap:2px; padding:6px;
+  background:var(--bg-elevated); border:1px solid var(--card-border); border-radius:10px; box-shadow:var(--shadow); }
+.view-menu.open .view-list { display:flex; }
+.view-menu.open #view-density-toggle { color:var(--accent); border-color:var(--accent); }
+.view-opt { display:flex; align-items:center; gap:10px; width:100%; padding:8px 10px; border:none; border-radius:8px; background:transparent; color:var(--text); font:inherit; font-size:0.88rem; text-align:left; cursor:pointer; }
+.view-opt svg { flex-shrink:0; }
+.view-opt .vo-hint { margin-left:auto; font-size:0.72rem; color:var(--text-dim); }
+.view-opt:hover { background:var(--card-bg); }
+.view-opt.active { color:var(--accent); background:color-mix(in srgb, var(--accent) 12%, transparent); font-weight:600; }
 """
 
 COLOR_LABELS = {"W": "White", "U": "Blue", "B": "Black", "R": "Red", "G": "Green"}
@@ -2095,11 +2105,18 @@ def render_builder_page(deck_id: str | None = None) -> str:
             <button type="button" class="btn ghost small" id="grid-set-filter-btn">Set</button>
             <div class="set-selection-popup" id="grid-set-filter-popup"></div>
           </div>
-          <button type="button" class="btn ghost icon-btn" id="view-density-toggle" data-mode="cards" title="Switch to gallery view" aria-label="Switch to gallery view">
-            <svg class="icon-list" viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M7 5h10M7 10h10M7 15h10"/><circle cx="3.2" cy="5" r="0.9" fill="currentColor" stroke="none"/><circle cx="3.2" cy="10" r="0.9" fill="currentColor" stroke="none"/><circle cx="3.2" cy="15" r="0.9" fill="currentColor" stroke="none"/></svg>
-            <svg class="icon-grid" viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="2.5" width="6" height="6" rx="1.2"/><rect x="11.5" y="2.5" width="6" height="6" rx="1.2"/><rect x="2.5" y="11.5" width="6" height="6" rx="1.2"/><rect x="11.5" y="11.5" width="6" height="6" rx="1.2"/></svg>
-            <svg class="icon-gallery" viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="3" width="6" height="14" rx="1.2"/><rect x="11.5" y="3" width="6" height="14" rx="1.2"/></svg>
-          </button>
+          <div class="view-menu" id="view-menu">
+            <button type="button" class="btn ghost icon-btn" id="view-density-toggle" data-mode="cards" title="Change the view" aria-label="Change the view" aria-haspopup="true">
+              <svg class="icon-list" viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M7 5h10M7 10h10M7 15h10"/><circle cx="3.2" cy="5" r="0.9" fill="currentColor" stroke="none"/><circle cx="3.2" cy="10" r="0.9" fill="currentColor" stroke="none"/><circle cx="3.2" cy="15" r="0.9" fill="currentColor" stroke="none"/></svg>
+              <svg class="icon-grid" viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="2.5" width="6" height="6" rx="1.2"/><rect x="11.5" y="2.5" width="6" height="6" rx="1.2"/><rect x="2.5" y="11.5" width="6" height="6" rx="1.2"/><rect x="11.5" y="11.5" width="6" height="6" rx="1.2"/></svg>
+              <svg class="icon-gallery" viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="3" width="6" height="14" rx="1.2"/><rect x="11.5" y="3" width="6" height="14" rx="1.2"/></svg>
+            </button>
+            <div class="view-list" id="view-list" role="menu">
+              <button type="button" class="view-opt" data-mode="cards" role="menuitem"><svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="2.5" width="6" height="6" rx="1.2"/><rect x="11.5" y="2.5" width="6" height="6" rx="1.2"/><rect x="2.5" y="11.5" width="6" height="6" rx="1.2"/><rect x="11.5" y="11.5" width="6" height="6" rx="1.2"/></svg> Cards <span class="vo-hint">images with details</span></button>
+              <button type="button" class="view-opt" data-mode="gallery" role="menuitem"><svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="3" width="6" height="14" rx="1.2"/><rect x="11.5" y="3" width="6" height="14" rx="1.2"/></svg> Gallery <span class="vo-hint">just the card images</span></button>
+              <button type="button" class="view-opt" data-mode="compact" role="menuitem"><svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M7 5h10M7 10h10M7 15h10"/><circle cx="3.2" cy="5" r="0.9" fill="currentColor" stroke="none"/><circle cx="3.2" cy="10" r="0.9" fill="currentColor" stroke="none"/><circle cx="3.2" cy="15" r="0.9" fill="currentColor" stroke="none"/></svg> Compact <span class="vo-hint">a plain list</span></button>
+            </div>
+          </div>
         </div>
         <div id="commander-popularity-controls" style="display:none;">
           <select id="edhrec-window" title="Which EDHREC time window a commander's popularity rank is based on">
@@ -2726,19 +2743,25 @@ document.getElementById('draw-hand-btn').addEventListener('click', drawSampleHan
 // One icon button: it shows the view a click switches TO (list icon while in
 // card tiles, tile icon while in the compact list).
 const densityBtn = document.getElementById('view-density-toggle');
-// Three views of the collection: card tiles, a gallery of card images, and the compact list (which also
-// condenses the deck list and suggestions). One click moves to the next; the choice is remembered.
+const viewMenu = document.getElementById('view-menu');
+// Three views of the collection -- card tiles, a gallery of card images, the compact list (which also condenses the deck list
+// and suggestions) -- chosen from a small menu. The choice is remembered.
 const VIEW_MODES = ['cards', 'gallery', 'compact'];
-const VIEW_LABELS = {{ cards: 'Switch to gallery view', gallery: 'Switch to compact list', compact: 'Switch to card tiles' }};
+const VIEW_NAMES = {{ cards: 'Cards', gallery: 'Gallery', compact: 'Compact' }};
 function setViewMode(mode) {{
   document.body.classList.toggle('compact', mode === 'compact');
   document.body.classList.toggle('gallery', mode === 'gallery');
   densityBtn.dataset.mode = mode;
-  densityBtn.title = VIEW_LABELS[mode];
-  densityBtn.setAttribute('aria-label', VIEW_LABELS[mode]);
+  densityBtn.title = 'View: ' + VIEW_NAMES[mode] + ' (click to change)';
+  densityBtn.setAttribute('aria-label', 'View: ' + VIEW_NAMES[mode] + '. Change the view');
+  viewMenu.querySelectorAll('.view-opt').forEach(o => o.classList.toggle('active', o.dataset.mode === mode));
   try {{ localStorage.setItem('brewlist-view-mode', mode); }} catch (e) {{}}
 }}
-densityBtn.addEventListener('click', () => setViewMode(VIEW_MODES[(VIEW_MODES.indexOf(densityBtn.dataset.mode) + 1) % VIEW_MODES.length]));
+densityBtn.addEventListener('click', (e) => {{ e.stopPropagation(); viewMenu.classList.toggle('open'); }});
+viewMenu.querySelectorAll('.view-opt').forEach(o => o.addEventListener('click', () => {{ setViewMode(o.dataset.mode); viewMenu.classList.remove('open'); }}));
+document.addEventListener('click', (e) => {{ if (!viewMenu.contains(e.target)) viewMenu.classList.remove('open'); }});
+document.addEventListener('keydown', (e) => {{ if (e.key === 'Escape') viewMenu.classList.remove('open'); }});
+setViewMode('cards');
 try {{ const saved = localStorage.getItem('brewlist-view-mode'); if (VIEW_MODES.includes(saved)) setViewMode(saved); }} catch (e) {{}}
 // The five mana symbols drive the color filter above: pick any combination and the matching preset is selected.
 const colorSelect = document.getElementById('filter-color');
