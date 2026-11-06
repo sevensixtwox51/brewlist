@@ -1876,7 +1876,10 @@ body.compact .complete-badge { display:none; }
 .pct-chip.none { font-size:0.7rem; font-weight:400; color:var(--text-dim); }
 body.compact .pct-chip { display:none; }
 body.gallery .thumb-col { position:relative; display:block; }
-body.gallery .pct-chip { position:absolute; top:6px; left:6px; padding:3px 7px; border-radius:999px; background:rgba(20,17,15,0.86); font-size:0.78rem; }
+body.gallery .pct-chip { position:absolute; bottom:6px; left:6px; z-index:3; padding:3px 7px; border-radius:999px; background:rgba(20,17,15,0.86); font-size:0.78rem; }
+body.gallery .builder-tile:has(.pct-chip) .tile-body { padding-bottom:38px; }
+body.gallery .builder-tile:hover .thumb-col { transform:translateY(-4px) scale(1.04); transition:transform .18s ease; }
+body.gallery .builder-tile:hover .thumb-col .card-thumb { transform:none; }
 .builder-tile > .ci-stripe, .builder-tile.foil > .ci-stripe { position:absolute; left:0; top:0; bottom:0; width:4px; border-radius:10px 0 0 10px; pointer-events:none; opacity:0.9; z-index:1; }
 body.gallery .builder-tile > .ci-stripe { display:none; }
 """
