@@ -314,7 +314,7 @@ Decklist so an open deck isn't lost, and a yellow banner appears if the server w
 restarted under an open page. The server also **quits by itself after 15 minutes
 with nothing used**: an open page counts only while you touch it (mouse, keys,
 scroll), so a tab left open doesn't keep it running, and a page with unsaved work gets
-three times as long. About two minutes before it stops, a banner says so; moving the
+three times as long. It never stops while a background job (rating commanders, building a report) is still running. About two minutes before it stops, a banner says so; moving the
 mouse cancels it. Set `BREWLIST_IDLE_EXIT_MINUTES` (e.g.
 `BREWLIST_IDLE_EXIT_MINUTES=60 python3 app.py`; minimum 2) to change the time, or
 `BREWLIST_IDLE_EXIT_MINUTES=0` to turn it off. It's also off in Docker (the container

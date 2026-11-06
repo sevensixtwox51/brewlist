@@ -6919,11 +6919,24 @@ def _note_activity():
     _last_activity = now
 
 
+def _background_work_running() -> bool:
+    """A job the server is still working on (rating commanders, a comparison or report being built) -- the server never idles out
+    from under one, even if the tab that started it was closed."""
+    with _SCORES_LOCK:
+        if _SCORES_JOB.get("running"):
+            return True
+    with _JOBS_LOCK:
+        return any(j.get("status") == "running" for j in JOBS.values())
+
+
 def _idle_seconds_left() -> float | None:
-    """Seconds until the idle exit fires, or None when it is off. A page holding unsaved work gets three times the grace."""
+    """Seconds until the idle exit fires, or None when it is off. A page holding unsaved work gets three times the grace, and
+    nothing idles out while a background job is running."""
     if _IDLE_EXIT_SECONDS is None:
         return None
     now = time.time()
+    if _background_work_running():
+        return _IDLE_EXIT_SECONDS
     limit = _IDLE_EXIT_SECONDS * (3 if now - _last_dirty < 90 else 1)
     return limit - (now - _last_activity)
 
