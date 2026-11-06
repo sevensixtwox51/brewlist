@@ -3673,7 +3673,7 @@ function applyFilter() {{
     const matchesText = !q || name.includes(q);
     const matchesMissing = !onlyMissing || isMissing;
     const ci = card.dataset.ci || '';
-    const matchesColor = !activeColors.size || [...activeColors].some(c => ci.includes(c));
+    const matchesColor = !activeColors.size || [...activeColors].some(c => c === 'C' ? ci === '' : ci.includes(c));
 
     let matchesPrice = true;
     if (isMissing && !noLimit) {{
@@ -4516,7 +4516,7 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
         )
     color_pips_html = "".join(
         f'<button type="button" class="color-pip" data-c="{c}" aria-label="{n}"><img src="{html.escape(mana_symbol_url(c))}" alt="" loading="lazy"></button>'
-        for c, n in (("W", "White"), ("U", "Blue"), ("B", "Black"), ("R", "Red"), ("G", "Green"))
+        for c, n in (("W", "White"), ("U", "Blue"), ("B", "Black"), ("R", "Red"), ("G", "Green"), ("C", "Colorless"))
     )
 
     body_attrs = ""

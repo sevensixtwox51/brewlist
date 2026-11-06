@@ -1743,6 +1743,7 @@ body.compact .deck-row .card-thumb { display:none; }
 body:not(.compact) .builder-tile { grid-template-columns:62px minmax(0,1fr) auto; }
 body:not(.compact) .builder-tile .card-thumb { width:62px; height:86px; border-radius:4.75% / 3.4%; box-shadow:0 3px 10px rgba(0,0,0,0.45); transition:transform .18s ease, box-shadow .18s ease; }
 body:not(.compact) .builder-tile:hover .card-thumb { transform:translateY(-2px) scale(1.06); box-shadow:0 10px 20px rgba(0,0,0,0.55), 0 0 0 1px color-mix(in srgb, var(--identity-glow, var(--gold)) 60%, transparent); }
+#view-density-toggle { display:inline-flex; align-items:center; justify-content:center; }
 #view-density-toggle svg { display:none; }
 #view-density-toggle[data-mode="cards"] .icon-gallery, #view-density-toggle[data-mode="gallery"] .icon-list, #view-density-toggle[data-mode="compact"] .icon-grid { display:block; }
 body.gallery .collection-grid { grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:18px 14px; padding:10px 8px 10px 4px; }
@@ -2066,7 +2067,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
           <select id="filter-color"><option value="">Any color</option><option value="C">Colorless</option><optgroup label="One-Color">{color_options}</optgroup>{color_family_optgroups}</select>
           <div class="theme-picker tag-search"><input type="text" id="tag-input" placeholder="Search by tag (sacrifice outlet, landfall...)" autocomplete="off" title="Scryfall's Oracle Tags: what a card does. Pick one or more to show only the cards you own that have them."><div class="theme-dropdown" id="tag-dropdown"></div></div>
           <span class="tag-chips" id="tag-chips"></span>
-          <span class="color-pips" id="color-pips" title="Click colors to filter; click again to clear"><button type="button" class="color-pip" data-c="W" aria-label="White"><img src="/static/mana/W.svg" alt=""></button><button type="button" class="color-pip" data-c="U" aria-label="Blue"><img src="/static/mana/U.svg" alt=""></button><button type="button" class="color-pip" data-c="B" aria-label="Black"><img src="/static/mana/B.svg" alt=""></button><button type="button" class="color-pip" data-c="R" aria-label="Red"><img src="/static/mana/R.svg" alt=""></button><button type="button" class="color-pip" data-c="G" aria-label="Green"><img src="/static/mana/G.svg" alt=""></button></span>
+          <span class="color-pips" id="color-pips" title="Click colors to filter; click again to clear"><button type="button" class="color-pip" data-c="W" aria-label="White"><img src="/static/mana/W.svg" alt=""></button><button type="button" class="color-pip" data-c="U" aria-label="Blue"><img src="/static/mana/U.svg" alt=""></button><button type="button" class="color-pip" data-c="B" aria-label="Black"><img src="/static/mana/B.svg" alt=""></button><button type="button" class="color-pip" data-c="R" aria-label="Red"><img src="/static/mana/R.svg" alt=""></button><button type="button" class="color-pip" data-c="G" aria-label="Green"><img src="/static/mana/G.svg" alt=""></button><button type="button" class="color-pip" data-c="C" aria-label="Colorless"><img src="/static/mana/C.svg" alt=""></button></span>
           <label class="exact-color-toggle" title="Only show cards whose color identity is exactly the selected color(s) -- e.g. true Grixis cards, not also mono-colored or two-color ones that merely fit within Grixis">
             <input type="checkbox" id="filter-color-exact" checked> Exact colors
           </label>
@@ -2724,13 +2725,19 @@ const colorSelect = document.getElementById('filter-color');
 const colorPips = [...document.querySelectorAll('#color-pips .color-pip')];
 function syncColorPips() {{
   const v = colorSelect.value;
-  colorPips.forEach(b => b.classList.toggle('on', v !== 'C' && v.includes(b.dataset.c)));
+  colorPips.forEach(b => b.classList.toggle('on', b.dataset.c === 'C' ? v === 'C' : (v !== 'C' && v.includes(b.dataset.c))));
 }}
 colorPips.forEach(b => b.addEventListener('click', () => {{
-  const on = new Set(colorPips.filter(x => x.classList.contains('on')).map(x => x.dataset.c));
-  if (on.has(b.dataset.c)) on.delete(b.dataset.c); else on.add(b.dataset.c);
-  const match = [...colorSelect.options].find(o => o.value && o.value !== 'C' && o.value.length === on.size && [...on].every(c => o.value.includes(c)));
-  colorSelect.value = match ? match.value : '';
+  const c = b.dataset.c;
+  if (c === 'C') {{
+    // Colorless stands alone: it isn't a color to combine with the others.
+    colorSelect.value = colorSelect.value === 'C' ? '' : 'C';
+  }} else {{
+    const on = new Set(colorPips.filter(x => x.classList.contains('on') && x.dataset.c !== 'C').map(x => x.dataset.c));
+    if (on.has(c)) on.delete(c); else on.add(c);
+    const match = [...colorSelect.options].find(o => o.value && o.value !== 'C' && o.value.length === on.size && [...on].every(x => o.value.includes(x)));
+    colorSelect.value = match ? match.value : '';
+  }}
   colorSelect.dispatchEvent(new Event('change'));
 }}));
 colorSelect.addEventListener('change', syncColorPips);
