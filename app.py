@@ -2127,7 +2127,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
           <select id="commander-sort" title="How to order your commanders. Most complete needs them rated first (the button next to this).">
             <option value="rank">Sort: most popular first</option>
             <option value="complete">Sort: most complete first</option>
-            <option value="name">Sort: collection order</option>
+            <option value="name">Sort: name (A-Z)</option>
           </select>
           <button type="button" class="btn ghost small" id="rate-commanders-btn" title="Builds each commander you own from your collection in the background and scores how much of the deck is real cards instead of slot filler. Takes a few minutes the first time; saved until your collection changes.">&#9878; Rate my commanders</button>
           <span class="hint" id="rate-status" style="margin:0;"></span>
