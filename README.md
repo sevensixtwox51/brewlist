@@ -146,6 +146,9 @@ page).
   today. Each is rated for its most common EDHREC deck type. Nothing is rated
   unless you click the button; after that, a collection change only re-rates
   the commanders whose colors the new or removed cards could affect.
+  The **Sort** menu orders the collection by name, or by **set** (release date,
+  then card number -- like a binder), with an ascending/descending button; under
+  the Commander filter it can also sort by popularity or completeness.
   **Search by tag** filters your collection with Scryfall's Oracle Tags (the
   same data as `otag:` searches): type "sacrifice outlet" or "landfall", pick
   one or more, and see only the cards you own that have them. Each tile has a

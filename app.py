@@ -1892,6 +1892,8 @@ body.gallery .builder-tile > .ci-stripe { display:none; }
 .view-opt .vo-hint { margin-left:auto; font-size:0.72rem; color:var(--text-dim); }
 .view-opt:hover { background:var(--card-bg); }
 .view-opt.active { color:var(--accent); background:color-mix(in srgb, var(--accent) 12%, transparent); font-weight:600; }
+.sort-field { display:inline-flex; align-items:center; gap:6px; }
+.sort-dir { width:38px; padding:0; justify-content:center; font-size:1.05rem; }
 """
 
 COLOR_LABELS = {"W": "White", "U": "Blue", "B": "Black", "R": "Red", "G": "Green"}
@@ -2105,6 +2107,15 @@ def render_builder_page(deck_id: str | None = None) -> str:
             <button type="button" class="btn ghost small" id="grid-set-filter-btn">Set</button>
             <div class="set-selection-popup" id="grid-set-filter-popup"></div>
           </div>
+          <div class="sort-field">
+            <select id="grid-sort" title="How to order the cards. Set order follows the sets by release date, then card number -- like a binder.">
+              <option value="name">Sort: name</option>
+              <option value="set">Sort: set, then card number</option>
+              <option value="rank" data-cmd="1">Sort: popularity (commanders)</option>
+              <option value="complete" data-cmd="1">Sort: completeness (commanders)</option>
+            </select>
+            <button type="button" class="btn ghost icon-btn sort-dir" id="sort-dir" aria-label="Reverse the sort order">&#8593;</button>
+          </div>
           <div class="view-menu" id="view-menu">
             <button type="button" class="btn ghost icon-btn" id="view-density-toggle" data-mode="cards" title="Change the view" aria-label="Change the view" aria-haspopup="true">
               <svg class="icon-list" viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M7 5h10M7 10h10M7 15h10"/><circle cx="3.2" cy="5" r="0.9" fill="currentColor" stroke="none"/><circle cx="3.2" cy="10" r="0.9" fill="currentColor" stroke="none"/><circle cx="3.2" cy="15" r="0.9" fill="currentColor" stroke="none"/></svg>
@@ -2123,11 +2134,6 @@ def render_builder_page(deck_id: str | None = None) -> str:
             <option value="2years">Popularity: past 2 years</option>
             <option value="month">Popularity: past month</option>
             <option value="week">Popularity: past week</option>
-          </select>
-          <select id="commander-sort" title="How to order your commanders. Most complete needs them rated first (the button next to this).">
-            <option value="rank">Sort: most popular first</option>
-            <option value="complete">Sort: most complete first</option>
-            <option value="name">Sort: name (A-Z)</option>
           </select>
           <button type="button" class="btn ghost small" id="rate-commanders-btn" title="Builds each commander you own from your collection in the background and scores how much of the deck is real cards instead of slot filler. Takes a few minutes the first time; saved until your collection changes.">&#9878; Rate my commanders</button>
           <span class="hint" id="rate-status" style="margin:0;"></span>
@@ -3277,9 +3283,8 @@ function renderGrid() {{
   const color = document.getElementById('filter-color').value;
   const exactColor = document.getElementById('filter-color-exact').checked;
   const edhrecWindow = document.getElementById('edhrec-window').value;
-  const commanderSort = document.getElementById('commander-sort').value;
-  const sortByComplete = category === 'Commander' && commanderSort === 'complete';
-  const sortByRank = category === 'Commander' && commanderSort === 'rank';
+  let sortMode = document.getElementById('grid-sort').value;
+  if (category !== 'Commander' && (sortMode === 'rank' || sortMode === 'complete')) sortMode = 'name';
   const grid = document.getElementById('collection-grid');
   grid.innerHTML = '';
   const frag = document.createDocumentFragment();
@@ -3294,30 +3299,33 @@ function renderGrid() {{
     return true;
   }});
 
-  if (sortByComplete) {{
-    // Rated commanders first, most complete first (fewest slot fillers on a tie); unrated ones last.
-    const sc = (card) => commanderScores[normalizeName(card.name)];
-    cards.sort((a, b) => {{
-      const x = sc(a), y = sc(b);
-      const xv = x && x.pct !== undefined ? x.pct : -1, yv = y && y.pct !== undefined ? y.pct : -1;
-      return (yv - xv) || ((x && x.filler || 0) - (y && y.filler || 0)) || a.name.localeCompare(b.name);
-    }});
-  }} else if (sortByRank) {{
-    // Ranked (lower = more popular) sorts first; anything with no rank in
-    // this window sorts after, by raw deck count when known -- so a real,
-    // if unranked, commander (see edhrec_data.py's module docstring on why
-    // most owned commanders won't place in a Top 100 at all) still sorts
-    // above one with no EDHREC data at all rather than mixing randomly.
-    cards.sort((a, b) => {{
-      const pa = commanderPopularityFor(a), pb = commanderPopularityFor(b);
-      const ra = pa && pa.rank ? pa.rank[edhrecWindow] : undefined;
-      const rb = pb && pb.rank ? pb.rank[edhrecWindow] : undefined;
-      if (ra !== undefined && rb !== undefined) return ra - rb;
-      if (ra !== undefined) return -1;
-      if (rb !== undefined) return 1;
-      const da = (pa && pa.num_decks) || 0, db = (pb && pb.num_decks) || 0;
-      return db - da;
-    }});
+  // Ascending is the natural order of what is sorted: name A-Z, set oldest first, popularity rank 1 first, completeness low to high.
+  // Cards with nothing to sort on (unranked, unrated) always go last, whichever way it runs.
+  const dir = sortDescending ? -1 : 1;
+  const cmp = (x, y) => (x < y ? -1 : (x > y ? 1 : 0));
+  const collectorKey = (c) => {{ const m = String(c.collector_number || '').match(/\\d+/); return m ? parseInt(m[0], 10) : 1e9; }};
+  const withLast = (valueOf, tiebreak) => (a, b) => {{
+    const x = valueOf(a), y = valueOf(b);
+    if (x === undefined && y === undefined) return 0;
+    if (x === undefined) return 1;
+    if (y === undefined) return -1;
+    return dir * (x - y) || tiebreak(a, b);
+  }};
+  if (sortMode === 'name') {{
+    cards.sort((a, b) => dir * cmp(a.name, b.name));
+  }} else if (sortMode === 'set') {{
+    cards.sort((a, b) => dir * (cmp(a.set_release || '', b.set_release || '') || cmp(a.set_code || '', b.set_code || '')
+      || (collectorKey(a) - collectorKey(b)) || cmp(String(a.collector_number || ''), String(b.collector_number || '')) || cmp(a.name, b.name)));
+  }} else if (sortMode === 'complete') {{
+    const sc = (card) => {{ const x = commanderScores[normalizeName(card.name)]; return x && x.pct !== undefined ? x.pct : undefined; }};
+    cards.sort(withLast(sc, (a, b) => cmp(a.name, b.name)));
+  }} else if (sortMode === 'rank') {{
+    // Rank 1 is the most popular. Anything with no rank in this window sorts after, by raw deck count when known, so a real but
+    // unranked commander still sorts above one with no EDHREC data at all (see edhrec_data.py on why most owned commanders
+    // won't place in a Top 100).
+    const rankOf = (card) => {{ const p = commanderPopularityFor(card); return p && p.rank ? p.rank[edhrecWindow] : undefined; }};
+    const decksOf = (card) => {{ const p = commanderPopularityFor(card); return (p && p.num_decks) || 0; }};
+    cards.sort(withLast(rankOf, (a, b) => decksOf(b) - decksOf(a)));
   }}
 
   cards.forEach(card => {{
@@ -3717,7 +3725,6 @@ document.getElementById('filter-category').addEventListener('change', () => {{
 document.getElementById('filter-color').addEventListener('change', renderGrid);
 document.getElementById('filter-color-exact').addEventListener('change', renderGrid);
 document.getElementById('edhrec-window').addEventListener('change', renderGrid);
-document.getElementById('commander-sort').addEventListener('change', renderGrid);
 
 // EDHREC data is deliberately never refreshed on a timer (see
 // edhrec_data.py's module docstring) -- the only two times a background
@@ -3731,6 +3738,17 @@ document.getElementById('commander-sort').addEventListener('change', renderGrid)
 // with cards real decks play, instead of slot filler. Rated in the background; scores are kept until the collection changes.
 let commanderScores = {{}};
 let scoresPolling = false;
+let sortDescending = false;
+const gridSortSel = document.getElementById('grid-sort');
+const sortDirBtn = document.getElementById('sort-dir');
+function syncSortDir() {{
+  sortDirBtn.innerHTML = sortDescending ? '&#8595;' : '&#8593;';
+  sortDirBtn.title = sortDescending ? 'Descending (click for ascending)' : 'Ascending (click for descending)';
+}}
+syncSortDir();
+// Each sort starts in the direction that puts the best first: completeness high to low, everything else low to high.
+gridSortSel.addEventListener('change', () => {{ sortDescending = gridSortSel.value === 'complete'; syncSortDir(); renderGrid(); }});
+sortDirBtn.addEventListener('click', () => {{ sortDescending = !sortDescending; syncSortDir(); renderGrid(); }});
 // A commander's rating is just its percent, under the card image; the detail is in the hover.
 function completenessChipHtml(card, category) {{
   if (category !== 'Commander' || !isCommanderEligible(card)) return '';
@@ -3838,10 +3856,14 @@ function updateCommanderPopularityControlsVisibility() {{
     // right after this by the filter-category change listener) reads
     // the checkbox live, so setting it here is enough -- no extra
     // re-render needed.
-    document.getElementById('commander-sort').value = 'rank';
+    gridSortSel.value = 'rank'; sortDescending = false; syncSortDir();
     if (!edhrecPolling) pollCommanderPopularity(60);
+  }} else if (gridSortSel.value === 'rank' || gridSortSel.value === 'complete') {{
+    gridSortSel.value = 'name'; sortDescending = false; syncSortDir();
   }}
+  [...gridSortSel.options].forEach(o => {{ if (o.dataset.cmd) {{ o.disabled = !isCommanderFilter; o.hidden = !isCommanderFilter; }} }});
 }}
+updateCommanderPopularityControlsVisibility();   // start with the commander-only sorts hidden
 document.getElementById('edhrec-refresh-btn').addEventListener('click', () => {{
   const statusEl = document.getElementById('edhrec-status');
   const btn = document.getElementById('edhrec-refresh-btn');
@@ -5852,6 +5874,9 @@ def builder_collection_data():
     # so far to show the nicer printing.
     ensure_printing_info_async(p.scryfall_id for oc in owned.values() if len(oc.printings) > 1 for p in oc.printings)
     cards = owned_collection_gameplay_view(owned, gameplay_data_in_index())
+    sets = sets_data_in_index()
+    for c in cards:
+        c["set_release"] = (sets.get((c.get("set_code") or "").upper()) or {}).get("release_date", "")
     image_versions = scryfall_image_versions([(c.get("scryfall_id"), c.get("set_code")) for c in cards])
     return jsonify(cards=cards, image_versions=image_versions)
 
