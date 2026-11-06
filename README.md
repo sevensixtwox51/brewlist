@@ -143,7 +143,9 @@ page).
   cards can fill with cards EDHREC lists for that commander, how many would be
   slot filler, and how many of EDHREC's 40 strongest signature cards you own.
   Sort by **Most complete first** to see which commanders you can build best
-  today. Ratings are saved until your collection or card database changes.
+  today. Each is rated for its most common EDHREC deck type. Nothing is rated
+  unless you click the button; after that, a collection change only re-rates
+  the commanders whose colors the new or removed cards could affect.
   **Search by tag** filters your collection with Scryfall's Oracle Tags (the
   same data as `otag:` searches): type "sacrifice outlet" or "landfall", pick
   one or more, and see only the cards you own that have them. Each tile has a

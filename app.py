@@ -3684,25 +3684,30 @@ function completenessHtml(card, category) {{
   if (!sc) return '';
   if (sc.pct === undefined) return '<div class="complete-badge none" title="EDHREC has no deck data for this commander, so it can not be rated.">not rated &middot; no EDHREC data</div>';
   const cls = sc.pct >= 85 ? 'good' : (sc.pct >= 70 ? 'ok' : 'bad');
-  const tip = sc.backed + ' of the deck\u2019s ' + sc.nonland + ' non-land slots can be filled from your collection with cards EDHREC lists for ' + card.name + ' decks. '
-    + sc.filler + ' would be slot filler' + (sc.empty ? ' and ' + sc.empty + ' would stay empty' : '') + '. '
-    + (sc.core_total ? 'You own ' + sc.core_owned + ' of the ' + sc.core_total + ' cards EDHREC links most strongly to this commander.' : '');
+  // The detail lives in the hover, so the tile only carries the bar and the number.
+  const tip = sc.pct + '% complete: ' + sc.backed + ' of the deck\u2019s ' + sc.nonland + ' non-land slots can be filled from your collection with cards EDHREC lists for '
+    + card.name + ' decks. ' + sc.filler + ' would be slot filler' + (sc.empty ? ' and ' + sc.empty + ' would stay empty' : '') + '.'
+    + (sc.core_total ? ' You own ' + sc.core_owned + ' of the ' + sc.core_total + ' signature cards EDHREC links most strongly to it.' : '')
+    + (sc.deck_type ? ' Rated for its most common deck type on EDHREC (' + sc.deck_type + '), not every theme.' : '');
   return '<div class="complete-badge ' + cls + '" title="' + escapeHtml(tip) + '"><span class="cb-main"><span class="cb-track"><span style="width:' + sc.pct + '%"></span></span>'
-    + '<b>' + sc.pct + '%</b> complete</span><span class="cb-detail">' + sc.filler + ' filler' + (sc.core_total ? ' &middot; ' + sc.core_owned + '/' + sc.core_total + ' signature cards' : '') + '</span></div>';
+    + '<b>' + sc.pct + '%</b> complete</span></div>';
 }}
 function loadCommanderScores() {{
   fetch('/builder/commander-scores').then(r => r.json()).then(data => {{
     commanderScores = data.scores || {{}};
     const status = document.getElementById('rate-status'), btn = document.getElementById('rate-commanders-btn');
+    const rated = Object.values(commanderScores).filter(s => s.pct !== undefined).length;
     if (data.running) {{
       status.textContent = 'Rating ' + data.done + ' / ' + data.total + (data.current ? ' (' + data.current.split(',')[0] + ')' : '') + '\u2026';
       btn.disabled = true;
       if (!scoresPolling) {{ scoresPolling = true; setTimeout(() => {{ scoresPolling = false; loadCommanderScores(); }}, 4000); }}
     }} else {{
-      const n = Object.values(commanderScores).filter(s => s.pct !== undefined).length;
-      status.textContent = n ? n + ' commanders rated' : '';
-      btn.disabled = false;
-      btn.textContent = n ? '\u2696 Re-check ratings' : '\u2696 Rate my commanders';
+      // Nothing is rated on its own: the button is the only way to start it, and it only re-rates what a collection change could touch.
+      btn.disabled = !!rated && !data.pending;
+      btn.textContent = !rated ? '\u2696 Rate my commanders' : (data.pending ? '\u2696 Re-check ' + data.pending + ' commander' + (data.pending === 1 ? '' : 's') : '\u2713 Ratings up to date');
+      btn.title = !rated ? 'Builds each commander you own from your collection in the background and scores how complete it is. Takes a few minutes the first time.'
+        : (data.pending ? 'Your collection changed since these were rated. This re-rates only the ' + data.pending + ' commanders whose colors the change touches, plus any new ones.' : 'Nothing has changed since these were rated.');
+      status.textContent = rated ? rated + ' rated' : '';
     }}
     renderGrid();
   }}).catch(() => {{}});
@@ -5833,28 +5838,40 @@ _SCORES_JOB: dict = {"running": False, "done": 0, "total": 0, "current": None}
 _BACKED_BASES = ("combo", "synergy", "theme", "edhrec")
 
 
-def _scores_key() -> str:
-    def _m(path):
-        try:
-            return str(int(os.path.getmtime(path)))
-        except OSError:
-            return "0"
-    return f"{_m(COLLECTION_PATH)}:{_m(PRICE_INDEX_PATH)}:4"
+def _mtime_str(path: str) -> str:
+    try:
+        return str(int(os.path.getmtime(path)))
+    except OSError:
+        return "0"
 
 
-def _load_scores() -> dict:
+def _index_key() -> str:
+    return f"{_mtime_str(PRICE_INDEX_PATH)}:5"
+
+
+def _legacy_key() -> str:
+    return f"{_mtime_str(COLLECTION_PATH)}:{_mtime_str(PRICE_INDEX_PATH)}:4"
+
+
+def _load_cache() -> tuple[dict, set | None]:
+    """(scores, the owned card names they were rated against). The names let a changed collection re-rate only the commanders
+    the change could affect; None means 'same as now' (a cache written before names were kept)."""
     try:
         with open(COMMANDER_SCORES_PATH, encoding="utf-8") as f:
             data = json.load(f)
     except (OSError, ValueError):
-        return {}
-    return data.get("scores", {}) if data.get("key") == _scores_key() else {}
+        return {}, None
+    if data.get("key") == _index_key():
+        return data.get("scores", {}), set(data.get("names") or [])
+    if data.get("key") == _legacy_key():
+        return data.get("scores", {}), None
+    return {}, None
 
 
-def _save_scores(scores: dict) -> None:
+def _save_cache(scores: dict, names: set) -> None:
     tmp = f"{COMMANDER_SCORES_PATH}.{os.getpid()}.tmp"
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump({"key": _scores_key(), "scores": scores}, f)
+        json.dump({"key": _index_key(), "names": sorted(names), "scores": scores}, f)
     os.replace(tmp, COMMANDER_SCORES_PATH)
 
 
@@ -5864,6 +5881,29 @@ def _eligible_commander_rows(owned_view: list[dict]) -> list[dict]:
         if (("Legendary" in r["type_line"] and "Creature" in r["type_line"]) or "can be your commander" in (r.get("oracle_text") or ""))
         and (r.get("legalities") or {}).get("commander") in (None, "Legal")
     ]
+
+
+def _pending_commanders(rows: list[dict], owned_view: list[dict], gameplay: dict, scores: dict, old_names: set | None) -> tuple[list[dict], set]:
+    """The commanders that still need rating: ones never rated, plus rated ones whose colours a collection change touches (a new
+    or removed card can only change the deck of a commander whose colour identity contains the card's). Returns (rows, current names)."""
+    names = {normalize_name(r["name"]) for r in owned_view}
+    if old_names is None:
+        old_names = names
+    changed = (names - old_names) | (old_names - names)
+    changed_ci = []
+    for n in changed:
+        row = gameplay.get(n)
+        changed_ci.append(None if row is None else set(row.get("color_identity") or []))
+    pending = []
+    for r in rows:
+        n = normalize_name(r["name"])
+        if n not in scores:
+            pending.append(r)
+            continue
+        cid = set(r.get("color_identity") or [])
+        if any(c is None or c <= cid for c in changed_ci):
+            pending.append(r)
+    return pending, names
 
 
 def _score_commander(row: dict, owned_view: list[dict], gameplay: dict) -> dict:
@@ -5915,16 +5955,17 @@ def _commander_scores_worker() -> None:
         gameplay = gameplay_data_in_index()
         owned_view = owned_collection_gameplay_view(owned, gameplay)
         rows = _eligible_commander_rows(owned_view)
+        scores, old_names = _load_cache()
+        todo, names = _pending_commanders(rows, owned_view, gameplay, scores, old_names)
         try:  # most-played commanders first, so the useful scores arrive early
-            pop = bulk_commander_popularity([r["name"] for r in rows])
+            pop = bulk_commander_popularity([r["name"] for r in todo])
             rank = {normalize_name(n): ((p.get("rank") or {}).get("2years") or 10**6) for n, p in pop.items()}
         except Exception:  # noqa: BLE001
             rank = {}
-        rows.sort(key=lambda r: (rank.get(normalize_name(r["name"]), 10**6), r["name"]))
-        scores = _load_scores()
-        todo = [r for r in rows if normalize_name(r["name"]) not in scores]
+        todo.sort(key=lambda r: (rank.get(normalize_name(r["name"]), 10**6), r["name"]))
+        keep_names = old_names if old_names is not None else names   # an interrupted run stays resumable
         with _SCORES_LOCK:
-            _SCORES_JOB.update(running=True, done=len(rows) - len(todo), total=len(rows), current=None)
+            _SCORES_JOB.update(running=True, done=0, total=len(todo), current=None)
         for r in todo:
             with _SCORES_LOCK:
                 _SCORES_JOB["current"] = r["name"]
@@ -5935,8 +5976,8 @@ def _commander_scores_worker() -> None:
             with _SCORES_LOCK:
                 _SCORES_JOB["done"] += 1
             if _SCORES_JOB["done"] % 5 == 0:
-                _save_scores(scores)
-        _save_scores(scores)
+                _save_cache(scores, keep_names)
+        _save_cache(scores, names)
     finally:
         with _SCORES_LOCK:
             _SCORES_JOB.update(running=False, current=None)
@@ -5944,13 +5985,25 @@ def _commander_scores_worker() -> None:
 
 @app.route("/builder/commander-scores", methods=["GET"])
 def builder_commander_scores():
+    """The saved ratings, the job's progress, and (when no job is running) how many commanders a collection change means
+    should be re-rated. Nothing here starts any work."""
     with _SCORES_LOCK:
         job = dict(_SCORES_JOB)
-    return jsonify(scores=_load_scores(), running=job["running"], done=job["done"], total=job["total"], current=job["current"])
+    scores, old_names = _load_cache()
+    pending = 0
+    if not job["running"] and os.path.isfile(COLLECTION_PATH):
+        try:
+            gameplay = gameplay_data_in_index()
+            owned_view = owned_collection_gameplay_view(load_collection(COLLECTION_PATH), gameplay)
+            pending = len(_pending_commanders(_eligible_commander_rows(owned_view), owned_view, gameplay, scores, old_names)[0])
+        except Exception:  # noqa: BLE001
+            pending = 0
+    return jsonify(scores=scores, running=job["running"], done=job["done"], total=job["total"], current=job["current"], pending=pending)
 
 
 @app.route("/builder/commander-scores/start", methods=["POST"])
 def builder_commander_scores_start():
+    """Starts rating the commanders that need it (never rated, or touched by a collection change). Only ever runs when asked."""
     if not os.path.isfile(COLLECTION_PATH):
         return jsonify(error="No ManaBox collection on file yet."), 400
     with _SCORES_LOCK:
