@@ -2704,6 +2704,8 @@ HTML_TEMPLATE = """<!doctype html>
   --shadow: 0 4px 16px rgba(0,0,0,0.4);
   --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
   --series-a: #6fa8c9;
+  --scroll-thumb: #8a7d68;
+  --scroll-track: #221d19;
 }}
 @media (prefers-color-scheme: light) {{
   :root {{
@@ -2719,9 +2721,16 @@ HTML_TEMPLATE = """<!doctype html>
     --gold: #e0b04a;
     --shadow: 0 2px 10px rgba(60,40,10,0.1);
     --series-a: #2f7ea1;
+    --scroll-thumb: #a89677;
+    --scroll-track: #ece3cf;
   }}
 }}
 a {{ color: var(--accent); }}
+:root {{ scrollbar-color: var(--scroll-thumb) var(--scroll-track); }}
+::-webkit-scrollbar {{ width: 13px; height: 13px; }}
+::-webkit-scrollbar-track {{ background: var(--scroll-track); }}
+::-webkit-scrollbar-thumb {{ background: var(--scroll-thumb); border-radius: 8px; border: 3px solid var(--scroll-track); }}
+::-webkit-scrollbar-thumb:hover {{ background: var(--text-dim); }}
 * {{ box-sizing: border-box; }}
 body {{
   margin: 0;
