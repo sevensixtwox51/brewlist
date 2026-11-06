@@ -2124,12 +2124,11 @@ def render_builder_page(deck_id: str | None = None) -> str:
             <option value="month">Popularity: past month</option>
             <option value="week">Popularity: past week</option>
           </select>
-          <label class="exact-color-toggle" title="Sorts eligible commanders by their EDHREC rank (most popular first); ones with no rank in this window sort last">
-            <input type="checkbox" id="sort-by-rank"> Sort by rank
-          </label>
-          <label class="exact-color-toggle" title="Sorts commanders by how complete your collection is for building them without slot filler (rate them first with the button next to this)">
-            <input type="checkbox" id="sort-by-complete"> Most complete first
-          </label>
+          <select id="commander-sort" title="How to order your commanders. Most complete needs them rated first (the button next to this).">
+            <option value="rank">Sort: most popular first</option>
+            <option value="complete">Sort: most complete first</option>
+            <option value="name">Sort: collection order</option>
+          </select>
           <button type="button" class="btn ghost small" id="rate-commanders-btn" title="Builds each commander you own from your collection in the background and scores how much of the deck is real cards instead of slot filler. Takes a few minutes the first time; saved until your collection changes.">&#9878; Rate my commanders</button>
           <span class="hint" id="rate-status" style="margin:0;"></span>
           <button type="button" class="btn ghost small" id="edhrec-refresh-btn" title="EDHREC data only updates when you click this -- it never refetches on its own">&#8635; Refresh rankings</button>
@@ -3278,8 +3277,9 @@ function renderGrid() {{
   const color = document.getElementById('filter-color').value;
   const exactColor = document.getElementById('filter-color-exact').checked;
   const edhrecWindow = document.getElementById('edhrec-window').value;
-  const sortByComplete = category === 'Commander' && document.getElementById('sort-by-complete').checked;
-  const sortByRank = category === 'Commander' && !sortByComplete && document.getElementById('sort-by-rank').checked;
+  const commanderSort = document.getElementById('commander-sort').value;
+  const sortByComplete = category === 'Commander' && commanderSort === 'complete';
+  const sortByRank = category === 'Commander' && commanderSort === 'rank';
   const grid = document.getElementById('collection-grid');
   grid.innerHTML = '';
   const frag = document.createDocumentFragment();
@@ -3717,7 +3717,7 @@ document.getElementById('filter-category').addEventListener('change', () => {{
 document.getElementById('filter-color').addEventListener('change', renderGrid);
 document.getElementById('filter-color-exact').addEventListener('change', renderGrid);
 document.getElementById('edhrec-window').addEventListener('change', renderGrid);
-document.getElementById('sort-by-rank').addEventListener('change', renderGrid);
+document.getElementById('commander-sort').addEventListener('change', renderGrid);
 
 // EDHREC data is deliberately never refreshed on a timer (see
 // edhrec_data.py's module docstring) -- the only two times a background
@@ -3781,13 +3781,6 @@ document.getElementById('rate-commanders-btn').addEventListener('click', () => {
   document.getElementById('rate-status').textContent = 'Starting\u2026';
   fetch('/builder/commander-scores/start', {{ method: 'POST' }}).then(() => loadCommanderScores()).catch(() => {{}});
 }});
-document.getElementById('sort-by-complete').addEventListener('change', (e) => {{
-  if (e.target.checked) document.getElementById('sort-by-rank').checked = false;
-  renderGrid();
-}});
-document.getElementById('sort-by-rank').addEventListener('change', (e) => {{
-  if (e.target.checked) document.getElementById('sort-by-complete').checked = false;
-}});
 loadCommanderScores();
 
 let edhrecPolling = false;
@@ -3845,7 +3838,7 @@ function updateCommanderPopularityControlsVisibility() {{
     // right after this by the filter-category change listener) reads
     // the checkbox live, so setting it here is enough -- no extra
     // re-render needed.
-    document.getElementById('sort-by-rank').checked = true;
+    document.getElementById('commander-sort').value = 'rank';
     if (!edhrecPolling) pollCommanderPopularity(60);
   }}
 }}
