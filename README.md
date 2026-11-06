@@ -137,6 +137,13 @@ page).
   plan-shifted one only if its goldfish kill-by-turn-8 odds are not clearly
   lower, saying so when it falls back
   ([`synergy.engine_plan`](synergy.py), `_plan_guard` in [`app.py`](app.py)).
+  **Rate my commanders** (in the Commander filter's controls) builds each
+  commander you own from your collection in the background and shows, on its
+  tile, how **complete** it is: the share of the deck's non-land slots your
+  cards can fill with cards EDHREC lists for that commander, how many would be
+  slot filler, and how many of EDHREC's 40 strongest signature cards you own.
+  Sort by **Most complete first** to see which commanders you can build best
+  today. Ratings are saved until your collection or card database changes.
   **Search by tag** filters your collection with Scryfall's Oracle Tags (the
   same data as `otag:` searches): type "sacrifice outlet" or "landfall", pick
   one or more, and see only the cards you own that have them. Each tile has a

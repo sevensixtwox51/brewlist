@@ -29,6 +29,7 @@ from datetime import datetime, timezone
 from flask import Flask, Response, abort, jsonify, request
 
 from brewlist_core import (
+    PRICE_INDEX_PATH,
     scryfall_image_versions,
     BUCKET_ORDER,
     PICKABLE_STORE_LABELS,
@@ -1847,6 +1848,17 @@ body.compact .tile-tags, body.gallery .tile-tags { display:none; }
 .tag-popover h5 { margin:0 0 8px; font-family:var(--serif); font-size:0.95rem; font-weight:600; }
 .tag-popover-chips { display:flex; flex-wrap:wrap; gap:5px; }
 .tag-count { opacity:0.65; font-variant-numeric:tabular-nums; margin-left:2px; }
+.complete-badge { display:flex; flex-direction:column; align-items:flex-start; gap:1px; margin-top:5px; font-size:0.72rem; color:var(--text-dim); }
+.complete-badge .cb-main { display:inline-flex; align-items:center; gap:7px; }
+.complete-badge .cb-detail { opacity:0.85; }
+.complete-badge b { font-family:var(--serif); font-size:0.95rem; }
+.complete-badge .cb-track { width:54px; height:5px; border-radius:3px; background:var(--card-border); overflow:hidden; flex-shrink:0; }
+.complete-badge .cb-track span { display:block; height:100%; border-radius:3px; background:var(--text-dim); }
+.complete-badge.good b { color:var(--owned); } .complete-badge.good .cb-track span { background:var(--owned); }
+.complete-badge.ok b { color:var(--gold); } .complete-badge.ok .cb-track span { background:var(--gold); }
+.complete-badge.bad b { color:var(--missing); } .complete-badge.bad .cb-track span { background:var(--missing); }
+.complete-badge.none { font-style:italic; }
+body.compact .complete-badge { display:none; }
 """
 
 COLOR_LABELS = {"W": "White", "U": "Blue", "B": "Black", "R": "Red", "G": "Green"}
@@ -2075,6 +2087,11 @@ def render_builder_page(deck_id: str | None = None) -> str:
           <label class="exact-color-toggle" title="Sorts eligible commanders by their EDHREC rank (most popular first); ones with no rank in this window sort last">
             <input type="checkbox" id="sort-by-rank"> Sort by rank
           </label>
+          <label class="exact-color-toggle" title="Sorts commanders by how complete your collection is for building them without slot filler (rate them first with the button next to this)">
+            <input type="checkbox" id="sort-by-complete"> Most complete first
+          </label>
+          <button type="button" class="btn ghost small" id="rate-commanders-btn" title="Builds each commander you own from your collection in the background and scores how much of the deck is real cards instead of slot filler. Takes a few minutes the first time; saved until your collection changes.">&#9878; Rate my commanders</button>
+          <span class="hint" id="rate-status" style="margin:0;"></span>
           <button type="button" class="btn ghost small" id="edhrec-refresh-btn" title="EDHREC data only updates when you click this -- it never refetches on its own">&#8635; Refresh rankings</button>
           <span class="hint" id="edhrec-status" style="margin:0;"></span>
         </div>
@@ -3209,7 +3226,8 @@ function renderGrid() {{
   const color = document.getElementById('filter-color').value;
   const exactColor = document.getElementById('filter-color-exact').checked;
   const edhrecWindow = document.getElementById('edhrec-window').value;
-  const sortByRank = category === 'Commander' && document.getElementById('sort-by-rank').checked;
+  const sortByComplete = category === 'Commander' && document.getElementById('sort-by-complete').checked;
+  const sortByRank = category === 'Commander' && !sortByComplete && document.getElementById('sort-by-rank').checked;
   const grid = document.getElementById('collection-grid');
   grid.innerHTML = '';
   const frag = document.createDocumentFragment();
@@ -3224,7 +3242,15 @@ function renderGrid() {{
     return true;
   }});
 
-  if (sortByRank) {{
+  if (sortByComplete) {{
+    // Rated commanders first, most complete first (fewest slot fillers on a tie); unrated ones last.
+    const sc = (card) => commanderScores[normalizeName(card.name)];
+    cards.sort((a, b) => {{
+      const x = sc(a), y = sc(b);
+      const xv = x && x.pct !== undefined ? x.pct : -1, yv = y && y.pct !== undefined ? y.pct : -1;
+      return (yv - xv) || ((x && x.filler || 0) - (y && y.filler || 0)) || a.name.localeCompare(b.name);
+    }});
+  }} else if (sortByRank) {{
     // Ranked (lower = more popular) sorts first; anything with no rank in
     // this window sorts after, by raw deck count when known -- so a real,
     // if unranked, commander (see edhrec_data.py's module docstring on why
@@ -3269,6 +3295,7 @@ function renderGrid() {{
         <div class="meta">${{card.type_line || 'Unknown type'}} &middot; CMC ${{card.cmc}} &middot; own ${{card.quantity}}</div>
         ${{warnHtml}}
         ${{popularityHtml}}
+        ${{completenessHtml(card, category)}}
         ${{tileTagChipsHtml(card)}}
       </div>
       <div class="tile-corner-actions">
@@ -3647,6 +3674,52 @@ document.getElementById('sort-by-rank').addEventListener('change', renderGrid);
 // real live edhrec.com fetch taking several seconds, so this polls every
 // 3s only WHILE the server reports one in progress, stopping the moment
 // it's done (or after a generous safety cap, in case something wedges).
+// ---- Commander completeness (see _score_commander in app.py): how much of a commander's deck your collection can fill
+// with cards real decks play, instead of slot filler. Rated in the background; scores are kept until the collection changes.
+let commanderScores = {{}};
+let scoresPolling = false;
+function completenessHtml(card, category) {{
+  if (category !== 'Commander' || !isCommanderEligible(card)) return '';
+  const sc = commanderScores[normalizeName(card.name)];
+  if (!sc) return '';
+  if (sc.pct === undefined) return '<div class="complete-badge none" title="EDHREC has no deck data for this commander, so it can not be rated.">not rated &middot; no EDHREC data</div>';
+  const cls = sc.pct >= 85 ? 'good' : (sc.pct >= 70 ? 'ok' : 'bad');
+  const tip = sc.backed + ' of the deck\u2019s ' + sc.nonland + ' non-land slots can be filled from your collection with cards EDHREC lists for ' + card.name + ' decks. '
+    + sc.filler + ' would be slot filler' + (sc.empty ? ' and ' + sc.empty + ' would stay empty' : '') + '. '
+    + (sc.core_total ? 'You own ' + sc.core_owned + ' of the ' + sc.core_total + ' cards EDHREC links most strongly to this commander.' : '');
+  return '<div class="complete-badge ' + cls + '" title="' + escapeHtml(tip) + '"><span class="cb-main"><span class="cb-track"><span style="width:' + sc.pct + '%"></span></span>'
+    + '<b>' + sc.pct + '%</b> complete</span><span class="cb-detail">' + sc.filler + ' filler' + (sc.core_total ? ' &middot; ' + sc.core_owned + '/' + sc.core_total + ' signature cards' : '') + '</span></div>';
+}}
+function loadCommanderScores() {{
+  fetch('/builder/commander-scores').then(r => r.json()).then(data => {{
+    commanderScores = data.scores || {{}};
+    const status = document.getElementById('rate-status'), btn = document.getElementById('rate-commanders-btn');
+    if (data.running) {{
+      status.textContent = 'Rating ' + data.done + ' / ' + data.total + (data.current ? ' (' + data.current.split(',')[0] + ')' : '') + '\u2026';
+      btn.disabled = true;
+      if (!scoresPolling) {{ scoresPolling = true; setTimeout(() => {{ scoresPolling = false; loadCommanderScores(); }}, 4000); }}
+    }} else {{
+      const n = Object.values(commanderScores).filter(s => s.pct !== undefined).length;
+      status.textContent = n ? n + ' commanders rated' : '';
+      btn.disabled = false;
+      btn.textContent = n ? '\u2696 Re-check ratings' : '\u2696 Rate my commanders';
+    }}
+    renderGrid();
+  }}).catch(() => {{}});
+}}
+document.getElementById('rate-commanders-btn').addEventListener('click', () => {{
+  document.getElementById('rate-status').textContent = 'Starting\u2026';
+  fetch('/builder/commander-scores/start', {{ method: 'POST' }}).then(() => loadCommanderScores()).catch(() => {{}});
+}});
+document.getElementById('sort-by-complete').addEventListener('change', (e) => {{
+  if (e.target.checked) document.getElementById('sort-by-rank').checked = false;
+  renderGrid();
+}});
+document.getElementById('sort-by-rank').addEventListener('change', (e) => {{
+  if (e.target.checked) document.getElementById('sort-by-complete').checked = false;
+}});
+loadCommanderScores();
+
 let edhrecPolling = false;
 function formatRelativeTime(epochSeconds) {{
   if (!epochSeconds) return null;
@@ -5745,6 +5818,147 @@ def builder_synergy():
     identity = set(body["identity"]) if isinstance(body.get("identity"), list) else None
     deck_names = {normalize_name(n) for n in (body.get("deck_names") or [])}
     return jsonify(tag_synergy.related_cards(name, rows, identity, deck_names))
+
+
+# --------------------------------------------------------------------------
+# Commander completeness: how well your collection can build each commander you own without slot filler.
+# Runs the real autobuild for the commander on its own (Auto mix, standard EDHREC deck type) and counts what it
+# filled the non-land slots with. A background job rates every eligible commander once and keeps the result,
+# redoing it only when the collection or the card database changes.
+# --------------------------------------------------------------------------
+
+COMMANDER_SCORES_PATH = os.path.join(DATA_DIR, "commander_scores.json")
+_SCORES_LOCK = threading.Lock()
+_SCORES_JOB: dict = {"running": False, "done": 0, "total": 0, "current": None}
+_BACKED_BASES = ("combo", "synergy", "theme", "edhrec")
+
+
+def _scores_key() -> str:
+    def _m(path):
+        try:
+            return str(int(os.path.getmtime(path)))
+        except OSError:
+            return "0"
+    return f"{_m(COLLECTION_PATH)}:{_m(PRICE_INDEX_PATH)}:4"
+
+
+def _load_scores() -> dict:
+    try:
+        with open(COMMANDER_SCORES_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return data.get("scores", {}) if data.get("key") == _scores_key() else {}
+
+
+def _save_scores(scores: dict) -> None:
+    tmp = f"{COMMANDER_SCORES_PATH}.{os.getpid()}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({"key": _scores_key(), "scores": scores}, f)
+    os.replace(tmp, COMMANDER_SCORES_PATH)
+
+
+def _eligible_commander_rows(owned_view: list[dict]) -> list[dict]:
+    return [
+        r for r in owned_view
+        if (("Legendary" in r["type_line"] and "Creature" in r["type_line"]) or "can be your commander" in (r.get("oracle_text") or ""))
+        and (r.get("legalities") or {}).get("commander") in (None, "Legal")
+    ]
+
+
+def _score_commander(row: dict, owned_view: list[dict], gameplay: dict) -> dict:
+    """Builds the commander's deck from your collection and reports how much of it is real: {pct, backed, filler, empty,
+    nonland, deck_type} -- or {"status": "no-data"} when EDHREC has nothing on the commander."""
+    cmd = {k: row.get(k) for k in ("name", "scryfall_id", "type_line", "color_identity", "cmc", "mana_cost", "category", "set_code", "collector_number")}
+    cmd["quantity"] = 1
+    wip = brew_to_card_entries({"commander": cmd, "cards": []})
+    mix = auto_deck_mix(row["name"], gameplay.get(normalize_name(row["name"])))["mix"]
+    meta: dict = {}
+    sug = suggest_builder_cards(
+        wip, owned_view, "commander", None, target_size=100, commander_color_identity=row.get("color_identity"),
+        max_suggestions=100, mix_targets=mix, gameplay=gameplay, meta_out=meta,
+    )
+    nonland_slots = max(1, 99 - mix["Lands"])
+    owned_nonland = [s for s in sug if s["role"] != "Lands" and s.get("owned", True)]
+    backed = sum(1 for s in owned_nonland if s["basis"] in _BACKED_BASES)
+    filler = sum(1 for s in owned_nonland if s["basis"] == "filler")
+    if meta.get("edhrec_problem") or sum(1 for s in owned_nonland if s["basis"] == "other") > len(owned_nonland) / 2:
+        return {"status": "no-data"}
+    # The signature cards: EDHREC's 40 strongest synergies with this commander, and how many of them you own.
+    core_owned = core_total = 0
+    try:
+        syn = A_edhrec_synergy(row["name"])
+        owned_names = set()
+        for r in owned_view:
+            owned_names.add(normalize_name(r["name"]))
+            owned_names.add(normalize_name(r["name"].split(" // ")[0]))
+        top = sorted(syn.values(), key=lambda c: -c["synergy"])[:40]
+        core_total = len(top)
+        core_owned = sum(1 for c in top if normalize_name(c["name"]) in owned_names)
+    except Exception:  # noqa: BLE001
+        pass
+    return {
+        "pct": round(100 * backed / nonland_slots), "backed": backed, "filler": filler,
+        "empty": max(0, nonland_slots - len(owned_nonland)), "nonland": nonland_slots,
+        "deck_type": ((meta.get("deck_type") or {}).get("value")),
+        "core_owned": core_owned, "core_total": core_total,
+    }
+
+
+def A_edhrec_synergy(commander_name: str) -> dict:
+    return edhrec_commander_view(commander_name, None).get("synergy_data") or {}
+
+
+def _commander_scores_worker() -> None:
+    try:
+        owned = load_collection(COLLECTION_PATH)
+        gameplay = gameplay_data_in_index()
+        owned_view = owned_collection_gameplay_view(owned, gameplay)
+        rows = _eligible_commander_rows(owned_view)
+        try:  # most-played commanders first, so the useful scores arrive early
+            pop = bulk_commander_popularity([r["name"] for r in rows])
+            rank = {normalize_name(n): ((p.get("rank") or {}).get("2years") or 10**6) for n, p in pop.items()}
+        except Exception:  # noqa: BLE001
+            rank = {}
+        rows.sort(key=lambda r: (rank.get(normalize_name(r["name"]), 10**6), r["name"]))
+        scores = _load_scores()
+        todo = [r for r in rows if normalize_name(r["name"]) not in scores]
+        with _SCORES_LOCK:
+            _SCORES_JOB.update(running=True, done=len(rows) - len(todo), total=len(rows), current=None)
+        for r in todo:
+            with _SCORES_LOCK:
+                _SCORES_JOB["current"] = r["name"]
+            try:
+                scores[normalize_name(r["name"])] = _score_commander(r, owned_view, gameplay)
+            except Exception as e:  # noqa: BLE001 -- one odd commander never stops the rest
+                scores[normalize_name(r["name"])] = {"status": "error", "error": str(e)[:120]}
+            with _SCORES_LOCK:
+                _SCORES_JOB["done"] += 1
+            if _SCORES_JOB["done"] % 5 == 0:
+                _save_scores(scores)
+        _save_scores(scores)
+    finally:
+        with _SCORES_LOCK:
+            _SCORES_JOB.update(running=False, current=None)
+
+
+@app.route("/builder/commander-scores", methods=["GET"])
+def builder_commander_scores():
+    with _SCORES_LOCK:
+        job = dict(_SCORES_JOB)
+    return jsonify(scores=_load_scores(), running=job["running"], done=job["done"], total=job["total"], current=job["current"])
+
+
+@app.route("/builder/commander-scores/start", methods=["POST"])
+def builder_commander_scores_start():
+    if not os.path.isfile(COLLECTION_PATH):
+        return jsonify(error="No ManaBox collection on file yet."), 400
+    with _SCORES_LOCK:
+        if _SCORES_JOB["running"]:
+            return jsonify(running=True, started=False)
+        _SCORES_JOB.update(running=True, done=0, total=0, current=None)
+    threading.Thread(target=_commander_scores_worker, daemon=True).start()
+    return jsonify(running=True, started=True)
 
 
 @app.route("/builder/commander-popularity", methods=["GET"])
