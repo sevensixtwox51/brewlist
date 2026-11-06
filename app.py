@@ -1869,6 +1869,8 @@ body.compact .complete-badge { display:none; }
 body.compact .pct-chip { display:none; }
 body.gallery .thumb-col { position:relative; display:block; }
 body.gallery .pct-chip { position:absolute; top:6px; left:6px; padding:3px 7px; border-radius:999px; background:rgba(20,17,15,0.86); font-size:0.78rem; }
+.builder-tile > .ci-stripe, .builder-tile.foil > .ci-stripe { position:absolute; left:0; top:0; bottom:0; width:4px; border-radius:10px 0 0 10px; pointer-events:none; opacity:0.9; z-index:1; }
+body.gallery .builder-tile > .ci-stripe { display:none; }
 """
 
 COLOR_LABELS = {"W": "White", "U": "Blue", "B": "Black", "R": "Red", "G": "Green"}
@@ -3305,6 +3307,7 @@ function renderGrid() {{
       }}
     }}
     tile.innerHTML = `
+      ${{ciStripeHtml(card)}}
       ${{thumbColHtml(card, category)}}
       <div class="tile-body">
         <div class="name"><span class="name-text">${{card.name}}</span>${{card.foil ? '<span class="foil-tag">Foil</span>' : ''}}</div>
@@ -3706,6 +3709,14 @@ function completenessChipHtml(card, category) {{
     + (sc.core_total ? ' You own ' + sc.core_owned + ' of the ' + sc.core_total + ' signature cards EDHREC links most strongly to it.' : '')
     + (sc.deck_type ? ' Rated for its most common deck type on EDHREC (' + sc.deck_type + '), not every theme.' : '');
   return '<span class="pct-chip ' + cls + '" title="' + escapeHtml(tip) + '">' + sc.pct + '%</span>';
+}}
+// A thin stripe down the tile's left edge in the card's colors (split into segments for multicolor), like the deck tiles.
+function ciStripeHtml(card) {{
+  const colors = identityColors(card.color_identity);
+  const step = 100 / colors.length;
+  const bg = colors.length === 1 ? MANA_HEX[colors[0]]
+    : 'linear-gradient(180deg, ' + colors.map((c, i) => MANA_HEX[c] + ' ' + (i * step) + '% ' + ((i + 1) * step) + '%').join(', ') + ')';
+  return '<span class="ci-stripe" style="background:' + bg + '" aria-hidden="true"></span>';
 }}
 function thumbColHtml(card, category) {{
   const thumb = thumbHtml(card.scryfall_id, 'card-thumb', card.layout);
