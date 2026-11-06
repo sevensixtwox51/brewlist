@@ -1840,6 +1840,8 @@ body.compact .tile-tags, body.gallery .tile-tags { display:none; }
 .syn-name { font-family:var(--serif); font-size:0.88rem; font-weight:600; line-height:1.2; margin-top:4px; }
 .syn-reason { font-size:0.68rem; color:var(--text-dim); line-height:1.3; flex:1; }
 .syn-add { margin-top:3px; }
+.tag-btn { font-size:0.72rem; }
+.tag-btn.on { color:var(--accent); border-color:var(--accent); background:color-mix(in srgb, var(--accent) 14%, transparent); }
 .tag-pill { padding:0 8px; border-radius:999px; border:1px solid var(--card-border); background:transparent; color:var(--text-dim); font-family:inherit; font-size:0.68rem; line-height:1.6; cursor:pointer; white-space:nowrap; }
 .tag-pill:hover, .tag-pill.on { color:var(--accent); border-color:var(--accent); }
 .tag-pill.on { background:color-mix(in srgb, var(--accent) 12%, transparent); }
@@ -3296,7 +3298,6 @@ function renderGrid() {{
         ${{warnHtml}}
         ${{popularityHtml}}
         ${{completenessHtml(card, category)}}
-        ${{tileTagChipsHtml(card)}}
       </div>
       <div class="tile-corner-actions">
         ${{manaCostPipsHtml(card.mana_cost)}}
@@ -3313,6 +3314,8 @@ function renderGrid() {{
       actions.appendChild(cmdBtn);
     }}
     actions.appendChild(synergyButton(card.name));
+    const tagBtn = tagButton(card);
+    if (tagBtn) actions.appendChild(tagBtn);
     const addBtn = document.createElement('button');
     addBtn.type = 'button'; addBtn.className = 'btn ghost tile-icon-btn';
     const atMax = brew.format === 'commander' && !!inDeck && inDeck.quantity >= maxCopies(card.name);
@@ -4788,12 +4791,17 @@ function loadTags() {{
     renderGrid();
   }}).catch(() => {{}});
 }}
-// One small "Tags" pill per tile (the tags themselves are in a popover, so tiles stay compact).
-function tileTagChipsHtml(card) {{
+// A small round button in the tile's corner stack (under the works-with button): opens a popover with all of the card's tags.
+function tagButton(card) {{
   const have = (cardTagMap[normalizeName(card.name)] || []).filter(i => tagList[i]);
-  if (!have.length) return '';
-  const hit = have.some(i => activeTags.has(i));
-  return `<div class="tile-tags"><button type="button" class="tag-pill${{hit ? ' on' : ''}}" data-card="${{escapeHtml(card.name)}}" title="See this card's tags">&#127991;&#65039; Tags ${{have.length}}</button></div>`;
+  if (!have.length) return null;
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'btn ghost tile-icon-btn tag-btn' + (have.some(i => activeTags.has(i)) ? ' on' : '');
+  b.textContent = '\U0001F3F7';
+  b.dataset.card = card.name;
+  b.title = 'See this card\u2019s ' + have.length + ' tag' + (have.length === 1 ? '' : 's');
+  return b;
 }}
 function synergyButton(name) {{
   const b = document.createElement('button');
@@ -4852,14 +4860,14 @@ tagPopover.addEventListener('click', (e) => {{
   closeTagPopover();
 }});
 document.getElementById('collection-grid').addEventListener('click', (e) => {{
-  const pill = e.target.closest('.tag-pill');
+  const pill = e.target.closest('.tag-btn, .tag-pill');
   if (!pill) return;
   e.stopPropagation();
   if (tagPopover.classList.contains('show') && tagPopover.dataset.owner === pill.dataset.card) {{ closeTagPopover(); return; }}
   tagPopover.dataset.owner = pill.dataset.card;
   openTagPopover(pill, pill.dataset.card);
 }});
-document.addEventListener('click', (e) => {{ if (!e.target.closest('.tag-popover, .tag-pill')) closeTagPopover(); }});
+document.addEventListener('click', (e) => {{ if (!e.target.closest('.tag-popover, .tag-btn, .tag-pill')) closeTagPopover(); }});
 document.addEventListener('keydown', (e) => {{ if (e.key === 'Escape') closeTagPopover(); }});
 document.getElementById('collection-grid').addEventListener('scroll', closeTagPopover);
 
