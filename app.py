@@ -1862,6 +1862,13 @@ body.compact .tile-tags, body.gallery .tile-tags { display:none; }
 .complete-badge.bad b { color:var(--missing); } .complete-badge.bad .cb-track span { background:var(--missing); }
 .complete-badge.none { font-style:italic; }
 body.compact .complete-badge { display:none; }
+.thumb-col { grid-area:thumb; display:flex; flex-direction:column; align-items:center; gap:3px; }
+.pct-chip { font-family:var(--serif); font-size:0.9rem; font-weight:600; line-height:1; cursor:help; }
+.pct-chip.good { color:var(--owned); } .pct-chip.ok { color:var(--gold); } .pct-chip.bad { color:var(--missing); }
+.pct-chip.none { font-size:0.7rem; font-weight:400; color:var(--text-dim); }
+body.compact .pct-chip { display:none; }
+body.gallery .thumb-col { position:relative; display:block; }
+body.gallery .pct-chip { position:absolute; top:6px; left:6px; padding:3px 7px; border-radius:999px; background:rgba(20,17,15,0.86); font-size:0.78rem; }
 """
 
 COLOR_LABELS = {"W": "White", "U": "Blue", "B": "Black", "R": "Red", "G": "Green"}
@@ -3298,13 +3305,12 @@ function renderGrid() {{
       }}
     }}
     tile.innerHTML = `
-      ${{thumbHtml(card.scryfall_id, 'card-thumb', card.layout)}}
+      ${{thumbColHtml(card, category)}}
       <div class="tile-body">
         <div class="name"><span class="name-text">${{card.name}}</span>${{card.foil ? '<span class="foil-tag">Foil</span>' : ''}}</div>
         <div class="meta">${{card.type_line || 'Unknown type'}} &middot; CMC ${{card.cmc}} &middot; own ${{card.quantity}}</div>
         ${{warnHtml}}
         ${{popularityHtml}}
-        ${{completenessHtml(card, category)}}
       </div>
       <div class="tile-corner-actions">
         ${{manaCostPipsHtml(card.mana_cost)}}
@@ -3688,19 +3694,23 @@ document.getElementById('sort-by-rank').addEventListener('change', renderGrid);
 // with cards real decks play, instead of slot filler. Rated in the background; scores are kept until the collection changes.
 let commanderScores = {{}};
 let scoresPolling = false;
-function completenessHtml(card, category) {{
+// A commander's rating is just its percent, under the card image; the detail is in the hover.
+function completenessChipHtml(card, category) {{
   if (category !== 'Commander' || !isCommanderEligible(card)) return '';
   const sc = commanderScores[normalizeName(card.name)];
   if (!sc) return '';
-  if (sc.pct === undefined) return '<div class="complete-badge none" title="EDHREC has no deck data for this commander, so it can not be rated.">not rated &middot; no EDHREC data</div>';
+  if (sc.pct === undefined) return '<span class="pct-chip none" title="EDHREC has no deck data for this commander, so it can not be rated.">n/a</span>';
   const cls = sc.pct >= 85 ? 'good' : (sc.pct >= 70 ? 'ok' : 'bad');
-  // The detail lives in the hover, so the tile only carries the bar and the number.
   const tip = sc.pct + '% complete: ' + sc.backed + ' of the deck\u2019s ' + sc.nonland + ' non-land slots can be filled from your collection with cards EDHREC lists for '
     + card.name + ' decks. ' + sc.filler + ' would be slot filler' + (sc.empty ? ' and ' + sc.empty + ' would stay empty' : '') + '.'
     + (sc.core_total ? ' You own ' + sc.core_owned + ' of the ' + sc.core_total + ' signature cards EDHREC links most strongly to it.' : '')
     + (sc.deck_type ? ' Rated for its most common deck type on EDHREC (' + sc.deck_type + '), not every theme.' : '');
-  return '<div class="complete-badge ' + cls + '" title="' + escapeHtml(tip) + '"><span class="cb-main"><span class="cb-track"><span style="width:' + sc.pct + '%"></span></span>'
-    + '<b>' + sc.pct + '%</b> complete</span></div>';
+  return '<span class="pct-chip ' + cls + '" title="' + escapeHtml(tip) + '">' + sc.pct + '%</span>';
+}}
+function thumbColHtml(card, category) {{
+  const thumb = thumbHtml(card.scryfall_id, 'card-thumb', card.layout);
+  const chip = completenessChipHtml(card, category);
+  return chip ? '<div class="thumb-col">' + thumb + chip + '</div>' : thumb;
 }}
 function loadCommanderScores() {{
   fetch('/builder/commander-scores').then(r => r.json()).then(data => {{
