@@ -1899,6 +1899,8 @@ body.gallery .builder-tile > .ci-stripe { display:none; }
 .color-pip.must { border-style:solid; border-width:3px; box-shadow:0 0 12px 0 var(--accent); position:relative; }
 .color-pip.must::after { content:"✓"; position:absolute; top:-6px; right:-6px; width:15px; height:15px; border-radius:50%; background:var(--accent); color:var(--bg); font-size:0.62rem; font-weight:700; line-height:15px; text-align:center; }
 .color-pip.muted { opacity:0.2; cursor:not-allowed; }
+.pip-clear { width:26px; height:26px; margin-left:4px; padding:0; border-radius:50%; border:1px solid var(--card-border); background:transparent; color:var(--text-dim); font-size:1rem; line-height:1; cursor:pointer; }
+.pip-clear:hover { color:var(--accent); border-color:var(--accent); }
 """
 
 COLOR_LABELS = {"W": "White", "U": "Blue", "B": "Black", "R": "Red", "G": "Green"}
@@ -2104,7 +2106,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
           <select id="filter-color"><option value="">Any color</option><option value="C">Colorless</option><optgroup label="One-Color">{color_options}</optgroup>{color_family_optgroups}</select>
           <div class="theme-picker tag-search"><input type="text" id="tag-input" placeholder="Search by tag (sacrifice outlet, landfall...)" autocomplete="off" title="Scryfall's Oracle Tags: what a card does. Pick one or more to show only the cards you own that have them."><div class="theme-dropdown" id="tag-dropdown"></div></div>
           <span class="tag-chips" id="tag-chips"></span>
-          <span class="color-pips" id="color-pips" title="Click a color to allow it, click again to require it (every card shown has it), a third time to clear"><button type="button" class="color-pip" data-c="W" aria-label="White"><img src="/static/mana/W.svg" alt=""></button><button type="button" class="color-pip" data-c="U" aria-label="Blue"><img src="/static/mana/U.svg" alt=""></button><button type="button" class="color-pip" data-c="B" aria-label="Black"><img src="/static/mana/B.svg" alt=""></button><button type="button" class="color-pip" data-c="R" aria-label="Red"><img src="/static/mana/R.svg" alt=""></button><button type="button" class="color-pip" data-c="G" aria-label="Green"><img src="/static/mana/G.svg" alt=""></button><button type="button" class="color-pip" data-c="C" aria-label="Colorless"><img src="/static/mana/C.svg" alt=""></button></span>
+          <span class="color-pips" id="color-pips" title="Click a color to allow it, click again to require it (every card shown has it), a third time to clear"><button type="button" class="color-pip" data-c="W" aria-label="White"><img src="/static/mana/W.svg" alt=""></button><button type="button" class="color-pip" data-c="U" aria-label="Blue"><img src="/static/mana/U.svg" alt=""></button><button type="button" class="color-pip" data-c="B" aria-label="Black"><img src="/static/mana/B.svg" alt=""></button><button type="button" class="color-pip" data-c="R" aria-label="Red"><img src="/static/mana/R.svg" alt=""></button><button type="button" class="color-pip" data-c="G" aria-label="Green"><img src="/static/mana/G.svg" alt=""></button><button type="button" class="color-pip" data-c="C" aria-label="Colorless"><img src="/static/mana/C.svg" alt=""></button><button type="button" class="pip-clear" id="pip-clear" title="Clear all colors" aria-label="Clear all colors" style="display:none;">&times;</button></span>
           <label class="exact-color-toggle" title="Only show cards whose color identity is exactly the selected color(s) -- e.g. true Grixis cards, not also mono-colored or two-color ones that merely fit within Grixis">
             <input type="checkbox" id="filter-color-exact" checked> Exact colors
           </label>
@@ -2798,6 +2800,7 @@ function syncColorPips() {{
       b.title = ['Click to allow this color', 'Allowed (click again to require it)', 'Required: every card has this color (click to clear)'][pipState[c]];
     }}
   }});
+  document.getElementById('pip-clear').style.display = (WUBRG.some(c => pipState[c]) || wantColorless || colorSelect.value) ? '' : 'none';
   exactColorBox.disabled = !!colorRule;
   exactColorBox.closest('label').style.opacity = colorRule ? '0.45' : '';
   exactColorBox.closest('label').title = colorRule ? 'Not used while a color is required' : 'Only show cards whose color identity is exactly the selected color(s)';
@@ -2823,6 +2826,11 @@ colorPips.forEach(b => b.addEventListener('click', () => {{
   else pipState[c] = (pipState[c] + 1) % 3;
   applyPips();
 }}));
+document.getElementById('pip-clear').addEventListener('click', () => {{
+  WUBRG.forEach(c => {{ pipState[c] = 0; }});
+  wantColorless = false;
+  applyPips();
+}});
 // Choosing from the dropdown directly starts fresh: the pips follow it and nothing is required.
 colorSelect.addEventListener('change', () => {{
   if (!changingFromPip) {{
