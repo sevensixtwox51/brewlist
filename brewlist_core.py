@@ -3529,7 +3529,8 @@ body.gallery .card:hover .card-body {{ opacity: 1; pointer-events: auto; transfo
 body.gallery .card-name {{ font-size: 0.82rem; }}
 body.gallery .qty {{ color: #d8d0c0; margin: 2px 0 0; font-size: 0.72rem; }}
 body.gallery .card.missing .qty {{ color: #ffb4a8; }}
-body.gallery .color-icons, body.gallery .mana-cost-pips, body.gallery .budget-alt-note, body.gallery .commander-sticker {{ display: none; }}
+body.gallery .color-icons, body.gallery .mana-cost-pips, body.gallery .budget-alt-note, body.gallery .commander-sticker, body.gallery .flavor-name, body.compact .flavor-name {{ display: none; }}
+.flavor-name {{ margin: 0 0 3px; font-size: 0.78rem; font-style: italic; color: var(--accent); }}
 /* The flip button sits on the thumbnail's bottom-right corner: its original spot (top 45px, left 26px) was for the 48px thumbnail. */
 body:not(.compact):not(.gallery) .card-main > .flip-btn {{ top: 64px; left: 46px; z-index: 4; }}
 body.gallery .card-main > .flip-btn {{ top: auto; left: auto; right: 6px; bottom: 6px; z-index: 4; opacity: 0; transition: opacity .15s ease; }}
@@ -3725,7 +3726,7 @@ function applyFilter() {{
   document.querySelectorAll('.card').forEach(card => {{
     const name = card.dataset.name;
     const isMissing = card.classList.contains('missing');
-    const matchesText = !q || name.includes(q);
+    const matchesText = !q || name.includes(q) || (card.dataset.flavor || '').includes(q);
     const matchesMissing = !onlyMissing || isMissing;
     const ci = card.dataset.ci || '';
     const matchesColor = !activeColors.size || [...activeColors].some(c => c === 'C' ? ci === '' : ci.includes(c));
@@ -4513,6 +4514,12 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
             return r.owned_scryfall_id
         return r.entry.scryfall_id
 
+    # Flavor / crossover names ("Chekov, Young Wayfinder" on a Tatyova) of the printings shown, so the filter finds either name.
+    # Looked up in the background for printings not cached yet -- a report never waits on Scryfall for it.
+    _shown_ids = [_display_scryfall_id(x) for cards_ in buckets.values() for x in cards_]
+    ensure_printing_info_async(_shown_ids)
+    flavor_by_id = flavor_names_in_cache()
+
     # "transform"/"modal_dfc" genuinely have a second, separate card image
     # (Scryfall's CDN serves it at the same URL with /back/ swapped in for
     # /front/) -- "adventure"/"split"/"aftermath" ALSO join two names with
@@ -4769,6 +4776,9 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
         for r in cards:
             e = r.entry
             name_esc = html.escape(e.name)
+            flavor = flavor_by_id.get(_display_scryfall_id(r) or "", "")
+            flavor_attr = f' data-flavor="{html.escape(flavor.lower())}"' if flavor else ""
+            flavor_html = f'<div class="flavor-name">{html.escape(flavor)}</div>' if flavor else ""
             # For an owned card, whether it's actually foil depends on which
             # printing you own (r.owned_is_foil), not the decklist's own foil
             # flag (e.entry.is_foil is just what finish the decklist entry
@@ -4945,7 +4955,7 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
                     f' &middot; {r.reserved} reserved for another deck' if r.reserved > 0 else ''
                 )
                 card_tiles.append(f"""
-<div class="card owned{foil_class}" data-ci="{''.join(card_colors)}" data-name="{name_esc.lower()}" data-qty="{e.quantity}" data-display-name="{name_esc}" data-owned-value="{r.owned_value:.2f}" data-reserved-qty="{reserved_flag}" {shop_data_attrs}{card_full_attr}>
+<div class="card owned{foil_class}" data-ci="{''.join(card_colors)}" data-name="{name_esc.lower()}"{flavor_attr} data-qty="{e.quantity}" data-display-name="{name_esc}" data-owned-value="{r.owned_value:.2f}" data-reserved-qty="{reserved_flag}" {shop_data_attrs}{card_full_attr}>
   <label class="override-toggle">
     <input type="checkbox" class="need-override"{reserved_checked}> Need another copy (used elsewhere)
   </label>
@@ -4957,6 +4967,7 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
         <div class="card-name">
           {name_esc}{color_icons_html}{mana_cost_pips_html}{badges}
         </div>
+        {flavor_html}
         <div class="qty qty-owned">need {e.quantity} &middot; have {r.have}{reserved_note}</div>
         <div class="qty qty-missing">need {e.quantity} more &middot; marked as used in another deck</div>
       </div>
@@ -4970,13 +4981,14 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
             else:
                 have_str = f" &middot; have {r.have}" if r.have else ""
                 card_tiles.append(f"""
-<div class="card missing{foil_class}" data-ci="{''.join(card_colors)}" data-name="{name_esc.lower()}" data-qty="{r.shortfall}" data-display-name="{name_esc}" {shop_data_attrs}{card_full_attr}>
+<div class="card missing{foil_class}" data-ci="{''.join(card_colors)}" data-name="{name_esc.lower()}"{flavor_attr} data-qty="{r.shortfall}" data-display-name="{name_esc}" {shop_data_attrs}{card_full_attr}>
   <div class="card-main">
     {commander_sticker_html}
     {thumb_html}
     <div class="card-body">
       <div class="card-info">
         <div class="card-name">{name_esc}{color_icons_html}{mana_cost_pips_html}{badges}</div>
+        {flavor_html}
         <div class="qty">need {r.shortfall} more &middot; deck wants {e.quantity}{have_str}</div>
       </div>
       <div class="card-prices">
