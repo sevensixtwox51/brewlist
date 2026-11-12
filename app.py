@@ -6242,7 +6242,7 @@ def builder_commander_popularity_refresh():
 @app.route("/builder/sets", methods=["GET"])
 def builder_sets():
     """Every set the owned collection has cards from, name + release date
-    labeled, sorted oldest-first -- backs the builder's Set Selection
+    labeled, sorted newest-first -- backs the builder's Set Selection
     filter. Independent of any particular brew (unlike /builder/themes),
     so this is a plain GET with no request body."""
     if not os.path.isfile(COLLECTION_PATH):

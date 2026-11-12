@@ -1907,7 +1907,7 @@ def owned_set_options(owned_view: list[dict], sets_data: dict[str, dict]) -> lis
     autobuilder's _filter_candidates) compare against, so a set listed here always has cards to filter and a card's set is
     always listed. (It used to count each card's first printing instead: a card shown in its nicer printing from another set,
     such as a Stardates Tatyova, left that set out of the list, and a token the grid doesn't show still added its set.)
-    Labeled via sets_data_in_index and sorted chronologically by release date (oldest first), defaulting to all-on. A code with
+    Labeled via sets_data_in_index and sorted by release date, newest first, defaulting to all-on. A code with
     no match in sets_data (a stale pre-this-field index, or an unrecognized code) still shows up, using the raw code as its own
     name and sorting last (empty release date)."""
     counts: dict[str, int] = {}
@@ -1928,7 +1928,9 @@ def owned_set_options(owned_view: list[dict], sets_data: dict[str, dict]) -> lis
             # apart from "a real 0-card set" and just omit the "/ M" part.
             "total_in_set": info.get("card_count"),
         })
-    options.sort(key=lambda o: (o["release_date"] or "9999-99-99", o["set_name"]))
+    # Newest set first (names A-Z within a date); a set with no known release date goes last.
+    options.sort(key=lambda o: o["set_name"])
+    options.sort(key=lambda o: o["release_date"] or "", reverse=True)
     return options
 
 
