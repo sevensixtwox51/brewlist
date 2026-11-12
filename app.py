@@ -39,6 +39,8 @@ from brewlist_core import (
     deck_is_commander_format,
     deck_key,
     ensure_price_index,
+    flavor_names_in_cache,
+    printing_info_fetch_running,
     rebuild_price_index_isolated,
     ensure_printing_info_async,
     extract_entries,
@@ -1901,6 +1903,8 @@ body.gallery .builder-tile > .ci-stripe { display:none; }
 .color-pip.muted { opacity:0.2; cursor:not-allowed; }
 .pip-clear { width:26px; height:26px; margin-left:4px; padding:0; border-radius:50%; border:1px solid var(--card-border); background:transparent; color:var(--text-dim); font-size:1rem; line-height:1; cursor:pointer; }
 .pip-clear:hover { color:var(--accent); border-color:var(--accent); }
+.flavor-name { margin:0 0 2px; font-size:0.74rem; font-style:italic; color:var(--accent); }
+body.compact .flavor-name, body.gallery .flavor-name { display:none; }
 """
 
 COLOR_LABELS = {"W": "White", "U": "Blue", "B": "Black", "R": "Red", "G": "Green"}
@@ -3343,7 +3347,7 @@ function renderGrid() {{
   const frag = document.createDocumentFragment();
 
   const cards = collection.filter(card => {{
-    if (search && !card.name.toLowerCase().includes(search)) return false;
+    if (search && !card.name.toLowerCase().includes(search) && !(card.flavor_name || '').toLowerCase().includes(search)) return false;
     if (category === 'Commander' && !isCommanderEligible(card)) return false;
     if (category && category !== 'Commander' && card.category !== category) return false;
     if (colorRule) {{
@@ -3409,6 +3413,7 @@ function renderGrid() {{
       ${{thumbColHtml(card, category)}}
       <div class="tile-body">
         <div class="name"><span class="name-text">${{card.name}}</span>${{card.foil ? '<span class="foil-tag">Foil</span>' : ''}}</div>
+        ${{card.flavor_name ? '<div class="flavor-name" title="The name printed on this card (a crossover or flavor name) -- search finds both names">' + escapeHtml(card.flavor_name) + '</div>' : ''}}
         <div class="meta">${{card.type_line || 'Unknown type'}} &middot; CMC ${{card.cmc}} &middot; own ${{card.quantity}}</div>
         ${{warnHtml}}
         ${{popularityHtml}}
@@ -3770,6 +3775,7 @@ fetch('/builder/collection-data')
     annotateFilterCounts();
     renderAll();
     loadTags();
+    loadFlavorNames(0);
   }})
   .catch(() => showError('Could not load your collection.'));
 
@@ -4916,6 +4922,20 @@ function runImport() {{
 }}
 
 // ---- Tag search and "works with" (tag_synergy.py): Scryfall's Oracle Tags for the cards you own ----
+// Flavor names (a crossover printing's own name, like "Chekov, Young Wayfinder" on a Tatyova) are looked up from Scryfall in the
+// background the first time; keep asking until that finishes so search finds both names without a reload.
+function loadFlavorNames(attempt) {{
+  fetch('/builder/flavor-names').then(r => r.json()).then(data => {{
+    let changed = false;
+    collection.forEach(c => {{
+      const fn = (data.names || {{}})[c.scryfall_id] || '';
+      if (fn !== (c.flavor_name || '')) {{ c.flavor_name = fn; changed = true; }}
+    }});
+    if (changed) renderGrid();
+    if (data.pending && attempt < 40) setTimeout(() => loadFlavorNames(attempt + 1), 5000);
+  }}).catch(() => {{}});
+}}
+
 let tagList = [], cardTagMap = {{}};
 const activeTags = new Set();
 function loadTags() {{
@@ -5928,8 +5948,13 @@ def builder_collection_data():
     # Art data for printings of cards owned more than once is fetched in the
     # background (cached forever after); the view below uses whatever is cached
     # so far to show the nicer printing.
-    ensure_printing_info_async(p.scryfall_id for oc in owned.values() if len(oc.printings) > 1 for p in oc.printings)
+    multi_ids = [p.scryfall_id for oc in owned.values() if len(oc.printings) > 1 for p in oc.printings]
     cards = owned_collection_gameplay_view(owned, gameplay_data_in_index())
+    # Also look up the printing each card is shown with, for its flavor name (searchable: "Chekov" finds Tatyova's Star Trek printing).
+    ensure_printing_info_async(multi_ids + [c.get("scryfall_id") for c in cards])
+    flavor = flavor_names_in_cache()
+    for c in cards:
+        c["flavor_name"] = flavor.get(c.get("scryfall_id")) or ""
     sets = sets_data_in_index()
     for c in cards:
         c["set_release"] = (sets.get((c.get("set_code") or "").upper()) or {}).get("release_date", "")
@@ -6156,6 +6181,13 @@ def builder_commander_scores_start():
         _SCORES_JOB.update(running=True, done=0, total=0, current=None)
     threading.Thread(target=_commander_scores_worker, daemon=True).start()
     return jsonify(running=True, started=True)
+
+
+@app.route("/builder/flavor-names", methods=["GET"])
+def builder_flavor_names():
+    """Flavor names by Scryfall id for the printings looked up so far, and whether the lookup is still running -- the page keeps
+    asking until it has finished, so names appear without a reload."""
+    return jsonify(names=flavor_names_in_cache(), pending=printing_info_fetch_running())
 
 
 @app.route("/builder/commander-popularity", methods=["GET"])
