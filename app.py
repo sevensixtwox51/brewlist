@@ -6219,7 +6219,7 @@ def builder_sets():
         owned = load_collection(COLLECTION_PATH)
     except ValueError as e:
         return jsonify(error=str(e)), 400
-    sets = owned_set_options(owned, sets_data_in_index())
+    sets = owned_set_options(owned_collection_gameplay_view(owned, gameplay_data_in_index()), sets_data_in_index())
     return jsonify(sets=sets)
 
 

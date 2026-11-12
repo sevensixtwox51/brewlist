@@ -1901,26 +1901,18 @@ def full_card_pool_gameplay_view(gameplay: dict[str, dict], exclude_names: set[s
     return view
 
 
-def owned_set_options(owned: dict[str, OwnedCard], sets_data: dict[str, dict]) -> list[dict]:
-    """Every set code that's some card's *representative* printing (the
-    first one, same `printings[0]` pick owned_collection_gameplay_view
-    makes -- not every set the card happens to be owned in). This has to
-    match that convention exactly: _filter_candidates only ever checks a
-    candidate's single representative set_code, so a set that only shows
-    up via a card's second/third owned printing would be functionally
-    meaningless to exclude/include here -- toggling it wouldn't change
-    which cards Suggest/the grid actually see, and it would silently
-    render as an empty "0 owned" row. Labeled via sets_data_in_index and
-    sorted chronologically by release date (oldest first) -- the pool the
-    builder's Set filters (autobuilder + collection grid) offer,
-    defaulting to all-on. A code with no match in sets_data (a stale
-    pre-this-field index, or an unrecognized code) still shows up, using
-    the raw code as its own name and sorting last (empty release date)."""
+def owned_set_options(owned_view: list[dict], sets_data: dict[str, dict]) -> list[dict]:
+    """Every set the collection grid has a card in, counted by the set code each card is SHOWN with (the row's `set_code` from
+    owned_collection_gameplay_view -- its best owned printing). That is exactly what the Set filters (the collection grid and the
+    autobuilder's _filter_candidates) compare against, so a set listed here always has cards to filter and a card's set is
+    always listed. (It used to count each card's first printing instead: a card shown in its nicer printing from another set,
+    such as a Stardates Tatyova, left that set out of the list, and a token the grid doesn't show still added its set.)
+    Labeled via sets_data_in_index and sorted chronologically by release date (oldest first), defaulting to all-on. A code with
+    no match in sets_data (a stale pre-this-field index, or an unrecognized code) still shows up, using the raw code as its own
+    name and sorting last (empty release date)."""
     counts: dict[str, int] = {}
-    for card in owned.values():
-        if not card.printings:
-            continue
-        code = (card.printings[0].set_code or "").upper()
+    for card in owned_view:
+        code = (card.get("set_code") or "").upper()
         if code:
             counts[code] = counts.get(code, 0) + 1
     options = []
