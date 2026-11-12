@@ -18,6 +18,7 @@ import math
 import os
 import re
 import subprocess
+import sys
 import threading
 import time
 import unicodedata
@@ -31,7 +32,7 @@ __all__ = [
     "parse_deck_ref", "deck_key", "split_deck_key", "fetch_deck", "extract_entries",
     "normalize_name", "find_collection_candidates", "load_collection", "load_overrides",
     "fetch_scryfall_prices_by_id", "price_for_printing", "select_used_printings",
-    "price_index_age_days", "price_index_built_at", "rebuild_price_index", "ensure_price_index", "game_changers_in_index",
+    "price_index_age_days", "price_index_built_at", "rebuild_price_index", "rebuild_price_index_isolated", "ensure_price_index", "game_changers_in_index",
     "load_store_prefs", "save_store_prefs", "STORE_LABELS", "STORE_DISPLAY_NAMES", "update_from_git",
     "EXTRA_STORE_LABELS", "PICKABLE_STORE_LABELS",
     "commander_legality_in_index", "deck_is_commander_format",
@@ -1856,6 +1857,34 @@ def sets_data_in_index(path: str = PRICE_INDEX_PATH) -> dict[str, dict]:
     deck builder's Set Selection filter to label/sort the sets the user
     actually owns cards from."""
     return _hot_index_section("sets", path) or {}
+
+
+def rebuild_price_index_isolated(path: str = PRICE_INDEX_PATH, on_progress=None) -> None:
+    """rebuild_price_index in a separate process (see index_worker.py), so the parsing it does cannot stall the web server's
+    other requests. Same progress callback; raises ValueError with the worker's message when the rebuild fails."""
+    worker = os.environ.get("BREWLIST_INDEX_WORKER") or os.path.join(_CORE_DIR, "index_worker.py")
+    proc = subprocess.Popen(
+        [sys.executable, worker, path], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
+        cwd=_CORE_DIR,
+    )
+    error, tail = None, []
+    try:
+        for line in proc.stdout:
+            line = line.strip()
+            try:
+                msg = json.loads(line)
+            except ValueError:
+                if line:
+                    tail = (tail + [line])[-5:]
+                continue
+            if "p" in msg and on_progress:
+                on_progress(*msg["p"])
+            elif "error" in msg:
+                error = msg["error"]
+    finally:
+        rc = proc.wait()
+    if error or rc != 0:
+        raise ValueError(error or ("The card database rebuild stopped unexpectedly" + (": " + " ".join(tail) if tail else ".")))
 
 
 def ensure_price_index(path: str = PRICE_INDEX_PATH, on_progress=None, force_refresh: bool = False) -> dict[str, dict]:

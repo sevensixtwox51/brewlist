@@ -39,6 +39,7 @@ from brewlist_core import (
     deck_is_commander_format,
     deck_key,
     ensure_price_index,
+    rebuild_price_index_isolated,
     ensure_printing_info_async,
     extract_entries,
     fetch_deck,
@@ -2771,23 +2772,27 @@ try {{ const saved = localStorage.getItem('brewlist-view-mode'); if (VIEW_MODES.
 // The five mana symbols drive the color filter above: pick any combination and the matching preset is selected.
 const colorSelect = document.getElementById('filter-color');
 const colorPips = [...document.querySelectorAll('#color-pips .color-pip')];
+// Colorless is a pip like the others and can be picked alongside colors (Wastes with white: colorless cards plus white ones).
+let includeColorless = false;   // colorless cards are added to whatever color filter the other pips make
+let changingFromPip = false;
 function syncColorPips() {{
   const v = colorSelect.value;
-  colorPips.forEach(b => b.classList.toggle('on', b.dataset.c === 'C' ? v === 'C' : (v !== 'C' && v.includes(b.dataset.c))));
+  colorPips.forEach(b => b.classList.toggle('on', b.dataset.c === 'C' ? (v === 'C' || includeColorless) : (v !== 'C' && v.includes(b.dataset.c))));
 }}
 colorPips.forEach(b => b.addEventListener('click', () => {{
-  const c = b.dataset.c;
-  if (c === 'C') {{
-    // Colorless stands alone: it isn't a color to combine with the others.
-    colorSelect.value = colorSelect.value === 'C' ? '' : 'C';
-  }} else {{
-    const on = new Set(colorPips.filter(x => x.classList.contains('on') && x.dataset.c !== 'C').map(x => x.dataset.c));
-    if (on.has(c)) on.delete(c); else on.add(c);
-    const match = [...colorSelect.options].find(o => o.value && o.value !== 'C' && o.value.length === on.size && [...on].every(x => o.value.includes(x)));
-    colorSelect.value = match ? match.value : '';
-  }}
+  const picked = new Set(colorPips.filter(x => x.classList.contains('on')).map(x => x.dataset.c));
+  if (picked.has(b.dataset.c)) picked.delete(b.dataset.c); else picked.add(b.dataset.c);
+  const colors = [...picked].filter(c => c !== 'C'), wantC = picked.has('C');
+  const match = colors.length ? [...colorSelect.options].find(o => o.value && o.value !== 'C' && o.value.length === colors.length && colors.every(x => o.value.includes(x))) : null;
+  colorSelect.value = match ? match.value : (wantC && !colors.length ? 'C' : '');
+  includeColorless = wantC && colors.length > 0;
+  changingFromPip = true;
   colorSelect.dispatchEvent(new Event('change'));
+  changingFromPip = false;
+  syncColorPips();
 }}));
+// Choosing from the dropdown directly starts fresh: no extra colorless.
+colorSelect.addEventListener('change', () => {{ if (!changingFromPip) includeColorless = false; }});
 colorSelect.addEventListener('change', syncColorPips);
 
 function findCard(name) {{
@@ -3270,7 +3275,8 @@ function matchesColorFilter(colorIdentity, filterValue, exact) {{
     return colorIdentity.length === filterColors.length && filterColors.every(c => colorIdentity.includes(c));
   }}
   if (filterValue.length === 1) return colorIdentity.includes(filterValue);
-  return colorIdentity.every(c => filterValue.includes(c));
+  // Cards that fit inside these colors -- but a colorless card is its own choice (the colorless pip), not something every color set includes.
+  return colorIdentity.length > 0 && colorIdentity.every(c => filterValue.includes(c));
 }}
 
 function commanderPopularityFor(card) {{
@@ -3293,7 +3299,7 @@ function renderGrid() {{
     if (search && !card.name.toLowerCase().includes(search)) return false;
     if (category === 'Commander' && !isCommanderEligible(card)) return false;
     if (category && category !== 'Commander' && card.category !== category) return false;
-    if (!matchesColorFilter(card.color_identity, color, exactColor)) return false;
+    if (!matchesColorFilter(card.color_identity, color, exactColor) && !(includeColorless && (card.color_identity || []).length === 0)) return false;
     if (activeTags.size) {{ const have = cardTagMap[normalizeName(card.name)] || []; if (![...activeTags].every(t => have.includes(t))) return false; }}
     if (gridExcludedSetCodes.length && gridExcludedSetCodes.includes(card.set_code)) return false;
     return true;
@@ -6773,7 +6779,8 @@ def refresh_price_index():
                     job["total"] = total
                     job["stage"] = stage
         try:
-            ensure_price_index(on_progress=_on_progress, force_refresh=True)
+            # In a process of its own: parsing MTGJSON's files blocks for many seconds and would starve the page's health check.
+            rebuild_price_index_isolated(on_progress=_on_progress)
             with _JOBS_LOCK:
                 job = JOBS.get(job_id)
                 if job:
