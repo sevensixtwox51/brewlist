@@ -77,9 +77,12 @@ Markdown/HTML/CSV reports on disk) — the Deck Builder is web-app only.
   Permanents vs. Instants/Sorceries), a color and mana-source breakdown, and
   a Draw / Deal Another Hand sample-hand tool with an average-lands-in-
   opening-hand stat
-- A **Compact** view toggle for the card grid — swaps big card-image tiles
-  for a dense text list with each card's full mana-cost pips, for scanning
-  a large deck quickly
+- A **View** menu for the card grid — Cards (big image tiles), Gallery
+  (art only, with a hover for details) or Compact (a dense text list with
+  each card's full mana-cost pips, for scanning a large deck quickly)
+- The card filter also finds a card by its flavor / crossover name (type
+  "Chekov" and you get Tatyova), and the flavor name shows under the real
+  one
 - A **Shopping List** button opens a plain-text, alphabetized list of
   what's still missing (quantity + name), pre-selected and one click away
   from your clipboard
@@ -92,16 +95,20 @@ Markdown/HTML/CSV reports on disk) — the Deck Builder is web-app only.
   own but have committed to a different build still shows as needed here —
   persisted so you don't have to re-mark it every time
 - A blurred commander-art backdrop, because why not
-- **Recent decks** on the Decks page can be deleted individually (a small
-  &times; next to each entry, with a confirm prompt) instead of having to
-  dig through `data/projects/` by hand
+- The **Decks** page shows your decks as art tiles: a **Compare** panel
+  on top (paste a decklist URL), then your brews, each tile badged
+  **Brew** or **Comparison** with a filter to show one kind, a **Show
+  more** button when the list is long, and **Brew something new** to start
+  a build. Decks can be deleted individually (a small &times; on the
+  tile, with a confirm prompt) instead of having to dig through
+  `data/projects/` by hand
+- A warm dark theme by default, switching to a light one when your system is set to light
 
 ## Deck Builder
 
 Building a new deck instead of checking an existing one? Skip typing out a
 want list and build straight from what you already own, at `/builder` in
-the web app (or the **+ New deck** link next to Recent decks on the Decks
-page).
+the web app (or the **Brew something new** tile on the Decks page).
 
 ![Deck Builder](screenshots/deck-builder.png)
 
@@ -112,8 +119,8 @@ page).
   Yore-Tiller, ...), with an **Exact colors** checkbox to narrow a filter
   like "Grixis (UBR)" down to true 3-color cards only, instead of also
   matching every mono/2-color card that merely fits inside it. A **Set**
-  filter narrows the grid to specific sets (multiselect, sorted by
-  release year, each showing how many uniques you own out of that set's
+  filter narrows the grid to specific sets (multiselect, newest first,
+  each showing how many uniques you own out of that set's
   real card count via MTGJSON). The type, color, and set dropdowns all
   show a live count per option (e.g. "Planeswalkers (0)"), so an empty
   category is obvious before you click into it
@@ -219,7 +226,7 @@ page).
   Card** button turns all of that into a clean, printable one-page summary
   for talking through the deck with the table
 - **Save** remembers the brew as a project, same as a compared deck — it
-  shows up in Recent decks on the Decks page and picks up right where you
+  shows up on the Decks page and picks up right where you
   left off
 - **View full report** runs the finished brew through the exact same
   report a compared deck gets (pricing, Game Changers, legality, bracket,
@@ -476,7 +483,11 @@ appreciated!
 | `brewlist_core.py` | Shared logic: Moxfield/Archidekt/Scryfall/MTGJSON fetching, ManaBox parsing, price comparison, HTML report rendering. No UI dependencies — imported by both entry points below. |
 | `deck_builder.py` | Deck Builder logic: owned-collection browsing data, the fill-the-gaps Suggest heuristic (now synergy-weighted, see `edhrec_data.py`), the Optimize combo-completion pass, brew-to-report conversion. No UI dependencies — imported by `app.py` only (the Deck Builder is web-app only). |
 | `edhrec_data.py` | EDHREC commander-popularity ranks and per-commander card synergy scores — the real, non-AI data source behind the Deck Builder picker's popularity badges and Suggest/Optimize's synergy weighting. No UI dependencies — imported by `deck_builder.py`/`app.py`. |
-| `app.py` | Flask web app, including the Deck Builder (`/builder`). |
+| `synergy.py` | Deck-plan recognition: what an engine commander wants (sacrifice, tokens, counters, ...), used by the autobuilder and the plan guard. |
+| `tag_synergy.py` | Scryfall Oracle Tags from the local card database: tag search, "Works with…" and similar-card suggestions. |
+| `mana_sim.py`, `turn_clock.py` | Goldfish simulations behind the Analyze panel's Mana Sim and Turn Clock. |
+| `index_worker.py` | Runs Refresh Database in its own process so the web app stays responsive while it downloads and rebuilds. |
+| `app.py` | Flask web app, including the Deck Builder (`/builder`). Its `static/` folder holds the mana-symbol SVGs. |
 | `brewlist_cli.py` | Terminal CLI (interactive menu or scriptable flags). |
 | `Brewlist.command` | macOS double-click launcher for the web app. |
 | `Brewlist.bat` | Windows double-click launcher for the web app. |
