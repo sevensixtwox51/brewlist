@@ -149,6 +149,10 @@ page).
   The **Sort** menu orders the collection by name, or by **set** (release date,
   then card number -- like a binder), with an ascending/descending button; under
   the Commander filter it can also sort by popularity or completeness.
+  The mana-symbol color pips cycle on each click: **allowed** (cards may have
+  the color), **required** (every card shown has it), then off -- so white
+  required with blue, black and green allowed shows only cards that include white
+  and no red. The colorless pip adds colorless cards.
   **Search by tag** filters your collection with Scryfall's Oracle Tags (the
   same data as `otag:` searches): type "sacrifice outlet" or "landfall", pick
   one or more, and see only the cards you own that have them. Each tile has a

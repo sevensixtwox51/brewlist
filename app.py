@@ -1895,6 +1895,10 @@ body.gallery .builder-tile > .ci-stripe { display:none; }
 .view-opt.active { color:var(--accent); background:color-mix(in srgb, var(--accent) 12%, transparent); font-weight:600; }
 .sort-field { display:inline-flex; align-items:center; gap:6px; }
 .sort-dir { width:38px; padding:0; justify-content:center; font-size:1.05rem; }
+.color-pip.on:not(.must) { border-style:dashed; }
+.color-pip.must { border-style:solid; border-width:3px; box-shadow:0 0 12px 0 var(--accent); position:relative; }
+.color-pip.must::after { content:"✓"; position:absolute; top:-6px; right:-6px; width:15px; height:15px; border-radius:50%; background:var(--accent); color:var(--bg); font-size:0.62rem; font-weight:700; line-height:15px; text-align:center; }
+.color-pip.muted { opacity:0.2; cursor:not-allowed; }
 """
 
 COLOR_LABELS = {"W": "White", "U": "Blue", "B": "Black", "R": "Red", "G": "Green"}
@@ -2100,7 +2104,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
           <select id="filter-color"><option value="">Any color</option><option value="C">Colorless</option><optgroup label="One-Color">{color_options}</optgroup>{color_family_optgroups}</select>
           <div class="theme-picker tag-search"><input type="text" id="tag-input" placeholder="Search by tag (sacrifice outlet, landfall...)" autocomplete="off" title="Scryfall's Oracle Tags: what a card does. Pick one or more to show only the cards you own that have them."><div class="theme-dropdown" id="tag-dropdown"></div></div>
           <span class="tag-chips" id="tag-chips"></span>
-          <span class="color-pips" id="color-pips" title="Click colors to filter; click again to clear"><button type="button" class="color-pip" data-c="W" aria-label="White"><img src="/static/mana/W.svg" alt=""></button><button type="button" class="color-pip" data-c="U" aria-label="Blue"><img src="/static/mana/U.svg" alt=""></button><button type="button" class="color-pip" data-c="B" aria-label="Black"><img src="/static/mana/B.svg" alt=""></button><button type="button" class="color-pip" data-c="R" aria-label="Red"><img src="/static/mana/R.svg" alt=""></button><button type="button" class="color-pip" data-c="G" aria-label="Green"><img src="/static/mana/G.svg" alt=""></button><button type="button" class="color-pip" data-c="C" aria-label="Colorless"><img src="/static/mana/C.svg" alt=""></button></span>
+          <span class="color-pips" id="color-pips" title="Click a color to allow it, click again to require it (every card shown has it), a third time to clear"><button type="button" class="color-pip" data-c="W" aria-label="White"><img src="/static/mana/W.svg" alt=""></button><button type="button" class="color-pip" data-c="U" aria-label="Blue"><img src="/static/mana/U.svg" alt=""></button><button type="button" class="color-pip" data-c="B" aria-label="Black"><img src="/static/mana/B.svg" alt=""></button><button type="button" class="color-pip" data-c="R" aria-label="Red"><img src="/static/mana/R.svg" alt=""></button><button type="button" class="color-pip" data-c="G" aria-label="Green"><img src="/static/mana/G.svg" alt=""></button><button type="button" class="color-pip" data-c="C" aria-label="Colorless"><img src="/static/mana/C.svg" alt=""></button></span>
           <label class="exact-color-toggle" title="Only show cards whose color identity is exactly the selected color(s) -- e.g. true Grixis cards, not also mono-colored or two-color ones that merely fit within Grixis">
             <input type="checkbox" id="filter-color-exact" checked> Exact colors
           </label>
@@ -2769,31 +2773,66 @@ document.addEventListener('click', (e) => {{ if (!viewMenu.contains(e.target)) v
 document.addEventListener('keydown', (e) => {{ if (e.key === 'Escape') viewMenu.classList.remove('open'); }});
 setViewMode('cards');
 try {{ const saved = localStorage.getItem('brewlist-view-mode'); if (VIEW_MODES.includes(saved)) setViewMode(saved); }} catch (e) {{}}
-// The five mana symbols drive the color filter above: pick any combination and the matching preset is selected.
+// The mana symbols drive the color filter. A color pip cycles: off -> allowed (cards may have it) -> required ("must have":
+// every card shown has it) -> off. With no required color the pips pick the matching preset in the dropdown above, as before;
+// with one, the rule is "has all the required colors and nothing outside the allowed ones" and the dropdown stands aside.
+// Colorless is a pip too: it adds colorless cards, and is off while a color is required (a colorless card has none).
 const colorSelect = document.getElementById('filter-color');
 const colorPips = [...document.querySelectorAll('#color-pips .color-pip')];
-// Colorless is a pip like the others and can be picked alongside colors (Wastes with white: colorless cards plus white ones).
+const exactColorBox = document.getElementById('filter-color-exact');
+const pipState = {{ W: 0, U: 0, B: 0, R: 0, G: 0 }};   // 0 off, 1 allowed, 2 required
+let wantColorless = false;
 let includeColorless = false;   // colorless cards are added to whatever color filter the other pips make
+let colorRule = null;           // {{ must, allowed }} while any color is required
 let changingFromPip = false;
 function syncColorPips() {{
-  const v = colorSelect.value;
-  colorPips.forEach(b => b.classList.toggle('on', b.dataset.c === 'C' ? (v === 'C' || includeColorless) : (v !== 'C' && v.includes(b.dataset.c))));
+  colorPips.forEach(b => {{
+    const c = b.dataset.c;
+    if (c === 'C') {{
+      b.classList.toggle('on', wantColorless);
+      b.classList.toggle('muted', !!colorRule);
+      b.title = colorRule ? 'Colorless cards have none of the required colors' : (wantColorless ? 'Colorless cards shown (click to remove)' : 'Add colorless cards');
+    }} else {{
+      b.classList.toggle('on', pipState[c] >= 1);
+      b.classList.toggle('must', pipState[c] === 2);
+      b.title = ['Click to allow this color', 'Allowed (click again to require it)', 'Required: every card has this color (click to clear)'][pipState[c]];
+    }}
+  }});
+  exactColorBox.disabled = !!colorRule;
+  exactColorBox.closest('label').style.opacity = colorRule ? '0.45' : '';
+  exactColorBox.closest('label').title = colorRule ? 'Not used while a color is required' : 'Only show cards whose color identity is exactly the selected color(s)';
 }}
-colorPips.forEach(b => b.addEventListener('click', () => {{
-  const picked = new Set(colorPips.filter(x => x.classList.contains('on')).map(x => x.dataset.c));
-  if (picked.has(b.dataset.c)) picked.delete(b.dataset.c); else picked.add(b.dataset.c);
-  const colors = [...picked].filter(c => c !== 'C'), wantC = picked.has('C');
-  const match = colors.length ? [...colorSelect.options].find(o => o.value && o.value !== 'C' && o.value.length === colors.length && colors.every(x => o.value.includes(x))) : null;
-  colorSelect.value = match ? match.value : (wantC && !colors.length ? 'C' : '');
-  includeColorless = wantC && colors.length > 0;
+function applyPips() {{
+  const must = WUBRG.filter(c => pipState[c] === 2), allowed = WUBRG.filter(c => pipState[c] >= 1);
+  colorRule = must.length ? {{ must, allowed }} : null;
+  if (colorRule) {{
+    wantColorless = false; includeColorless = false; colorSelect.value = '';
+  }} else {{
+    const match = allowed.length ? [...colorSelect.options].find(o => o.value && o.value !== 'C' && o.value.length === allowed.length && allowed.every(x => o.value.includes(x))) : null;
+    colorSelect.value = match ? match.value : (wantColorless && !allowed.length ? 'C' : '');
+    includeColorless = wantColorless && allowed.length > 0;
+  }}
   changingFromPip = true;
   colorSelect.dispatchEvent(new Event('change'));
   changingFromPip = false;
   syncColorPips();
+}}
+colorPips.forEach(b => b.addEventListener('click', () => {{
+  const c = b.dataset.c;
+  if (c === 'C') {{ if (colorRule) return; wantColorless = !wantColorless; }}
+  else pipState[c] = (pipState[c] + 1) % 3;
+  applyPips();
 }}));
-// Choosing from the dropdown directly starts fresh: no extra colorless.
-colorSelect.addEventListener('change', () => {{ if (!changingFromPip) includeColorless = false; }});
-colorSelect.addEventListener('change', syncColorPips);
+// Choosing from the dropdown directly starts fresh: the pips follow it and nothing is required.
+colorSelect.addEventListener('change', () => {{
+  if (!changingFromPip) {{
+    const v = colorSelect.value;
+    WUBRG.forEach(c => {{ pipState[c] = (v !== 'C' && v.includes(c)) ? 1 : 0; }});
+    wantColorless = v === 'C'; includeColorless = false; colorRule = null;
+  }}
+  syncColorPips();
+}});
+syncColorPips();
 
 function findCard(name) {{
   const nm = normalizeName(name);
@@ -3299,7 +3338,10 @@ function renderGrid() {{
     if (search && !card.name.toLowerCase().includes(search)) return false;
     if (category === 'Commander' && !isCommanderEligible(card)) return false;
     if (category && category !== 'Commander' && card.category !== category) return false;
-    if (!matchesColorFilter(card.color_identity, color, exactColor) && !(includeColorless && (card.color_identity || []).length === 0)) return false;
+    if (colorRule) {{
+      const id = card.color_identity || [];
+      if (!(colorRule.must.every(c => id.includes(c)) && id.every(c => colorRule.allowed.includes(c)))) return false;
+    }} else if (!matchesColorFilter(card.color_identity, color, exactColor) && !(includeColorless && (card.color_identity || []).length === 0)) return false;
     if (activeTags.size) {{ const have = cardTagMap[normalizeName(card.name)] || []; if (![...activeTags].every(t => have.includes(t))) return false; }}
     if (gridExcludedSetCodes.length && gridExcludedSetCodes.includes(card.set_code)) return false;
     return true;
