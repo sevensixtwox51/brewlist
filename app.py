@@ -1363,6 +1363,8 @@ body.compact .thumb-wrap { display:none; }
 .deck-panel.drop-target.drop-commander::after { content: none; }
 /* While a card is being dragged the deck panel grows to the full column height, so the whole right side is the drop area. */
 @media (min-width: 901px) { body.dragging-card .deck-panel { min-height: calc(100vh - 40px); } }
+.commander-slot.commander-cta { display: block; }
+.commander-cta .cta-title { font-family: var(--serif); font-size: 1.1rem; color: var(--accent); }
 #commander-slot-wrap.drop-commander .commander-slot { outline: 2px dashed var(--accent); outline-offset: 2px; }
 #commander-slot-wrap.drop-commander::after { content: "Drop to set as commander"; display: block; text-align: center; color: var(--accent); font-family: var(--serif); margin-top: 4px; }
 .deck-stats { display:flex; gap:14px; flex-wrap:wrap; color:var(--text-dim); font-size:0.85rem; margin-bottom:10px; }
@@ -2883,7 +2885,18 @@ function isCommanderEligible(card) {{
   return (card.oracle_text || '').includes('can be your commander');
 }}
 
+// Switches the type filter the same way the dropdown does (sort defaults, popularity controls, re-render).
+function setCategoryFilter(value) {{
+  const sel = document.getElementById('filter-category');
+  if (sel.value === value) return;
+  sel.value = value;
+  sel.dispatchEvent(new Event('change'));
+}}
+const hasCommanderCards = () => collection.some(isCommanderEligible);
+
 function setCommander(card) {{
+  // Picked from the commander list: go back to every card so the rest of the deck can be browsed.
+  if (document.getElementById('filter-category').value === 'Commander') setCategoryFilter('');
   if (!brew.commander || brew.commander.name !== card.name) brew.edhrec_theme = '';
   brew.commander = {{
     name: card.name, scryfall_id: card.scryfall_id, type_line: card.type_line, color_identity: card.color_identity,
@@ -2896,7 +2909,7 @@ function setCommander(card) {{
   refreshAutoMix();
 }}
 
-function clearCommander() {{ brew.commander = null; brew.edhrec_theme = ''; renderAll(); loadThemeOptions(); loadDeckTypes(); refreshAutoMix(); }}
+function clearCommander() {{ brew.commander = null; brew.edhrec_theme = ''; if (hasCommanderCards()) setCategoryFilter('Commander'); renderAll(); loadThemeOptions(); loadDeckTypes(); refreshAutoMix(); }}
 
 // A card added from a suggestion keeps the fact that it was only slot filler (not on
 // EDHREC's list for this commander), so the deck list can still mark it after it has
@@ -3460,7 +3473,12 @@ function renderCommanderSlot() {{
   const wrap = document.getElementById('commander-slot-wrap');
   if (brew.format !== 'commander') {{ wrap.innerHTML = ''; return; }}
   if (!brew.commander) {{
-    wrap.innerHTML = '<div class="commander-slot"><span class="hint" style="margin:0;">No commander chosen -- click &#9733; Commander on an eligible card.</span></div>';
+    const showing = document.getElementById('filter-category').value === 'Commander';
+    wrap.innerHTML = '<div class="commander-slot commander-cta"><div class="cta-title">Pick your commander</div>'
+      + '<div class="hint" style="margin:2px 0 0;">' + (showing ? 'Showing the commanders you own. Click &#9733; on one to start the deck.' : 'List the commanders you own, then click &#9733; on one.') + '</div>'
+      + (showing ? '' : '<button type="button" class="btn small" id="show-commanders-btn" style="margin-top:8px;">Show my commanders</button>') + '</div>';
+    const showBtn = wrap.querySelector('#show-commanders-btn');
+    if (showBtn) showBtn.addEventListener('click', () => setCategoryFilter('Commander'));
     return;
   }}
   const art = scryfallImg(brew.commander.scryfall_id, 'art_crop');
@@ -3727,6 +3745,8 @@ fetch('/builder/collection-data')
     for (const c of (data.cards || [])) if (c.scryfall_id && FLIP_LAYOUTS.includes(c.layout)) flippableIds.add(c.scryfall_id);
     annotateFilterCounts();
     renderAll();
+    // A deck with no commander yet starts on the list of commanders you own -- the first thing to do.
+    if (brew.format === 'commander' && !brew.commander && hasCommanderCards()) setCategoryFilter('Commander');
     loadTags();
     loadFlavorNames(0);
   }})
@@ -3736,6 +3756,7 @@ document.getElementById('search').addEventListener('input', renderGrid);
 document.getElementById('filter-category').addEventListener('change', () => {{
   updateCommanderPopularityControlsVisibility();
   renderGrid();
+  renderCommanderSlot();
 }});
 document.getElementById('filter-color').addEventListener('change', renderGrid);
 document.getElementById('filter-color-exact').addEventListener('change', renderGrid);
