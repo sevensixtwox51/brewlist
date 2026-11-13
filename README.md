@@ -127,7 +127,9 @@ the web app (or the **Brew something new** tile on the Decks page).
   show a live count per option (e.g. "Planeswalkers (0)"), so an empty
   category is obvious before you click into it
 - **★** on an eligible card sets it as your commander; **+** adds any card
-  to the deck — both live right on the card tile
+  to the deck — both live right on the card tile. You can also **drag a
+  card tile into the deck panel** to add it, or drop an eligible commander
+  on the commander banner to set it
 - **Suggest cards** fills the deck from what you own in one click (not
   just a small batch you have to keep re-requesting), ranked by: cards
   that complete a known combo you're one card away from (via Commander

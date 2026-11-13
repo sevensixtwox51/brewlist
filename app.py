@@ -1357,6 +1357,14 @@ body.compact .thumb-wrap { display:none; }
 }
 #hover-preview.show { display: block; }
 .deck-panel { position:sticky; top:20px; padding:14px 16px; }
+.builder-tile[draggable="true"] { cursor: grab; }
+.builder-tile.dragging { opacity: 0.45; }
+.deck-panel.drop-target { outline: 2px dashed var(--accent); outline-offset: -2px; }
+.deck-panel.drop-target::after { content: "Drop to add to the deck"; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--card-bg) 82%, transparent); color: var(--accent); font-family: var(--serif); font-size: 1.3rem; pointer-events: none; z-index: 5; border-radius: inherit; }
+.deck-panel.drop-target.drop-commander::after { content: none; }
+#commander-slot-wrap.drop-commander .commander-slot { outline: 2px dashed var(--accent); outline-offset: 2px; }
+#commander-slot-wrap.drop-commander::after { content: "Drop to set as commander"; display: block; text-align: center; color: var(--accent); font-family: var(--serif); margin-top: 4px; }
 .deck-stats { display:flex; gap:14px; flex-wrap:wrap; color:var(--text-dim); font-size:0.85rem; margin-bottom:10px; }
 .deck-stats b { color: var(--text); }
 .commander-slot {
@@ -1732,7 +1740,7 @@ body.compact .deck-row .card-thumb { display:none; }
 .combo-item .combo-missing { color:var(--missing); font-size:0.78rem; margin-top:2px; }
 .combo-item a { color:var(--accent); }
 #battle-card { display:none; }
-@media (max-width: 900px) { .builder-layout { grid-template-columns: 1fr; } .deck-panel { position:static; } }
+@media (max-width: 900px) { .builder-layout { grid-template-columns: 1fr; } .deck-panel { position:relative; } }
 @media print {
   body * { visibility:hidden; }
   body::before, body::after { display:none !important; }
@@ -2751,6 +2759,33 @@ setupHoverPreview(document.getElementById('collection-grid'));
 setupHoverPreview(document.getElementById('commander-slot-wrap'));
 setupHoverPreview(document.getElementById('deck-list'));
 setupHoverPreview(document.getElementById('suggestions-panel'));
+
+// Drag a card tile into the deck panel to add it; drop an eligible commander on the commander banner to set it.
+let dragCard = null;
+(() => {{
+  const panel = document.querySelector('.deck-panel');
+  const cmdWrap = document.getElementById('commander-slot-wrap');
+  const clear = () => {{ panel.classList.remove('drop-target', 'drop-commander'); cmdWrap.classList.remove('drop-commander'); }};
+  const overCommander = (e) => brew.format === 'commander' && isCommanderEligible(dragCard) && !!e.target.closest('#commander-slot-wrap');
+  panel.addEventListener('dragover', (e) => {{
+    if (!dragCard) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    const cmd = overCommander(e);
+    panel.classList.add('drop-target');
+    panel.classList.toggle('drop-commander', cmd);
+    cmdWrap.classList.toggle('drop-commander', cmd);
+  }});
+  panel.addEventListener('dragleave', (e) => {{ if (!panel.contains(e.relatedTarget)) clear(); }});
+  panel.addEventListener('drop', (e) => {{
+    if (!dragCard) return;
+    e.preventDefault();
+    const card = dragCard, cmd = overCommander(e);
+    dragCard = null; clear();
+    if (cmd) setCommander(card); else addCard(card);
+  }});
+  document.addEventListener('dragend', () => {{ dragCard = null; clear(); document.querySelectorAll('.builder-tile.dragging').forEach(t => t.classList.remove('dragging')); }});
+}})();
 setupHoverPreview(document.getElementById('sample-hand-cards'));
 setupHoverPreview(document.getElementById('replace-popup'));
 
@@ -3391,6 +3426,13 @@ function renderGrid() {{
   cards.forEach(card => {{
     const tile = document.createElement('div');
     tile.className = 'builder-tile' + (card.foil ? ' foil' : '');
+    tile.draggable = true;
+    tile.addEventListener('dragstart', (e) => {{
+      dragCard = card;
+      e.dataTransfer.effectAllowed = 'copy';
+      e.dataTransfer.setData('text/plain', card.name);
+      tile.classList.add('dragging');
+    }});
     tile.dataset.full = scryfallImg(card.scryfall_id, 'normal') || '';
     const legality = legalityFor(card);
     const warnHtml = (legality && legality !== 'Legal') ? `<div class="warn">&#9888; ${{legality}} in ${{brew.format === 'commander' ? 'Commander' : brew.target_format}}</div>` : '';
