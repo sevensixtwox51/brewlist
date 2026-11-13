@@ -1207,8 +1207,7 @@ form.addEventListener('submit', (e) => {{
 
 
 # --------------------------------------------------------------------------
-# Deck builder page -- build a brand-new deck (Commander or generic 60-card
-# constructed) using only cards already in the ManaBox collection. See
+# Deck builder page -- build a brand-new Commander deck using only cards already in the ManaBox collection. See
 # deck_builder.py for the non-UI logic (gameplay-data merge, fill-the-gaps
 # suggestions, brew -> CardEntry conversion). A saved brew is just another
 # project file (see save_project/load_project above), distinguished by
@@ -1972,7 +1971,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
     start_auto = not saved_mix  # a new deck starts on the Auto (Karsten) mix; a saved one keeps its own numbers
     brew_state = {
         "deck_name": brew.get("deck_name") or "",
-        "format": brew.get("format") or "commander",
+        "format": "commander",
         "target_format": brew.get("target_format") or "standard",
         "commander": brew.get("commander"),
         "cards": brew.get("cards") or [],
@@ -2036,23 +2035,6 @@ def render_builder_page(deck_id: str | None = None) -> str:
       <div class="action-group">
         <div class="field"><label for="deck-name">Deck name</label>
           <input type="text" id="deck-name" placeholder="Untitled brew">
-        </div>
-        <div class="field"><label for="deck-format">Format</label>
-          <select id="deck-format">
-            <option value="commander">Commander</option>
-            <option value="constructed">60-card constructed</option>
-          </select>
-        </div>
-        <div class="field" id="target-format-field">
-          <label for="target-format">Target format (legality)</label>
-          <select id="target-format">
-            <option value="standard">Standard</option>
-            <option value="pioneer">Pioneer</option>
-            <option value="modern">Modern</option>
-            <option value="legacy">Legacy</option>
-            <option value="vintage">Vintage</option>
-            <option value="pauper">Pauper</option>
-          </select>
         </div>
         <div class="field" id="intended-bracket-field">
           <label for="intended-bracket" title="Optional -- if set, Suggest avoids Game Changers beyond what WotC's own bracket rules allow. Leave as No preference to build freely; the estimated bracket is always shown either way.">Intended bracket</label>
@@ -2373,8 +2355,6 @@ const errorBox = document.getElementById('error-box');
 function showError(message) {{ errorBox.textContent = message; errorBox.style.display = 'block'; }}
 
 document.getElementById('deck-name').value = brew.deck_name;
-document.getElementById('deck-format').value = brew.format;
-document.getElementById('target-format').value = brew.target_format;
 document.getElementById('intended-bracket').value = brew.intended_bracket || '';
 document.getElementById('mix-lands').value = brew.mix_targets.Lands;
 document.getElementById('mix-ramp').value = brew.mix_targets.Ramp;
@@ -2499,25 +2479,9 @@ document.getElementById('mix-template').addEventListener('change', (e) => {{
   updateSynergyReadout();
 }});
 
-function updateFormatUI() {{
-  const isCommander = brew.format === 'commander';
-  document.getElementById('target-format-field').style.display = isCommander ? 'none' : 'flex';
-  document.getElementById('intended-bracket-field').style.display = isCommander ? 'flex' : 'none';
-  document.getElementById('mix-targets-field').style.display = isCommander ? 'block' : 'none';
-}}
-updateFormatUI();
 loadThemeOptions();
 if (mixAuto) refreshAutoMix();
 
-document.getElementById('deck-format').addEventListener('change', (e) => {{
-  brew.format = e.target.value;
-  if (brew.format !== 'commander') brew.commander = null;
-  updateFormatUI();
-  renderAll();
-  loadThemeOptions();
-  loadDeckTypes();
-}});
-document.getElementById('target-format').addEventListener('change', (e) => {{ brew.target_format = e.target.value; }});
 document.getElementById('intended-bracket').addEventListener('change', (e) => {{ brew.intended_bracket = e.target.value; }});
 document.getElementById('deck-name').addEventListener('input', (e) => {{ brew.deck_name = e.target.value; }});
 ['lands', 'ramp', 'draw', 'interaction'].forEach(role => {{
@@ -3066,14 +3030,9 @@ function adjustQty(name, delta) {{
 }}
 
 function legalityFor(card) {{
-  // MTGJSON omits a format entirely when a card was never printed into
-  // that format's pool (e.g. Sol Ring has no "standard" key at all)
-  // rather than saying "Not Legal" -- so a missing entry means "not
-  // legal" for a target constructed format. Commander is the exception:
-  // it's explicitly "Legal" for essentially every real paper card, so a
-  // missing entry there just means untracked, not banned.
-  if (brew.format === 'commander') return (card.legalities || {{}})['commander'] || null;
-  return (card.legalities || {{}})[brew.target_format] || 'Not Legal';
+  // Commander is explicitly "Legal" for essentially every real paper card, so a missing entry just means
+  // untracked, not banned.
+  return (card.legalities || {{}})['commander'] || null;
 }}
 
 // Appends a "(count)" to each type-filter option based on the loaded
@@ -4877,11 +4836,6 @@ function runImport() {{
     const key = normalizeName(card.name);
     (wanted[key] = wanted[key] || {{ card: card, qty: 0 }}).qty += e.qty;
   }});
-  if (commanderCard && brew.format !== 'commander') {{
-    brew.format = 'commander';
-    document.getElementById('deck-format').value = 'commander';
-    updateFormatUI();
-  }}
   if (replace) brew.cards = [];
   if (commanderCard) setCommander(commanderCard);
   const commanderKey = commanderCard ? normalizeName(commanderCard.name) : null;
@@ -5453,7 +5407,6 @@ function renderDeckShape(data) {{
 // run on the server right after Analyze and shown as on-curve odds per turn.
 const MANA_SIM_GOOD = {{ 2: 95, 3: 88, 4: 78, 5: 66, 6: 55 }};
 function runManaSim(requestSeq) {{
-  if (brew.format === 'constructed') {{ analyzeStage(requestSeq, 'mana', false); analyzeStage(requestSeq, 'land', false); return; }}
   fetch('/builder/mana-sim', {{
     method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
     body: JSON.stringify({{ cards: brew.cards, commander: brew.commander }}),
@@ -5557,7 +5510,6 @@ function renderSynergy(data) {{
 
 // Turn Clock (turn_clock.simulate_turn_clock): how soon the deck kills one opponent who does nothing.
 function runTurnClock(requestSeq) {{
-  if (brew.format === 'constructed') {{ analyzeStage(requestSeq, 'clock', false); analyzeStage(requestSeq, 'resilience', false); return; }}
   fetch('/builder/turn-clock', {{
     method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
     body: JSON.stringify({{ cards: brew.cards, commander: brew.commander, combos: (lastAnalyzeData && lastAnalyzeData.combos_included_list) || [] }}),
@@ -5759,7 +5711,7 @@ analyzeBadgesEl.addEventListener('mouseout', (e) => {{
 
 function buildBattleCardHtml(data) {{
   const name = brew.deck_name || document.getElementById('deck-name').value || 'Untitled brew';
-  const commanderLine = brew.commander ? `Commander: ${{brew.commander.name}}` : (brew.format === 'commander' ? 'No commander chosen' : '60-card constructed');
+  const commanderLine = brew.commander ? `Commander: ${{brew.commander.name}}` : 'No commander chosen';
   const badges = [];
   badges.push(colorIdentityLabel(deckColorIdentity()));
   if (data.is_commander_format && data.wotc_bracket) badges.push(`Bracket ${{data.wotc_bracket[0]}} (${{data.wotc_bracket[1]}})`);
@@ -6260,7 +6212,7 @@ def builder_save():
         deck_id,
         type="brew",
         deck_name=body.get("deck_name") or "Untitled brew",
-        format=body.get("format") if body.get("format") in ("commander", "constructed") else "commander",
+        format="commander",
         target_format=body.get("target_format") or "standard",
         commander=body.get("commander"),
         cards=cards,
@@ -6366,7 +6318,7 @@ def _run_suggest(body: dict, pools_out: dict | None = None, meta_out: dict | Non
     one-click Suggest would have picked. Returns (suggestions, None) on
     success or (None, (error_message, status)) when the request can't be
     served."""
-    deck_format = body.get("format") if body.get("format") in ("commander", "constructed") else "commander"
+    deck_format = "commander"
     if not os.path.isfile(COLLECTION_PATH):
         return None, ("No ManaBox collection on file yet -- upload one from the home page first.", 400)
     try:
@@ -6576,7 +6528,7 @@ def builder_optimize():
     they stood at the *start* of that call. Same request shape as
     /builder/suggest; not auto-applied client-side."""
     body = request.get_json(silent=True) or {}
-    deck_format = body.get("format") if body.get("format") in ("commander", "constructed") else "commander"
+    deck_format = "commander"
     if not os.path.isfile(COLLECTION_PATH):
         return jsonify(error="No ManaBox collection on file yet -- upload one from the home page first."), 400
     try:
@@ -6605,7 +6557,7 @@ def builder_themes():
     "Preferred theme" picker -- recomputed whenever the commander/colors
     change client-side, same request shape as /builder/suggest."""
     body = request.get_json(silent=True) or {}
-    deck_format = body.get("format") if body.get("format") in ("commander", "constructed") else "commander"
+    deck_format = "commander"
     if not os.path.isfile(COLLECTION_PATH):
         return jsonify(error="No ManaBox collection on file yet -- upload one from the home page first."), 400
     try:
@@ -6631,7 +6583,7 @@ def builder_replace():
     Game Changers, no live Commander Spellbook call since this backs a
     quick per-card popup, not a full re-suggest."""
     body = request.get_json(silent=True) or {}
-    deck_format = body.get("format") if body.get("format") in ("commander", "constructed") else "commander"
+    deck_format = "commander"
     card_name = body.get("card_name")
     if not card_name:
         return jsonify(error="Missing card_name."), 400
@@ -6665,7 +6617,7 @@ def builder_stats():
     not run on every card add/remove, since it makes a live Commander
     Spellbook call (combos/bracket) each time."""
     body = request.get_json(silent=True) or {}
-    deck_format = body.get("format") if body.get("format") in ("commander", "constructed") else "commander"
+    deck_format = "commander"
     entries = brew_to_card_entries({"commander": body.get("commander"), "cards": body.get("cards") or []})
     if not entries:
         return jsonify(error="Add some cards first."), 400

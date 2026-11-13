@@ -4,7 +4,7 @@
   <a href="https://ko-fi.com/imtotallymeh"><img src="https://ko-fi.com/img/githubbutton_sm.svg" alt="ko-fi"></a>
 </p>
 
-Brewlist builds Commander and 60-card decks from the cards you already own,
+Brewlist builds Commander decks from the cards you already own,
 and checks any [Moxfield](https://moxfield.com) or
 [Archidekt](https://archidekt.com) decklist against your
 [ManaBox](https://manabox.app) collection.
@@ -33,7 +33,7 @@ Build a new deck straight from what you already own, at `/builder` in the
 web app (or the **Brew something new** tile on the Decks page). A saved brew
 can be run through the same report a compared deck gets.
 
-- Pick **Commander** (100-card singleton) or **60-card constructed**, then
+- Pick a commander, then
   search/filter your ManaBox collection by name, card type, or color —
   color filtering goes beyond plain WUBRG letters to every named
   guild/shard/wedge/4-color/5-color combination (Azorius, Sultai, Jeskai,
