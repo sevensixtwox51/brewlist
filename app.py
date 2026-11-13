@@ -957,7 +957,7 @@ def render_decks_page(error: str | None = None, prefill_url: str = "") -> str:
     store_summary_text = _esc(", ".join(STORE_DISPLAY_NAMES[l] for l in PICKABLE_STORE_LABELS if l in selected_stores) or "no stores selected")
 
     header_html, footer_html = _page_chrome(
-        "Compare a decklist against your collection, with live pricing.", error
+        "Build a deck from your collection, or compare a decklist with live pricing.", error
     )
 
     return f"""<!doctype html>
