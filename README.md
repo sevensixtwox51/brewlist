@@ -84,7 +84,6 @@ can be run through the same report a compared deck gets.
   cards that complement it (sacrifice outlets with death payoffs, landfall
   with land ramp, reanimation with graveyard fillers...) from a small curated
   list of tag pairs, plus similar cards that share its rarer tags
-  ([`tag_synergy.py`](tag_synergy.py))
 
 ![Works with: owned sacrifice outlets for a death-payoff creature](screenshots/works-with.png)
 
@@ -141,7 +140,6 @@ can be run through the same report a compared deck gets.
   Draw to Synergy. The app builds the standard shape too and keeps the
   plan-shifted one only if its goldfish kill-by-turn-8 odds are not clearly
   lower, saying so when it falls back
-  ([`synergy.engine_plan`](synergy.py), `_plan_guard` in [`app.py`](app.py))
 - An optional **Preferred theme** picker lets you steer Suggest toward a named
   EDH archetype (Voltron, Reanimator, Stax, Tokens, Group Hug, ...) from the
   very first click, instead of only ever discovering one organically. Each is
@@ -159,8 +157,7 @@ can be run through the same report a compared deck gets.
   allow for that bracket; leave it on "No preference" to build freely — the
   estimated bracket is shown either way
 - Suggest, Optimize, and the ⇄ replacement button all also weigh a real
-  **EDHREC synergy score** for your exact commander (see
-  [`edhrec_data.py`](edhrec_data.py)) ahead of the generic Oracle Tag signal —
+  **EDHREC synergy score** for your exact commander ahead of the generic Oracle Tag signal —
   a statistic computed by EDHREC from tens of thousands of real decklists, not
   a category match, so it can surface a card that's genuinely good with *this*
   commander specifically even when nothing in Suggest's fixed tag vocabulary
