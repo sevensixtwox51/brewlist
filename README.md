@@ -102,6 +102,8 @@ Markdown/HTML/CSV reports on disk) — the Deck Builder is web-app only.
   a build. Decks can be deleted individually (a small &times; on the
   tile, with a confirm prompt) instead of having to dig through
   `data/projects/` by hand
+
+  ![Decks page: Compare panel, Brew and Comparison tiles](screenshots/decks.png)
 - A warm dark theme by default, switching to a light one when your system is set to light
 
 ## Deck Builder
@@ -180,6 +182,8 @@ the web app (or the **Brew something new** tile on the Decks page).
   independent state) restricts which sets Suggest, the theme picker, and
   the replacement button below are allowed to pull owned candidates from
   at all — everything's on by default
+
+  ![Suggest cards: step 1 of 5, Creatures & Synergy, with the Deck type picker](screenshots/suggest.png)
 - Each card already in the deck has a **⇄** button that suggests owned
   replacements filling the same role (same Lands/Ramp/Draw/Interaction/
   Synergy slot, ranked by shared Oracle Tag then Game Changers) — pick one
@@ -225,6 +229,8 @@ the web app (or the **Brew something new** tile on the Decks page).
   package). A **Print Battle
   Card** button turns all of that into a clean, printable one-page summary
   for talking through the deck with the table
+
+  ![Analyze Deck: mana simulation, curve, sample hand](screenshots/analyze.png)
 - **Save** remembers the brew as a project, same as a compared deck — it
   shows up on the Decks page and picks up right where you
   left off
