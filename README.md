@@ -523,11 +523,7 @@ That's about the *code*, though — every feature the app itself runs
 (pricing, legality, budget alternatives, Suggest, Optimize, commander
 popularity/synergy) is a deterministic heuristic over real data
 (Scryfall Oracle Tags, MTGJSON, Commander Spellbook, EDHREC), explicitly
-*not* an AI guess. An earlier version of this app had an opt-in "Build
-with AI" mode whose output genuinely was AI-generated (an agentic Claude
-loop reading a commander's card text); it was removed in favor of real
-EDHREC synergy data, which turned out to cover the same need for free
-and without an ongoing API cost.
+*not* an AI guess. The app makes no AI calls at runtime.
 
 <p align="center">
   <a href="AI-DECLARATION.md"><img src="https://img.shields.io/badge/%E4%B7%BC%20AI--DECLARATION-auto-ede9fe?labelColor=ede9fe" alt="AI-DECLARATION: auto" height="28"></a>
