@@ -1363,6 +1363,8 @@ body.compact .thumb-wrap { display:none; }
 .deck-panel.drop-target::after { content: "Drop to add to the deck"; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   background: color-mix(in srgb, var(--card-bg) 82%, transparent); color: var(--accent); font-family: var(--serif); font-size: 1.3rem; pointer-events: none; z-index: 5; border-radius: inherit; }
 .deck-panel.drop-target.drop-commander::after { content: none; }
+/* While a card is being dragged the deck panel grows to the full column height, so the whole right side is the drop area. */
+@media (min-width: 901px) { body.dragging-card .deck-panel { min-height: calc(100vh - 40px); } }
 #commander-slot-wrap.drop-commander .commander-slot { outline: 2px dashed var(--accent); outline-offset: 2px; }
 #commander-slot-wrap.drop-commander::after { content: "Drop to set as commander"; display: block; text-align: center; color: var(--accent); font-family: var(--serif); margin-top: 4px; }
 .deck-stats { display:flex; gap:14px; flex-wrap:wrap; color:var(--text-dim); font-size:0.85rem; margin-bottom:10px; }
@@ -2765,7 +2767,10 @@ let dragCard = null;
 (() => {{
   const panel = document.querySelector('.deck-panel');
   const cmdWrap = document.getElementById('commander-slot-wrap');
-  const clear = () => {{ panel.classList.remove('drop-target', 'drop-commander'); cmdWrap.classList.remove('drop-commander'); }};
+  const clear = () => {{ panel.classList.remove('drop-target', 'drop-commander'); cmdWrap.classList.remove('drop-commander'); document.body.classList.remove('dragging-card'); }};
+  window.beginCardDrag = () => setTimeout(() => {{ if (dragCard) document.body.classList.add('dragging-card'); }}, 0);
+  // A drag whose source tile was re-rendered never sends dragend; the first pointer move afterwards means it is over.
+  document.addEventListener('pointermove', (e) => {{ if (dragCard && e.buttons === 0) {{ dragCard = null; clear(); }} }});
   const overCommander = (e) => brew.format === 'commander' && isCommanderEligible(dragCard) && !!e.target.closest('#commander-slot-wrap');
   panel.addEventListener('dragover', (e) => {{
     if (!dragCard) return;
@@ -3432,6 +3437,7 @@ function renderGrid() {{
       e.dataTransfer.effectAllowed = 'copy';
       e.dataTransfer.setData('text/plain', card.name);
       tile.classList.add('dragging');
+      window.beginCardDrag();
     }});
     tile.dataset.full = scryfallImg(card.scryfall_id, 'normal') || '';
     const legality = legalityFor(card);
