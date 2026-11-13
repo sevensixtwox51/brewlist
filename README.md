@@ -29,271 +29,120 @@ Deck Builder is web-app only.
 
 ## The Decks page
 
-After setup, the **Decks** page is home base for both tools. A **Compare** panel
-sits on top (paste a decklist URL), and your saved decks are art tiles below
-it, each badged **Brew** or **Comparison**, with a filter to show one kind, a
-**Show more** button when the list is long, and a **Brew something new** tile
-to start a build. Decks can be deleted individually (a small &times; on the
-tile, with a confirm prompt) instead of having to dig through
-`data/projects/` by hand. The app has a warm dark theme by default and
-switches to a light one when your system is set to light.
+The **Decks** page is home base for both tools: a **Compare** panel on top
+(paste a decklist URL) and your saved decks as art tiles below, badged **Brew**
+or **Comparison**, with a filter, a **Brew something new** tile, and a small
+&times; to delete one. The app is dark by default and switches to light with
+your system.
 
 ![Decks page: Compare panel, Brew and Comparison tiles](screenshots/decks.png)
 
 ## Deck Builder
 
-Build a new deck straight from what you already own, at `/builder` in the
-web app (or the **Brew something new** tile on the Decks page). A saved brew
-can be run through the same report a compared deck gets.
+Build a deck from what you own at `/builder` (or the **Brew something new**
+tile). A saved brew can be run through the same report a compared deck gets.
 
-### Browse and filter your collection
+### Find cards
 
-- Search by name, or filter by card type, color, or set. Color filtering goes
-  beyond plain WUBRG letters to every named guild/shard/wedge/4-color/5-color
-  combination (Azorius, Sultai, Jeskai, Yore-Tiller, ...), with an **Exact
-  colors** checkbox to narrow a filter like "Grixis (UBR)" down to true
-  3-color cards only, instead of also matching every mono/2-color card that
-  merely fits inside it. The **Set** filter is a multiselect, newest first,
-  each set showing how many uniques you own out of its real card count (via
-  MTGJSON). The type, color, and set dropdowns all show a live count per
-  option (e.g. "Planeswalkers (0)"), so an empty category is obvious before
-  you click into it
-- The mana-symbol color pips cycle on each click: **allowed** (cards may have
-  the color), **required** (every card shown has it), then off, so white
-  required with blue, black and green allowed shows only cards that include
-  white and no red. The colorless pip adds colorless cards, and the **×**
-  beside the pips clears every color at once
-- **Search by tag** filters your collection with Scryfall's Oracle Tags (the
-  same data as `otag:` searches): type "sacrifice outlet" or "landfall", pick
-  one or more, and see only the cards you own that have them. The **tag
-  button** (🏷) on each tile opens a small popover listing that card's tags
-  (click one to filter by it)
-- The search box also finds a card by its flavor / crossover name (type
-  "Chekov" and you get Tatyova), and the flavor name shows under the real one
-- The **Sort** menu orders the collection by name, or by **set** (release
-  date, then card number, like a binder), with an ascending/descending
-  button; under the Commander filter it can also sort by popularity or
-  completeness
-- The **View** button next to Sort switches the collection between Cards,
-  Gallery and Compact (one line per card, so several times as many cards
-  fit on a screen as in Cards view)
+- Filter by name, type, color or set. Colors go beyond WUBRG to every named
+  guild, shard and wedge, with an **Exact colors** option; the color pips cycle
+  **allowed**, **required**, off (the colorless pip adds colorless cards, **×**
+  clears them all). The **Set** filter is a multiselect, newest first, showing
+  how many cards you own of each set. Every dropdown shows live counts
+- **Search by tag** uses Scryfall's Oracle Tags (the data behind `otag:`):
+  try "sacrifice outlet" or "landfall". The 🏷 button on a tile lists its
+  tags. The search box also matches a card's flavor or crossover name
+  (type "Chekov" and you get Tatyova)
+- **Sort** by name or set (like a binder), or for commanders by popularity or
+  completeness. **View** switches between Cards, Gallery and Compact
 
 ![The three views side by side: Cards, Gallery and Compact](screenshots/view-modes.png)
 
-- The **link button** on a tile or deck row opens **Works with...**: owned
-  cards that complement it (sacrifice outlets with death payoffs, landfall
-  with land ramp, reanimation with graveyard fillers...) from a small curated
-  list of tag pairs, plus similar cards that share its rarer tags
+- The 🔗 button opens **Works with...**: owned cards that complement it
+  (sacrifice outlets with death payoffs, landfall with land ramp...) plus
+  cards that share its rarer tags
 
 ![Works with: owned sacrifice outlets for a death-payoff creature](screenshots/works-with.png)
 
-### Add cards and pick a commander
+### Build the deck
 
-- **★** on an eligible card sets it as your commander; **+** adds any card to
-  the deck, and both live right on the card tile. You can also **drag a card
-  tile into the deck panel** to add it (the whole right side becomes the drop
-  area), or drop an eligible commander on the commander banner to set it
+- **★** sets the commander, **+** adds a card, and you can drag a tile into the
+  deck panel (drop a commander on the banner to set it)
 
 ![Dragging a card over the deck panel](screenshots/drag-to-add.png)
 
-- **Rate my commanders** (in the Commander filter's controls) builds each
-  commander you own from your collection in the background and shows, on its
-  tile, how **complete** it is: the share of the deck's non-land slots your
-  cards can fill with cards EDHREC lists for that commander. Hover the
-  percentage for how many slots would be filler and how many of EDHREC's 40
-  strongest signature cards you own. Sort by **Most complete first** to see
-  which commanders you can build best today. Each is rated for its most
-  common EDHREC deck type. Nothing is rated unless you click the button; after
-  that, a collection change only re-rates the commanders whose colors the new
-  or removed cards could affect
+- **Rate my commanders** scores every commander you own by how much of its
+  EDHREC deck your collection can fill (slot filler and signature cards show on
+  hover), for its most common EDHREC deck type. Sort by **Most complete first**
+  to see what you can build best today. Nothing is rated until you click it
 
 ![Commanders sorted by completeness](screenshots/commander-ratings.png)
 
-### Suggest cards
-
-- **Suggest cards** fills the deck from what you own in one click (not just a
-  small batch you have to keep re-requesting), ranked by: cards that complete
-  a known combo you're one card away from (via Commander Spellbook), then
-  cards sharing a theme/synergy tag with what's already in the deck or with
-  your commander itself (the same Scryfall Oracle Tags used for the
-  budget-alternative suggestions under Compare a decklist — not an AI guess),
-  then whichever part of the deck's shape is furthest from target. Defaults to
-  the well-known Command Zone-style EDH ratios (38 lands / 10 ramp / 10 draw /
-  11 interaction / 30 synergy pieces out of a 99-card library, plus your 1
-  commander), adjustable under **Deck mix targets**
-- It opens a guided, five-step flow: first pick an EDHREC **deck type** for
-  your commander (each shows how many decks use it, a few of its top cards,
-  and how many of those you own), then review Synergy, Ramp, Draw,
-  Interaction and Lands one step at a time. Every pick is a card tile you can
-  click to add or drop, with a note on why it was chosen and a **Not owned**
-  or **Slot filler** tag where that applies. Finish with **Accept all picks**
-  or step through them. **Quick suggest** skips the review and drops the
-  autopicker's whole list into the panel in one click. The **Deck type** menu
-  lets you switch plans later
+- **Suggest cards** is a guided five-step flow: pick an EDHREC **deck type** for
+  your commander, then review Synergy, Ramp, Draw, Interaction and Lands one
+  step at a time, with a reason on each pick and **Not owned** or **Slot filler**
+  tags where they apply. **Quick suggest** takes the whole list at once. Picks are ranked by combos you're one card from finishing
+  (Commander Spellbook), then EDHREC synergy scores and Oracle Tags, then
+  whatever the deck's shape (default 38 lands / 10 ramp / 10 draw / 11
+  interaction / 30 synergy) still needs. No API key or per-build cost, and
+  nothing is added until you approve it
 
 ![Suggest cards: step 1 of 5, Creatures & Synergy, with the Deck type picker](screenshots/suggest.png)
 
-- **Engine commanders** (a commander whose EDHREC deck type is a plan its own
-  text takes part in: Teysa Karlov and Aristocrats, Kwia and Lifegain) get a
-  plan-aware Auto build: cards that work with that plan, as enablers or
-  payoffs, are ranked first, and six slots move from generic Interaction and
-  Draw to Synergy. The app builds the standard shape too and keeps the
-  plan-shifted one only if its goldfish kill-by-turn-8 odds are not clearly
-  lower, saying so when it falls back
-- An optional **Preferred theme** picker lets you steer Suggest toward a named
-  EDH archetype (Voltron, Reanimator, Stax, Tokens, Group Hug, ...) from the
-  very first click, instead of only ever discovering one organically. Each is
-  backed by real Scryfall Oracle Tags data (the same data used for the
-  budget-alternative suggestions under Compare a decklist), curated down to
-  archetypes that are both genuinely well-known deckbuilding identities and
-  have owned cards to back them — only options with 2+ owned candidates ever
-  show up. A separate **Set Selection** multiselect (same Select All/Clear
-  All/Cancel/OK popup as the grid's own Set filter, but independent state)
-  restricts which sets Suggest, the theme picker, and the replacement button
-  below are allowed to pull owned candidates from at all — everything's on by
-  default
-- An optional **Intended bracket** (1-2 / 3 / 4+) keeps Suggest from
-  recommending more Game Changers than WotC's own published bracket rules
-  allow for that bracket; leave it on "No preference" to build freely — the
-  estimated bracket is shown either way
-- Suggest, Optimize, and the ⇄ replacement button all also weigh a real
-  **EDHREC synergy score** for your exact commander ahead of the generic Oracle Tag signal —
-  a statistic computed by EDHREC from tens of thousands of real decklists, not
-  a category match, so it can surface a card that's genuinely good with *this*
-  commander specifically even when nothing in Suggest's fixed tag vocabulary
-  would catch it. No API key, no per-build cost, and nothing is applied until
-  you review and approve it, same as every other suggestion in this app
-- Each card already in the deck has a **⇄** button that suggests owned
-  replacements filling the same role (same Lands/Ramp/Draw/Interaction/Synergy
-  slot, ranked by shared Oracle Tag then Game Changers) — pick one to swap it
-  in for the original in a single click
-- **Optimize Deck** is a second pass for a deck that's already built: it
-  re-checks Commander Spellbook for real, owned, one-card-away combos and
-  proposes concrete swaps (add the missing piece, cut a safe filler in the
-  same role, never a Game Changer or another combo's own card) — catches
-  combos Suggest can miss in a single big batch, or once the deck's already
-  full and Suggest has nothing left to fill
+- **Engine commanders** (Teysa and Aristocrats, Kwia and Lifegain) get a
+  plan-aware build that ranks enablers and payoffs first, and the standard
+  shape is kept if the plan version's goldfish odds are clearly worse
+- Options: a **Preferred theme** (Voltron, Reanimator, Stax, ...), **Set
+  Selection** to limit which sets Suggest may use, **Intended bracket** to
+  avoid too many Game Changers, and **Deck mix targets**
+- **⇄** on a deck card suggests owned replacements for the same role.
+  **Optimize Deck** looks for owned one-card-away combos and proposes swaps
 
 ### Analyze, save and export
 
-- **Analyze Deck** opens a modal with the same Game Changers count, Commander
-  legality, Commander Spellbook rating, estimated WotC bracket, known combos,
-  and total deck value the compare flow computes, plus a **Rule 0 summary**
-  (colors, bracket reasoning, Game Changers, mass land denial, extra-turn
-  count — the objective facts a real pre-game chat covers, not AI-generated
-  prose), the live mana curve/color-breakdown chart, a sample-hand draw tool,
-  and a **Combo Reference** list (in-deck combos plus one-card-away ones and
-  what's missing). It also checks the deck's **colored mana sources** against
-  Karsten's requirement, runs a **mana simulation** (thousands of shuffled
-  games of just lands and ramp: on-curve odds by turn, mulligans, how often
-  the commander lands on curve) and a **Turn Clock** (how soon the deck kills
-  one opponent who does nothing; it reads creature combat, tokens, equipment
-  and auras, team boosts, extra combats, board-scaling drain, tutors, and the
-  combos you've already assembled, planeswalkers, and repeatable abilities
-  that cost only mana and tapping), a **Resilience** check (the same clock
-  under spot removal, a board wipe on turn 6, both, or the commander removed
-  each time it's cast), and **Synergy Packages** (what the deck is built
-  around as enablers vs. payoffs, tribal included, with payoffs that have
-  nothing to enable them and cards outside every package). A **Print Battle
-  Card** button turns all of that into a clean, printable one-page summary for
-  talking through the deck with the table
+- **Analyze Deck** shows a **Rule 0 summary** (colors, bracket, Game Changers,
+  mass land denial, extra turns), combos, the mana curve and a sample hand,
+  colored sources against Karsten's numbers, a **mana simulation**, a **Turn
+  Clock** (how fast the deck kills an opponent who does nothing), a
+  **Resilience** check, and **Synergy Packages**. **Print Battle Card** makes a
+  one-page summary for the table
 
 ![Analyze Deck: mana simulation, curve, sample hand](screenshots/analyze.png)
 
-- **Save** remembers the brew as a project, same as a compared deck — it shows
-  up on the Decks page and picks up right where you left off
-- **View full report** runs the finished brew through the exact same report a
-  compared deck gets (pricing, Game Changers, legality, bracket, combos) —
-  since everything in it is owned by construction, it always shows 100%
-  complete
-- **Copy Decklist** copies a plain-text list — one line per card, with your
-  *exact* owned printing's set code and collector number — ready to paste into
-  Moxfield's or Archidekt's own deck-import box
-- **Export CSV** downloads the same Lands/Artifacts/Colors binder organization
-  as the compare flow's In-Store CSV, but for what you're building — useful
-  for physically pulling the cards from your own binders
-- A blurred commander-art backdrop here too, updating live as you pick or
-  clear a commander
+- **Save** keeps it on the Decks page. **View full report** runs it through the
+  compare report. **Copy Decklist** (your exact printings) pastes into Moxfield
+  or Archidekt, and **Export CSV** gives a binder-ordered list for pulling the
+  cards
 
 ## Compare a decklist
 
-Paste a Moxfield or Archidekt link on the Decks page and Brewlist checks it against
-your collection:
+Paste a Moxfield or Archidekt link on the Decks page:
 
-- Fetches a decklist straight from Moxfield's or Archidekt's API given just
-  the deck URL — paste either kind, it's auto-detected
-- Matches it against a ManaBox collection export (`Quantity`, `Foil`,
-  `Scryfall ID`, etc.) — no manual bookkeeping
-- Prices **owned** cards by the *exact printing you actually have* (showcase,
-  extended art, etched foil, ...), not just whichever printing the decklist
-  happens to reference
-- Prices **missing** cards from the true cheapest printing available across
-  TCGPlayer, Card Kingdom, and ManaPool (decklists sometimes reference a
-  rare, much pricier alt-art printing by default), foil and non-foil toggle.
-  Pick which stores to price from on the Decks page (all three checked by
-  default, saved for next time) — Cardmarket is also available as a 4th,
-  opt-in option, shown separately in EUR since it's never blended into any
-  dollar total or "cheapest" comparison
-- All pricing comes from a local index built from MTGJSON's public bulk
-  data, so every comparison is accurate from the first click — no separate
-  "accurate pricing" step to run. The index is a one-time ~325MB download,
-  refreshed automatically once a week (or on demand); after that, lookups
-  are instant instead of a live call per card
-- Each price shows a ▲/▼ trend arrow when it's moved 2%+ over the past
-  week, using MTGJSON's 90-day price history
-- For missing cards priced $20+, suggests cheaper same-role alternatives to
-  buy, or flags it if you already own one — e.g. a missing Mana Crypt
-  surfaces budget mana rocks, a missing fetch land surfaces cheaper fetches
-  you don't have (or the one you already do). Uses Scryfall's community-
-  curated Oracle Tags to find same-function cards — no AI-generated guesses
+- See what you own and what's missing, with prices at today's market. Owned
+  cards are priced by the *exact printing you have*, missing ones by the
+  cheapest printing across TCGPlayer, Card Kingdom and ManaPool (Cardmarket is
+  an opt-in extra, shown separately in EUR), with a foil toggle and ▲/▼ trend
+  arrows from MTGJSON's 90-day history
+- Prices come from a local MTGJSON index (a one-time ~325MB download,
+  refreshed weekly or on demand), so lookups are instant
+- For missing cards over $20, **budget alternatives** from Scryfall's Oracle
+  Tags (or the one you already own), no AI guesses
 
-  ![Budget-alternative suggestions on a card tile](screenshots/budget-alternatives.png)
-- Flags cards on WotC's official Commander "Game Changers" list with a badge
-  on the card and a deck-wide count in the header — useful for checking
-  your deck against its intended bracket
-- For Commander decks, flags any card that's banned/not legal in the format
-  with a badge and a header summary — Moxfield's format field is used
-  directly; for Archidekt (which doesn't expose one), this is inferred from
-  an EDH bracket value or a "Commander" category card being present
-- For Commander decks, a "Combos" panel shows any known combos your deck
-  already has all the pieces for, plus the most notable combos you're
-  exactly one card away from completing — via
-  [Commander Spellbook](https://commanderspellbook.com)'s public API, which
-  also flags mass-land-denial and extra-turn cards and gives its own
-  power/style rating for the deck (not the official WotC bracket system,
-  but linked out to Commander Spellbook's own page for the deck, which
-  shows more detail)
+![Budget-alternative suggestions on a card tile](screenshots/budget-alternatives.png)
 
-  ![Combos panel](screenshots/combos.png)
-- Alongside that, an **Estimated Bracket** (1-2 / 3 / 4+) computed straight
-  from WotC's own published Commander Brackets rules — Game Changers
-  count, mass land denial, two-card combos, and extra-turn cards, all data
-  the app already has. Brackets 1-2 and 4-5 genuinely aren't
-  distinguishable from a decklist alone per WotC's own text, so those
-  report as a range rather than guessing
-- Total deck value at today's market price, plus the owned portion
-- A **Deck Analysis** panel on every report: a mana curve chart (split
-  Permanents vs. Instants/Sorceries), a color and mana-source breakdown, and
-  a Draw / Deal Another Hand sample-hand tool with an average-lands-in-
-  opening-hand stat
-- A **View** menu for the card grid — Cards (big image tiles), Gallery
-  (art only, with a hover for details) or Compact (a dense text list with
-  each card's full mana-cost pips, for scanning a large deck quickly)
-- The card filter also finds a card by its flavor / crossover name (type
-  "Chekov" and you get Tatyova), and the flavor name shows under the real
-  one
-- A **Shopping List** button opens a plain-text, alphabetized list of
-  what's still missing (quantity + name), pre-selected and one click away
-  from your clipboard
-- A separate **Export In-Store CSV** button groups missing cards the way a
-  physical store organizes its binders (Lands, Artifacts, then Colors
-  split into mono-color / Multicolor / Colorless bins) as a downloadable
-  CSV file
-- A price slider to cap what you're willing to spend per card
-- Per-card "reserved for another deck" overrides, so a card you technically
-  own but have committed to a different build still shows as needed here —
-  persisted so you don't have to re-mark it every time
-- A blurred commander-art backdrop, because why not
+- **Game Changers** and banned/not-legal cards are badged, with header counts
+- A **Combos** panel lists combos you have and ones you're one card from
+  (Commander Spellbook), and an **Estimated Bracket** follows WotC's published
+  rules (1-2, 3 or 4+)
+
+![Combos panel](screenshots/combos.png)
+
+- Deck value, a **Deck Analysis** panel (curve, colors, sample hand), a
+  **Shopping List**, an **In-Store CSV** grouped like a store's binders, a price
+  slider, and per-card "reserved for another deck" overrides that are
+  remembered
+- The same **View** menu and flavor-name search as the builder, and a blurred
+  commander-art backdrop
 
 ## Requirements
 
@@ -322,112 +171,66 @@ aren't recognized (depends on how Python was installed).
 
 ## Updating
 
-Both the web app and CLI also check automatically every time you launch
-them, and only say something if there's actually an update (a banner on
-the Setup or Decks page, or a line printed before the menu/comparison
-starts) -- silent otherwise, so a normal launch isn't cluttered with
-"already up to date" every time.
-
-To check on demand instead: the web app has a **Check for Updates** button
-on the Setup page (`/`). From the CLI:
+Both the web app and the CLI check for updates when they launch and only say
+something if there is one (a banner on the Setup or Decks page, or a line in
+the terminal). To check on demand, use the **Check for Updates** button on the
+Setup page, or:
 
 ```bash
 python3 brewlist_cli.py --update
 ```
 
-Both pull the latest code straight from GitHub with a plain `git pull` --
-no separate download step, works the same on macOS, Windows, or Linux.
-This only works if you installed with `git clone` as shown above (not a
-downloaded ZIP); if it pulls new commits, restart the app afterward to
-actually run the new code.
+Either one runs a plain `git pull`, so it only works if you installed with
+`git clone` (not a downloaded ZIP). Restart the app afterward to run the new
+code.
 
 ## Usage: web app (recommended)
 
 ![Home page](screenshots/home.png)
 
-**macOS:** double-click `Brewlist.command` in Finder. If you see "'Brewlist.command'
-can't be opened because it is from an unidentified developer" -- this happens
-when the file was downloaded via a browser (e.g. GitHub's "Download ZIP"
-button) rather than `git clone`, which triggers macOS's Gatekeeper quarantine
-on unsigned scripts. Right-click the file and choose **Open** instead of
-double-clicking (bypasses it just for that file), or run this in Terminal
-first:
+Launch it:
 
-```bash
-xattr -dr com.apple.quarantine Brewlist.command
-```
+- **macOS:** double-click `Brewlist.command`. If macOS says it can't be opened
+  because it's from an unidentified developer (it does that when the file came
+  from a ZIP download rather than `git clone`), right-click it and choose
+  **Open**, or run `xattr -dr com.apple.quarantine Brewlist.command` once
+- **Windows:** double-click `Brewlist.bat`
+- **Linux:** run `./brewlist.sh` from a terminal
+- **Any OS:** `python3 app.py`
 
-**Windows:** double-click `Brewlist.bat` in File Explorer.
+It picks a free port (starting at 5050, since macOS's AirPlay Receiver often
+uses 5000) and opens your browser. Close the terminal or use **Shut Down** to
+stop it. If the server stops answering, a banner says so and points you to Copy
+Decklist so an open deck isn't lost. It also **quits by itself after 15 minutes
+of no use** (a tab left open doesn't count, and it never stops mid-job). Set
+`BREWLIST_IDLE_EXIT_MINUTES` to change that (minimum 2, or `0` to turn it off;
+it's off in Docker). `PORT`, `HOST` and `NO_BROWSER=1` are also available.
 
-**Linux:** most file managers won't run a `.sh` file on double-click by
-default, so from a terminal in the `brewlist` folder:
-
-```bash
-./brewlist.sh
-```
-
-**Any OS / from a terminal:**
-
-```bash
-python3 app.py
-```
-
-Either way, it finds a free port automatically (starting at 5050, since
-macOS's AirPlay Receiver often squats on 5000) and opens your browser to
-it -- same behavior on macOS, Windows, and Linux. Closing the terminal
-window (or the "Shut Down" button in the page itself) stops the server.
-Every page checks that the server is still alive (a tiny `/health` ping every
-10 seconds); if it stops answering, a banner says so and points you to Copy
-Decklist so an open deck isn't lost, and a yellow banner appears if the server was
-restarted under an open page. The server also **quits by itself after 15 minutes
-with nothing used**: an open page counts only while you touch it (mouse, keys,
-scroll), so a tab left open doesn't keep it running, and a page with unsaved work gets
-three times as long. It never stops while a background job (rating commanders, building a report) is still running. About two minutes before it stops, a banner says so; moving the
-mouse cancels it. Set `BREWLIST_IDLE_EXIT_MINUTES` (e.g.
-`BREWLIST_IDLE_EXIT_MINUTES=60 python3 app.py`; minimum 2) to change the time, or
-`BREWLIST_IDLE_EXIT_MINUTES=0` to turn it off. It's also off in Docker (the container
-would just be restarted).
-Set `PORT` (e.g. `PORT=6000 python3 app.py`) to force a specific port
-instead of auto-picking one. `HOST` (default `127.0.0.1`, local machine
-only) and `NO_BROWSER=1` (skip auto-opening a browser) are also available
-if you want to run it somewhere unusual -- both are set automatically by
-the Docker image below.
-
-It opens to a **Setup** page first — upload your ManaBox collection export
-(`.csv`) there (drag the file onto the drop zone or click to choose it), then hit **Continue to Decks**. Uploading is its own
-immediate action (its own button, not bundled into anything else), so it
-takes effect right away — from there:
+It opens to a **Setup** page: upload your ManaBox collection export (`.csv`;
+drag it onto the drop zone or click to choose it) and hit **Continue to Decks**.
+The collection is remembered, so you only return to Setup (the **⚙ Collection &
+Settings** link) to replace it.
 
 **To build a deck**
 
 1. On the **Decks** page, click **Brew something new**
-2. Pick a commander (**★** on a card in your collection; **Rate my
-   commanders** shows which ones you can build best)
-3. Hit **Suggest cards** and review the picks step by step (or **Quick
-   suggest** to take the whole list at once), then add or swap cards by hand
-4. **Analyze Deck** to check the mana, the turn clock and the bracket, then
-   **Save**, **Copy Decklist** for Moxfield/Archidekt, or **View full report**
+2. Pick a commander (**★** on a card; **Rate my commanders** shows which ones you
+   can build best)
+3. Hit **Suggest cards** and review the picks (or **Quick suggest**), then add or
+   swap cards by hand
+4. **Analyze Deck**, then **Save**, **Copy Decklist** or **View full report**
 
 **To compare a decklist**
 
-1. On the **Decks** page, paste a Moxfield or Archidekt deck URL (e.g.
-   `https://moxfield.com/decks/...` or `https://archidekt.com/decks/...`)
+1. On the **Decks** page, paste a Moxfield or Archidekt deck URL
 2. Hit **Compare**
 
-Once a collection is uploaded, it's remembered — you only need to go back
-to Setup (the **⚙ Collection & Settings** link on the Decks page) when you
-actually want to replace it with a new export.
-
 Both tools use a local card database (prices, legality, Game Changers, Oracle
-Tags) — the first time you ever run one (or after the weekly auto-refresh), it
-downloads a ~325MB database from MTGJSON, which takes under a minute; after
-that, everything is instant. You can also refresh it on demand from the Setup
-page's **Refresh Database** button.
-
-The app remembers each deck as a "project": a brew picks up where you left
-off, and for a compared deck any "reserved for another deck" overrides you
-save, plus your last-used options, are recalled automatically the next time
-you paste that same URL — no re-uploading, no re-checking boxes.
+Tags). The first run downloads about 325MB from MTGJSON, which takes under a
+minute, and then it's refreshed weekly or from the Setup page's **Refresh
+Database** button. Each deck is remembered as a "project": a brew picks up where
+you left off, and a compared deck recalls its saved overrides and options the
+next time you paste the same URL.
 
 ## Usage: Docker
 
