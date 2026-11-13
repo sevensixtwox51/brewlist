@@ -165,11 +165,13 @@ the web app (or the **Brew something new** tile on the Decks page).
   The mana-symbol color pips cycle on each click: **allowed** (cards may have
   the color), **required** (every card shown has it), then off -- so white
   required with blue, black and green allowed shows only cards that include white
-  and no red. The colorless pip adds colorless cards.
+  and no red. The colorless pip adds colorless cards, and the **×** beside
+  the pips clears every color at once.
   **Search by tag** filters your collection with Scryfall's Oracle Tags (the
   same data as `otag:` searches): type "sacrifice outlet" or "landfall", pick
-  one or more, and see only the cards you own that have them. Each tile has a
-  small **Tags** pill listing that card's tags, and the **link button** on a
+  one or more, and see only the cards you own that have them. The **tag
+  button** (🏷) on each tile opens a small popover listing that card's tags
+  (click one to filter by it), and the **link button** on a
   tile or deck row opens "Works with...": owned cards that complement it
   (sacrifice outlets with death payoffs, landfall with land ramp, reanimation
   with graveyard fillers...) from a small curated list of tag pairs, plus
@@ -186,6 +188,16 @@ the web app (or the **Brew something new** tile on the Decks page).
   independent state) restricts which sets Suggest, the theme picker, and
   the replacement button below are allowed to pull owned candidates from
   at all — everything's on by default
+
+  **Suggest cards** opens a guided, five-step flow: first pick an EDHREC
+  **deck type** for your commander (each shows how many decks use it, a few
+  of its top cards, and how many of those you own), then review Synergy,
+  Ramp, Draw, Interaction and Lands one step at a time — every pick is a
+  card tile you can click to add or drop, with a note on why it was chosen
+  and a **Not owned** or **Slot filler** tag where that applies — and
+  finish with **Accept all picks** or step through them. **Quick suggest**
+  skips the review and drops the autopicker's whole list into the panel in
+  one click. The **Deck type** menu lets you switch plans later.
 
   ![Suggest cards: step 1 of 5, Creatures & Synergy, with the Deck type picker](screenshots/suggest.png)
 - Each card already in the deck has a **⇄** button that suggests owned
@@ -350,7 +362,7 @@ if you want to run it somewhere unusual -- both are set automatically by
 the Docker image below.
 
 It opens to a **Setup** page first — upload your ManaBox collection export
-(`.csv`) there, then hit **Continue to Decks**. Uploading is its own
+(`.csv`) there (drag the file onto the drop zone or click to choose it), then hit **Continue to Decks**. Uploading is its own
 immediate action (its own button, not bundled into anything else), so it
 takes effect right away — from there:
 
