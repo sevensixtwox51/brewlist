@@ -27,158 +27,194 @@ Deck Builder is web-app only.
 
 ![Comparison results — pricing, Game Changers, Commander legality, deck completion](screenshots/results.png)
 
+## The Decks page
+
+After setup, the **Decks** page is home base for both tools. A **Compare** panel
+sits on top (paste a decklist URL), and your saved decks are art tiles below
+it, each badged **Brew** or **Comparison**, with a filter to show one kind, a
+**Show more** button when the list is long, and a **Brew something new** tile
+to start a build. Decks can be deleted individually (a small &times; on the
+tile, with a confirm prompt) instead of having to dig through
+`data/projects/` by hand. The app has a warm dark theme by default and
+switches to a light one when your system is set to light.
+
+![Decks page: Compare panel, Brew and Comparison tiles](screenshots/decks.png)
+
 ## Deck Builder
 
 Build a new deck straight from what you already own, at `/builder` in the
 web app (or the **Brew something new** tile on the Decks page). A saved brew
 can be run through the same report a compared deck gets.
 
-- Pick a commander, then
-  search/filter your ManaBox collection by name, card type, or color —
-  color filtering goes beyond plain WUBRG letters to every named
-  guild/shard/wedge/4-color/5-color combination (Azorius, Sultai, Jeskai,
-  Yore-Tiller, ...), with an **Exact colors** checkbox to narrow a filter
-  like "Grixis (UBR)" down to true 3-color cards only, instead of also
-  matching every mono/2-color card that merely fits inside it. A **Set**
-  filter narrows the grid to specific sets (multiselect, newest first,
-  each showing how many uniques you own out of that set's
-  real card count via MTGJSON). The type, color, and set dropdowns all
-  show a live count per option (e.g. "Planeswalkers (0)"), so an empty
-  category is obvious before you click into it
-- **★** on an eligible card sets it as your commander; **+** adds any card
-  to the deck — both live right on the card tile. You can also **drag a
-  card tile into the deck panel** to add it, or drop an eligible commander
-  on the commander banner to set it. The **View** button next to Sort
-  switches the collection between Cards, Gallery and Compact (one line per
-  card, so a few hundred cards fit on a screen)
-- **Suggest cards** fills the deck from what you own in one click (not
-  just a small batch you have to keep re-requesting), ranked by: cards
-  that complete a known combo you're one card away from (via Commander
-  Spellbook), then cards sharing a theme/synergy tag with what's already in
-  the deck or with your commander itself (the same Scryfall Oracle Tags
-  used for the budget-alternative suggestions under Compare a decklist — not an AI guess),
-  then whichever part of the deck's shape is furthest from target.
-  Defaults to the well-known Command Zone-style EDH ratios (38 lands / 10
-  ramp / 10 draw / 11 interaction / 30 synergy pieces out of a 99-card
-  library, plus your 1 commander), adjustable under **Deck mix targets**.
-  **Engine commanders** (a commander whose EDHREC deck type is a plan its own
+### Browse and filter your collection
+
+- Search by name, or filter by card type, color, or set. Color filtering goes
+  beyond plain WUBRG letters to every named guild/shard/wedge/4-color/5-color
+  combination (Azorius, Sultai, Jeskai, Yore-Tiller, ...), with an **Exact
+  colors** checkbox to narrow a filter like "Grixis (UBR)" down to true
+  3-color cards only, instead of also matching every mono/2-color card that
+  merely fits inside it. The **Set** filter is a multiselect, newest first,
+  each set showing how many uniques you own out of its real card count (via
+  MTGJSON). The type, color, and set dropdowns all show a live count per
+  option (e.g. "Planeswalkers (0)"), so an empty category is obvious before
+  you click into it
+- The mana-symbol color pips cycle on each click: **allowed** (cards may have
+  the color), **required** (every card shown has it), then off, so white
+  required with blue, black and green allowed shows only cards that include
+  white and no red. The colorless pip adds colorless cards, and the **×**
+  beside the pips clears every color at once
+- **Search by tag** filters your collection with Scryfall's Oracle Tags (the
+  same data as `otag:` searches): type "sacrifice outlet" or "landfall", pick
+  one or more, and see only the cards you own that have them. The **tag
+  button** (🏷) on each tile opens a small popover listing that card's tags
+  (click one to filter by it)
+- The search box also finds a card by its flavor / crossover name (type
+  "Chekov" and you get Tatyova), and the flavor name shows under the real one
+- The **Sort** menu orders the collection by name, or by **set** (release
+  date, then card number, like a binder), with an ascending/descending
+  button; under the Commander filter it can also sort by popularity or
+  completeness
+- The **View** button next to Sort switches the collection between Cards,
+  Gallery and Compact (one line per card, so a few hundred cards fit on a
+  screen)
+
+![Compact view: one line per card](screenshots/compact-view.png)
+
+- The **link button** on a tile or deck row opens **Works with...**: owned
+  cards that complement it (sacrifice outlets with death payoffs, landfall
+  with land ramp, reanimation with graveyard fillers...) from a small curated
+  list of tag pairs, plus similar cards that share its rarer tags
+  ([`tag_synergy.py`](tag_synergy.py))
+
+![Works with: owned sacrifice outlets for a death-payoff creature](screenshots/works-with.png)
+
+### Add cards and pick a commander
+
+- **★** on an eligible card sets it as your commander; **+** adds any card to
+  the deck, and both live right on the card tile. You can also **drag a card
+  tile into the deck panel** to add it (the whole right side becomes the drop
+  area), or drop an eligible commander on the commander banner to set it
+
+![Dragging a card over the deck panel](screenshots/drag-to-add.png)
+
+- **Rate my commanders** (in the Commander filter's controls) builds each
+  commander you own from your collection in the background and shows, on its
+  tile, how **complete** it is: the share of the deck's non-land slots your
+  cards can fill with cards EDHREC lists for that commander. Hover the
+  percentage for how many slots would be filler and how many of EDHREC's 40
+  strongest signature cards you own. Sort by **Most complete first** to see
+  which commanders you can build best today. Each is rated for its most
+  common EDHREC deck type. Nothing is rated unless you click the button; after
+  that, a collection change only re-rates the commanders whose colors the new
+  or removed cards could affect
+
+![Commanders sorted by completeness](screenshots/commander-ratings.png)
+
+### Suggest cards
+
+- **Suggest cards** fills the deck from what you own in one click (not just a
+  small batch you have to keep re-requesting), ranked by: cards that complete
+  a known combo you're one card away from (via Commander Spellbook), then
+  cards sharing a theme/synergy tag with what's already in the deck or with
+  your commander itself (the same Scryfall Oracle Tags used for the
+  budget-alternative suggestions under Compare a decklist — not an AI guess),
+  then whichever part of the deck's shape is furthest from target. Defaults to
+  the well-known Command Zone-style EDH ratios (38 lands / 10 ramp / 10 draw /
+  11 interaction / 30 synergy pieces out of a 99-card library, plus your 1
+  commander), adjustable under **Deck mix targets**
+- It opens a guided, five-step flow: first pick an EDHREC **deck type** for
+  your commander (each shows how many decks use it, a few of its top cards,
+  and how many of those you own), then review Synergy, Ramp, Draw,
+  Interaction and Lands one step at a time. Every pick is a card tile you can
+  click to add or drop, with a note on why it was chosen and a **Not owned**
+  or **Slot filler** tag where that applies. Finish with **Accept all picks**
+  or step through them. **Quick suggest** skips the review and drops the
+  autopicker's whole list into the panel in one click. The **Deck type** menu
+  lets you switch plans later
+
+![Suggest cards: step 1 of 5, Creatures & Synergy, with the Deck type picker](screenshots/suggest.png)
+
+- **Engine commanders** (a commander whose EDHREC deck type is a plan its own
   text takes part in: Teysa Karlov and Aristocrats, Kwia and Lifegain) get a
   plan-aware Auto build: cards that work with that plan, as enablers or
   payoffs, are ranked first, and six slots move from generic Interaction and
   Draw to Synergy. The app builds the standard shape too and keeps the
   plan-shifted one only if its goldfish kill-by-turn-8 odds are not clearly
   lower, saying so when it falls back
-  ([`synergy.engine_plan`](synergy.py), `_plan_guard` in [`app.py`](app.py)).
-  **Rate my commanders** (in the Commander filter's controls) builds each
-  commander you own from your collection in the background and shows, on its
-  tile, how **complete** it is: the share of the deck's non-land slots your
-  cards can fill with cards EDHREC lists for that commander, how many would be
-  slot filler, and how many of EDHREC's 40 strongest signature cards you own.
-  Sort by **Most complete first** to see which commanders you can build best
-  today. Each is rated for its most common EDHREC deck type. Nothing is rated
-  unless you click the button; after that, a collection change only re-rates
-  the commanders whose colors the new or removed cards could affect.
-  The **Sort** menu orders the collection by name, or by **set** (release date,
-  then card number -- like a binder), with an ascending/descending button; under
-  the Commander filter it can also sort by popularity or completeness.
-  The mana-symbol color pips cycle on each click: **allowed** (cards may have
-  the color), **required** (every card shown has it), then off -- so white
-  required with blue, black and green allowed shows only cards that include white
-  and no red. The colorless pip adds colorless cards, and the **×** beside
-  the pips clears every color at once.
-  **Search by tag** filters your collection with Scryfall's Oracle Tags (the
-  same data as `otag:` searches): type "sacrifice outlet" or "landfall", pick
-  one or more, and see only the cards you own that have them. The **tag
-  button** (🏷) on each tile opens a small popover listing that card's tags
-  (click one to filter by it), and the **link button** on a
-  tile or deck row opens "Works with...": owned cards that complement it
-  (sacrifice outlets with death payoffs, landfall with land ramp, reanimation
-  with graveyard fillers...) from a small curated list of tag pairs, plus
-  similar cards that share its rarer tags ([`tag_synergy.py`](tag_synergy.py)).
-  An optional **Preferred theme** picker lets you steer Suggest toward a
-  named EDH archetype (Voltron, Reanimator, Stax, Tokens, Group Hug, ...)
-  from the very first click, instead of only ever discovering one
-  organically. Each is backed by real Scryfall Oracle Tags data (the same
-  data used for the budget-alternative suggestions under Compare a decklist), curated down
-  to archetypes that are both genuinely well-known deckbuilding identities
-  and have owned cards to back them — only options with 2+ owned
-  candidates ever show up. A separate **Set Selection** multiselect (same
-  Select All/Clear All/Cancel/OK popup as the grid's own Set filter, but
-  independent state) restricts which sets Suggest, the theme picker, and
-  the replacement button below are allowed to pull owned candidates from
-  at all — everything's on by default
-
-  **Suggest cards** opens a guided, five-step flow: first pick an EDHREC
-  **deck type** for your commander (each shows how many decks use it, a few
-  of its top cards, and how many of those you own), then review Synergy,
-  Ramp, Draw, Interaction and Lands one step at a time — every pick is a
-  card tile you can click to add or drop, with a note on why it was chosen
-  and a **Not owned** or **Slot filler** tag where that applies — and
-  finish with **Accept all picks** or step through them. **Quick suggest**
-  skips the review and drops the autopicker's whole list into the panel in
-  one click. The **Deck type** menu lets you switch plans later.
-
-  ![Suggest cards: step 1 of 5, Creatures & Synergy, with the Deck type picker](screenshots/suggest.png)
-- Each card already in the deck has a **⇄** button that suggests owned
-  replacements filling the same role (same Lands/Ramp/Draw/Interaction/
-  Synergy slot, ranked by shared Oracle Tag then Game Changers) — pick one
-  to swap it in for the original in a single click
-- **Optimize Deck** is a second pass for a deck that's already built:
-  it re-checks Commander Spellbook for real, owned, one-card-away combos
-  and proposes concrete swaps (add the missing piece, cut a safe filler
-  in the same role, never a Game Changer or another combo's own card) —
-  catches combos Suggest can miss in a single big batch, or once the
-  deck's already full and Suggest has nothing left to fill
-- Suggest, Optimize, and the ⇄ replacement button all also weigh a real
-  **EDHREC synergy score** for your exact commander (see
-  [`edhrec_data.py`](edhrec_data.py)) ahead of the generic Oracle Tag
-  signal — a statistic computed by EDHREC from tens of thousands of real
-  decklists, not a category match, so it can surface a card that's
-  genuinely good with *this* commander specifically even when nothing in
-  Suggest's fixed tag vocabulary would catch it. No API key, no per-build
-  cost, and nothing is applied until you review and approve it, same as
-  every other suggestion in this app.
+  ([`synergy.engine_plan`](synergy.py), `_plan_guard` in [`app.py`](app.py))
+- An optional **Preferred theme** picker lets you steer Suggest toward a named
+  EDH archetype (Voltron, Reanimator, Stax, Tokens, Group Hug, ...) from the
+  very first click, instead of only ever discovering one organically. Each is
+  backed by real Scryfall Oracle Tags data (the same data used for the
+  budget-alternative suggestions under Compare a decklist), curated down to
+  archetypes that are both genuinely well-known deckbuilding identities and
+  have owned cards to back them — only options with 2+ owned candidates ever
+  show up. A separate **Set Selection** multiselect (same Select All/Clear
+  All/Cancel/OK popup as the grid's own Set filter, but independent state)
+  restricts which sets Suggest, the theme picker, and the replacement button
+  below are allowed to pull owned candidates from at all — everything's on by
+  default
 - An optional **Intended bracket** (1-2 / 3 / 4+) keeps Suggest from
   recommending more Game Changers than WotC's own published bracket rules
   allow for that bracket; leave it on "No preference" to build freely — the
   estimated bracket is shown either way
-- **Analyze Deck** opens a modal with the same Game Changers count,
-  Commander legality, Commander Spellbook rating, estimated WotC bracket,
-  known combos, and total deck value the compare flow computes, plus a
-  **Rule 0 summary** (colors, bracket reasoning, Game Changers, mass land
-  denial, extra-turn count — the objective facts a real pre-game chat
-  covers, not AI-generated prose), the live mana curve/color-breakdown
-  chart, a sample-hand draw tool, and a **Combo Reference** list (in-deck
-  combos plus one-card-away ones and what's missing). It also checks the
-  deck's **colored mana sources** against Karsten's requirement, runs a
-  **mana simulation** (thousands of shuffled games of just lands and ramp:
-  on-curve odds by turn, mulligans, how often the commander lands on curve)
-  and a **Turn Clock** (how soon the deck kills one opponent who does
-  nothing; it reads creature combat, tokens, equipment and auras, team
-  boosts, extra combats, board-scaling drain, tutors, and the combos you've
-  already assembled, planeswalkers, and repeatable abilities that cost only mana and tapping),
-  a **Resilience** check (the same clock under spot removal, a board wipe on
-  turn 6, both, or the commander removed each time it's cast), and **Synergy Packages**
-  (what the deck is built around as enablers vs. payoffs, tribal included,
-  with payoffs that have nothing to enable them and cards outside every
-  package). A **Print Battle
-  Card** button turns all of that into a clean, printable one-page summary
-  for talking through the deck with the table
+- Suggest, Optimize, and the ⇄ replacement button all also weigh a real
+  **EDHREC synergy score** for your exact commander (see
+  [`edhrec_data.py`](edhrec_data.py)) ahead of the generic Oracle Tag signal —
+  a statistic computed by EDHREC from tens of thousands of real decklists, not
+  a category match, so it can surface a card that's genuinely good with *this*
+  commander specifically even when nothing in Suggest's fixed tag vocabulary
+  would catch it. No API key, no per-build cost, and nothing is applied until
+  you review and approve it, same as every other suggestion in this app
+- Each card already in the deck has a **⇄** button that suggests owned
+  replacements filling the same role (same Lands/Ramp/Draw/Interaction/Synergy
+  slot, ranked by shared Oracle Tag then Game Changers) — pick one to swap it
+  in for the original in a single click
+- **Optimize Deck** is a second pass for a deck that's already built: it
+  re-checks Commander Spellbook for real, owned, one-card-away combos and
+  proposes concrete swaps (add the missing piece, cut a safe filler in the
+  same role, never a Game Changer or another combo's own card) — catches
+  combos Suggest can miss in a single big batch, or once the deck's already
+  full and Suggest has nothing left to fill
 
-  ![Analyze Deck: mana simulation, curve, sample hand](screenshots/analyze.png)
-- **Save** remembers the brew as a project, same as a compared deck — it
-  shows up on the Decks page and picks up right where you
-  left off
-- **View full report** runs the finished brew through the exact same
-  report a compared deck gets (pricing, Game Changers, legality, bracket,
-  combos) — since everything in it is owned by construction, it always
-  shows 100% complete
+### Analyze, save and export
+
+- **Analyze Deck** opens a modal with the same Game Changers count, Commander
+  legality, Commander Spellbook rating, estimated WotC bracket, known combos,
+  and total deck value the compare flow computes, plus a **Rule 0 summary**
+  (colors, bracket reasoning, Game Changers, mass land denial, extra-turn
+  count — the objective facts a real pre-game chat covers, not AI-generated
+  prose), the live mana curve/color-breakdown chart, a sample-hand draw tool,
+  and a **Combo Reference** list (in-deck combos plus one-card-away ones and
+  what's missing). It also checks the deck's **colored mana sources** against
+  Karsten's requirement, runs a **mana simulation** (thousands of shuffled
+  games of just lands and ramp: on-curve odds by turn, mulligans, how often
+  the commander lands on curve) and a **Turn Clock** (how soon the deck kills
+  one opponent who does nothing; it reads creature combat, tokens, equipment
+  and auras, team boosts, extra combats, board-scaling drain, tutors, and the
+  combos you've already assembled, planeswalkers, and repeatable abilities
+  that cost only mana and tapping), a **Resilience** check (the same clock
+  under spot removal, a board wipe on turn 6, both, or the commander removed
+  each time it's cast), and **Synergy Packages** (what the deck is built
+  around as enablers vs. payoffs, tribal included, with payoffs that have
+  nothing to enable them and cards outside every package). A **Print Battle
+  Card** button turns all of that into a clean, printable one-page summary for
+  talking through the deck with the table
+
+![Analyze Deck: mana simulation, curve, sample hand](screenshots/analyze.png)
+
+- **Save** remembers the brew as a project, same as a compared deck — it shows
+  up on the Decks page and picks up right where you left off
+- **View full report** runs the finished brew through the exact same report a
+  compared deck gets (pricing, Game Changers, legality, bracket, combos) —
+  since everything in it is owned by construction, it always shows 100%
+  complete
 - **Copy Decklist** copies a plain-text list — one line per card, with your
-  *exact* owned printing's set code and collector number — ready to paste
-  into Moxfield's or Archidekt's own deck-import box
-- **Export CSV** downloads the same Lands/Artifacts/Colors binder
-  organization as the compare flow's In-Store CSV, but for what you're
-  building — useful for physically pulling the cards from your own binders
+  *exact* owned printing's set code and collector number — ready to paste into
+  Moxfield's or Archidekt's own deck-import box
+- **Export CSV** downloads the same Lands/Artifacts/Colors binder organization
+  as the compare flow's In-Store CSV, but for what you're building — useful
+  for physically pulling the cards from your own binders
 - A blurred commander-art backdrop here too, updating live as you pick or
   clear a commander
 
@@ -261,16 +297,6 @@ your collection:
   own but have committed to a different build still shows as needed here —
   persisted so you don't have to re-mark it every time
 - A blurred commander-art backdrop, because why not
-- The **Decks** page shows your decks as art tiles: a **Compare** panel
-  on top (paste a decklist URL), then your brews, each tile badged
-  **Brew** or **Comparison** with a filter to show one kind, a **Show
-  more** button when the list is long, and **Brew something new** to start
-  a build. Decks can be deleted individually (a small &times; on the
-  tile, with a confirm prompt) instead of having to dig through
-  `data/projects/` by hand
-
-  ![Decks page: Compare panel, Brew and Comparison tiles](screenshots/decks.png)
-- A warm dark theme by default, switching to a light one when your system is set to light
 
 ## Requirements
 
@@ -375,6 +401,18 @@ It opens to a **Setup** page first — upload your ManaBox collection export
 immediate action (its own button, not bundled into anything else), so it
 takes effect right away — from there:
 
+**To build a deck**
+
+1. On the **Decks** page, click **Brew something new**
+2. Pick a commander (**★** on a card in your collection; **Rate my
+   commanders** shows which ones you can build best)
+3. Hit **Suggest cards** and review the picks step by step (or **Quick
+   suggest** to take the whole list at once), then add or swap cards by hand
+4. **Analyze Deck** to check the mana, the turn clock and the bracket, then
+   **Save**, **Copy Decklist** for Moxfield/Archidekt, or **View full report**
+
+**To compare a decklist**
+
 1. On the **Decks** page, paste a Moxfield or Archidekt deck URL (e.g.
    `https://moxfield.com/decks/...` or `https://archidekt.com/decks/...`)
 2. Hit **Compare**
@@ -383,16 +421,16 @@ Once a collection is uploaded, it's remembered — you only need to go back
 to Setup (the **⚙ Collection & Settings** link on the Decks page) when you
 actually want to replace it with a new export.
 
-That comparison already uses accurate cheapest-printing prices — the first
-time you ever run one (or after the weekly auto-refresh), it downloads a
-~325MB card database from MTGJSON, which takes under a minute; after that,
-every comparison is instant. You can also refresh that database on demand
-from the Setup page's **Refresh Database** button.
+Both tools use a local card database (prices, legality, Game Changers, Oracle
+Tags) — the first time you ever run one (or after the weekly auto-refresh), it
+downloads a ~325MB database from MTGJSON, which takes under a minute; after
+that, everything is instant. You can also refresh it on demand from the Setup
+page's **Refresh Database** button.
 
-The app remembers each deck you've looked at as a "project": any
-"reserved for another deck" overrides you save, plus your last-used
-options, are recalled automatically the next time you paste that same URL
-— no re-uploading, no re-checking boxes.
+The app remembers each deck as a "project": a brew picks up where you left
+off, and for a compared deck any "reserved for another deck" overrides you
+save, plus your last-used options, are recalled automatically the next time
+you paste that same URL — no re-uploading, no re-checking boxes.
 
 ## Usage: Docker
 
