@@ -129,7 +129,9 @@ the web app (or the **Brew something new** tile on the Decks page).
 - **★** on an eligible card sets it as your commander; **+** adds any card
   to the deck — both live right on the card tile. You can also **drag a
   card tile into the deck panel** to add it, or drop an eligible commander
-  on the commander banner to set it
+  on the commander banner to set it. The **View** button next to Sort
+  switches the collection between Cards, Gallery and Compact (one line per
+  card, so a few hundred cards fit on a screen)
 - **Suggest cards** fills the deck from what you own in one click (not
   just a small batch you have to keep re-requesting), ranked by: cards
   that complete a known combo you're one card away from (via Commander
