@@ -70,7 +70,6 @@ from deck_builder import (
     auto_deck_mix,
     karsten_correction,
     deck_color_sources,
-    deck_filler_flags,
     mana_fixes,
     deck_karsten,
     commander_deck_shape_targets,
@@ -2176,7 +2175,6 @@ def render_builder_page(deck_id: str | None = None) -> str:
       <div class="deck-stats" id="deck-stats"></div>
       <button type="button" class="btn ghost small" id="analyze-btn" style="margin-bottom:10px;">&#128269; Analyze Deck</button>
       <button type="button" class="btn ghost small" id="optimize-btn" style="margin-bottom:10px;" title="Looks for real, owned combos you're exactly one card away from completing, and proposes swaps to add them -- useful after Suggest cards has already filled the deck, since a full batch can't always see a combo piece it's about to add in that same batch">&#9889; Optimize Deck</button>
-      <button type="button" class="btn ghost small" id="mark-fillers-btn" style="margin-bottom:10px;display:none;" title="Flags the cards in this deck that EDHREC doesn't list for your commander, with the same Slot filler pill Suggest adds -- for decks built or saved before the pill existed">&#127991;&#65039; Mark slot fillers <span id="mark-fillers-count"></span></button>
       <div id="commander-slot-wrap"></div>
       <div id="suggestions-panel"></div>
       <button type="button" class="btn danger small" id="clear-cards-btn" style="display:none;margin-top:14px;margin-bottom:6px;">Clear All Cards</button>
@@ -3050,33 +3048,6 @@ document.addEventListener('click', (e) => {{
 document.addEventListener('keydown', (e) => {{ if (e.key === 'Escape') closeAvoidedPopup(); }});
 renderAvoidedBtn();
 
-document.getElementById('mark-fillers-btn').addEventListener('click', () => {{
-  if (!brew.commander) {{ showError('Pick a commander first.'); return; }}
-  const btn = document.getElementById('mark-fillers-btn');
-  btn.disabled = true;
-  fetch('/builder/mark-fillers', {{
-    method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
-    body: JSON.stringify({{ cards: brew.cards, commander: brew.commander, edhrec_theme: brew.edhrec_theme }}),
-  }})
-    .then(r => r.json())
-    .then(data => {{
-      btn.disabled = false;
-      if (data.error) {{ showError(data.error); return; }}
-      if (data.problem) {{ showError('Could not mark fillers: ' + data.problem); return; }}
-      const byName = {{}};
-      Object.entries(data.fillers).forEach(([n, f]) => {{ byName[normalizeName(n)] = f; }});
-      let marked = 0;
-      brew.cards.forEach(c => {{
-        const f = byName[normalizeName(c.name)];
-        if (f) {{ c.filler = true; c.fill_role = f.role; c.fill_note = f.note; delete c.not_filler; marked += 1; }}
-        else {{ delete c.filler; delete c.fill_role; delete c.fill_note; c.not_filler = true; }}
-      }});
-      renderAll();
-      showError(marked ? `Marked ${{marked}} of ${{data.checked}} cards as slot filler.` : `No slot filler: all ${{data.checked}} cards are on EDHREC's list for this commander.`);
-    }})
-    .catch(() => {{ btn.disabled = false; showError('Could not reach the server.'); }});
-}});
-
 document.getElementById('clear-cards-btn').addEventListener('click', () => {{
   if (!brew.cards.length) return;
   if (!confirm(`Remove all ${{brew.cards.length}} card(s) from this deck? Your commander is kept -- use its own Clear button to remove that separately.`)) return;
@@ -3784,39 +3755,6 @@ function renderAll() {{
   renderCommanderSlot();
   renderDeckList();
   renderStats();
-  scheduleMarkFillersCheck();
-}}
-
-// The Mark slot fillers button is only for decks with no record of why each card was picked: ones built or saved
-// before the Slot filler pill existed, or put together by hand. A deck Suggest built (or one already marked) carries
-// that record on its cards (filler / not_filler), so the button never appears for it. Checked with the server a moment
-// after the deck changes, and only when the deck did change.
-let markFillersTimer = null, markFillersSig = '', markFillersSeq = 0;
-function scheduleMarkFillersCheck() {{
-  clearTimeout(markFillersTimer);
-  markFillersTimer = setTimeout(checkMarkFillers, 1200);
-}}
-function checkMarkFillers() {{
-  const btn = document.getElementById('mark-fillers-btn');
-  if (!brew.commander || brew.format !== 'commander' || !brew.cards.length) {{ btn.style.display = 'none'; markFillersSig = ''; return; }}
-  if (brew.cards.some(c => c.filler || c.not_filler)) {{ btn.style.display = 'none'; markFillersSig = ''; return; }}
-  const sig = [brew.commander.name, brew.edhrec_theme || '', brew.cards.map(c => normalizeName(c.name)).sort().join(','), brew.cards.filter(c => c.filler).length].join('|');
-  if (sig === markFillersSig) return;
-  markFillersSig = sig;
-  const mine = ++markFillersSeq;
-  fetch('/builder/mark-fillers', {{
-    method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
-    body: JSON.stringify({{ cards: brew.cards, commander: brew.commander, edhrec_theme: brew.edhrec_theme }}),
-  }})
-    .then(r => r.json())
-    .then(data => {{
-      if (mine !== markFillersSeq) return; // the deck changed again while this was running
-      if (data.error || data.problem || !data.fillers) {{ btn.style.display = 'none'; return; }}
-      const count = Object.keys(data.fillers).length;
-      document.getElementById('mark-fillers-count').textContent = count ? '(' + count + ')' : '';
-      btn.style.display = count ? '' : 'none';
-    }})
-    .catch(() => {{ btn.style.display = 'none'; markFillersSig = ''; }});
 }}
 
 fetch('/builder/collection-data')
@@ -6822,17 +6760,6 @@ def builder_land_curve():
     except Exception:  # noqa: BLE001
         result = None
     return jsonify(result or {"error": "Not enough cards to simulate yet."})
-
-
-@app.route("/builder/mark-fillers", methods=["POST"])
-def builder_mark_fillers():
-    """Flags a saved deck's cards that EDHREC doesn't list for its commander (see deck_builder.deck_filler_flags)."""
-    body = request.get_json(silent=True) or {}
-    entries = brew_to_card_entries({"commander": body.get("commander"), "cards": body.get("cards") or []})
-    result = deck_filler_flags(entries, body.get("edhrec_theme") or None) if entries else None
-    if result is None:
-        return jsonify(error="Pick a commander first.")
-    return jsonify(result)
 
 
 @app.route("/builder/resilience", methods=["POST"])
