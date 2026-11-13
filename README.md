@@ -78,7 +78,7 @@ can be run through the same report a compared deck gets.
   Gallery and Compact (one line per card, so several times as many cards
   fit on a screen as in Cards view)
 
-![Compact view: one line per card](screenshots/compact-view.png)
+![The three views side by side: Cards, Gallery and Compact](screenshots/view-modes.png)
 
 - The **link button** on a tile or deck row opens **Works with...**: owned
   cards that complement it (sacrifice outlets with death payoffs, landfall
