@@ -66,8 +66,9 @@ tile). A saved brew can be run through the same report a compared deck gets.
 
 ### Build the deck
 
-- **★** sets the commander, **+** adds a card, and you can drag a tile into the
-  deck panel (drop a commander on the banner to set it)
+- **★** sets the commander (set the type filter to **Commander** to see the ones
+  you own), **+** adds a card, and you can drag a tile into the deck panel (drop
+  a commander on the banner to set it)
 
 ![Dragging a card over the deck panel](screenshots/drag-to-add.png)
 
@@ -214,8 +215,8 @@ Settings** link) to replace it.
 **To build a deck**
 
 1. On the **Decks** page, click **Brew something new**
-2. Pick a commander (**★** on a card; **Rate my commanders** shows which ones you
-   can build best)
+2. Pick a commander: set the type filter to **Commander** to list the ones you
+   own (**Rate my commanders** shows which you can build best), then hit **★**
 3. Hit **Suggest cards** and review the picks (or **Quick suggest**), then add or
    swap cards by hand
 4. **Analyze Deck**, then **Save**, **Copy Decklist** or **View full report**
