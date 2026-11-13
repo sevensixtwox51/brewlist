@@ -75,8 +75,8 @@ can be run through the same report a compared deck gets.
   button; under the Commander filter it can also sort by popularity or
   completeness
 - The **View** button next to Sort switches the collection between Cards,
-  Gallery and Compact (one line per card, so a few hundred cards fit on a
-  screen)
+  Gallery and Compact (one line per card, so several times as many cards
+  fit on a screen as in Cards view)
 
 ![Compact view: one line per card](screenshots/compact-view.png)
 
