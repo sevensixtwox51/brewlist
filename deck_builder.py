@@ -23,8 +23,6 @@ from brewlist_core import (
     CardEntry,
     OwnedCard,
     WOTC_BRACKET_GAME_CHANGER_MAX,
-    EXTRA_TURN_LOW_QUANTITY_MAX,
-    bracket_flags_for,
     best_printing,
     budget_alt_data_in_index,
     categorize,
@@ -1962,24 +1960,6 @@ def _filter_candidates(
         current_gc_count = sum(e.quantity for e in wip_entries if normalize_name(e.name) in game_changers)
         gc_at_cap = current_gc_count >= gc_cap
 
-    # Brackets 1-3 also rule out mass land denial, and extra turns (none in 1, "low quantities" in 2-3 -- the same
-    # cap estimate_wotc_bracket uses). Game Changers alone left a Bracket 3 brew with Liliana, Dreadhorde General in
-    # it, which Commander Spellbook flags as mass land denial, so Analyze then rated the deck 4+. These come from
-    # Spellbook's per-card flags (cached on disk, see bracket_flags_for); if they can't be fetched nothing is excluded.
-    bracket_blocked: set[str] = set()
-    extra_turn_keep: set[str] = set()
-    if deck_format == "commander" and intended_bracket in ("1-2", "3"):
-        flags = bracket_flags_for([c["name"] for c in owned_view if "Land" not in (c.get("type_line") or "")])
-        bracket_blocked = {n for n, f in flags.items() if f["massLandDenial"]}
-        extra_turn = {n for n, f in flags.items() if f["extraTurn"]}
-        bracket_blocked |= extra_turn
-        if intended_bracket == "3":
-            have = sum(e.quantity for e in wip_entries if normalize_name(e.name) in extra_turn)
-            room = max(0, EXTRA_TURN_LOW_QUANTITY_MAX - have)
-            # the most popular few stay allowed, so a batch can never add more than the cap
-            ranked = sorted((c for c in owned_view if normalize_name(c["name"]) in extra_turn), key=lambda c: c.get("edhrec_rank") or 10**9)
-            extra_turn_keep = {normalize_name(c["name"]) for c in ranked[:room]}
-
     candidates = []
     for c in owned_view:
         if normalize_name(c["name"]) in used_names:
@@ -2003,8 +1983,6 @@ def _filter_candidates(
         if excluded_card_names and normalize_name(c["name"]) in excluded_card_names:
             continue
         if gc_at_cap and normalize_name(c["name"]) in game_changers:
-            continue
-        if bracket_blocked and normalize_name(c["name"]) in bracket_blocked and normalize_name(c["name"]) not in extra_turn_keep:
             continue
         if colors_allowed is not None and not set(c["color_identity"]).issubset(colors_allowed):
             continue

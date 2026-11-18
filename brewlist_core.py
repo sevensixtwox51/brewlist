@@ -37,7 +37,7 @@ __all__ = [
     "EXTRA_STORE_LABELS", "PICKABLE_STORE_LABELS",
     "commander_legality_in_index", "deck_is_commander_format",
     "find_deck_combos", "estimate_deck_bracket", "BRACKET_TAG_LABELS", "scryfall_prices_in_index",
-    "estimate_wotc_bracket", "WOTC_BRACKET_LABELS", "bracket_flags_for", "EXTRA_TURN_LOW_QUANTITY_MAX",
+    "estimate_wotc_bracket", "WOTC_BRACKET_LABELS",
     "budget_alt_data_in_index", "BUDGET_ALT_MIN_PRICE",
     "PRICE_INDEX_PATH", "PRICE_INDEX_MAX_AGE_DAYS",
     "categorize", "shopping_group", "shopping_group_rank",
@@ -2071,70 +2071,6 @@ def estimate_deck_bracket(entries: list[CardEntry]) -> dict | None:
                 "extraTurn": bool(c.get("extraTurn")),
             }
     return {"tag": data["bracketTag"], "cards": cards, "combo_count": len(data.get("combos") or [])}
-
-
-# Per-card mass-land-denial / extra-turn flags from Commander Spellbook's estimate-bracket endpoint, for Suggest's
-# "Intended bracket": WotC's rules put mass land denial out of brackets 1-3 and extra turns out of bracket 1 (and
-# in low quantities for 2-3). The endpoint takes a deck and flags each card in it, so a whole collection is asked
-# in batches (one call with ~2,000 names is refused; 400 works) and the answers are kept on disk -- a card's flags
-# almost never change -- so only the first Suggest with an intended bracket pays for the network calls.
-BRACKET_FLAGS_PATH = os.path.join(_CORE_DIR, "data", "bracket_flags.json")
-_BRACKET_FLAGS_BATCH = 400
-_BRACKET_FLAGS_MAX_AGE_DAYS = 30
-_bracket_flags_lock = threading.Lock()
-
-
-def bracket_flags_for(names: list[str]) -> dict[str, dict]:
-    """{normalized name: {"massLandDenial": bool, "extraTurn": bool}} for every name Commander Spellbook could be
-    asked about. Names that can't be fetched (offline, refused) are simply left out, so callers treat "missing"
-    as "unknown, don't exclude" and behave as they did before this existed."""
-    now = time.time()
-    with _bracket_flags_lock:
-        try:
-            with open(BRACKET_FLAGS_PATH, encoding="utf-8") as f:
-                cache = json.load(f)
-        except (OSError, ValueError):
-            cache = {}
-        max_age = _BRACKET_FLAGS_MAX_AGE_DAYS * 86400
-        wanted = {}
-        for n in names:
-            wanted.setdefault(normalize_name(n), n)
-        todo = [orig for norm, orig in wanted.items() if norm not in cache or now - cache[norm][2] > max_age]
-        changed = False
-        for i in range(0, len(todo), _BRACKET_FLAGS_BATCH):
-            batch = todo[i:i + _BRACKET_FLAGS_BATCH]
-            data = _commander_spellbook_post("estimate-bracket", {"main": [{"card": n, "quantity": 1} for n in batch], "commanders": []})
-            if not data or "cards" not in data:
-                break  # offline or refused: stop here rather than stall on every remaining batch
-            seen = set()
-            for c in data.get("cards") or []:
-                nm = (c.get("card") or {}).get("name")
-                if not nm:
-                    continue
-                flags = [1 if c.get("massLandDenial") else 0, 1 if c.get("extraTurn") else 0, now]
-                for key in {normalize_name(nm), normalize_name(nm.split(" // ")[0])}:
-                    cache[key] = flags
-                    seen.add(key)
-            for n in batch:  # a name Spellbook doesn't know: remember that, so it isn't asked about again
-                key = normalize_name(n)
-                if key not in seen and normalize_name(n.split(" // ")[0]) not in seen:
-                    cache[key] = [0, 0, now]
-            changed = True
-        if changed:
-            try:
-                os.makedirs(os.path.dirname(BRACKET_FLAGS_PATH), exist_ok=True)
-                tmp = BRACKET_FLAGS_PATH + ".tmp"
-                with open(tmp, "w", encoding="utf-8") as f:
-                    json.dump(cache, f)
-                os.replace(tmp, BRACKET_FLAGS_PATH)
-            except OSError:
-                pass
-        out = {}
-        for norm in wanted:
-            v = cache.get(norm) or cache.get(norm.split(" // ")[0])
-            if v:
-                out[norm] = {"massLandDenial": bool(v[0]), "extraTurn": bool(v[1])}
-        return out
 
 
 # WotC's own published deck-building rules per bracket (from "Introducing
