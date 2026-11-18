@@ -95,8 +95,9 @@ tile). A saved brew can be run through the same report a compared deck gets.
   plan-aware build that ranks enablers and payoffs first, and the standard
   shape is kept if the plan version's goldfish odds are clearly worse
 - Options: a **Preferred theme** (Voltron, Reanimator, Stax, ...), **Set
-  Selection** to limit which sets Suggest may use, **Intended bracket** to
-  avoid too many Game Changers, and **Deck mix targets**
+  Selection** to limit which sets Suggest may use, **Intended bracket** (1-2 or 3)
+  to avoid too many Game Changers, mass land denial and extra turns, and **Deck
+  mix targets**
 - **⇄** on a deck card suggests owned replacements for the same role.
   **Optimize Deck** looks for owned one-card-away combos and proposes swaps
 

@@ -5214,8 +5214,9 @@ function rule0Items(data) {{
       items.push(`<b>Estimated Bracket ${{data.wotc_bracket[0]}}</b> (${{data.wotc_bracket[1]}}) -- WotC's own published rules, from this deck's Game Changers/combos/extra-turns/land-denial`);
     }}
     items.push(`<b>Game Changers (${{data.game_changers}}):</b> ${{data.game_changers_names.length ? data.game_changers_names.join(', ') : 'none'}}`);
-    items.push(`<b>Mass land denial:</b> ${{data.mass_land_denial ? 'Yes' : 'No'}}`);
-    items.push(`<b>Extra-turn effects:</b> ${{data.extra_turn_count}}`);
+    const mldNames = data.mass_land_denial_names || [], xtNames = data.extra_turn_names || [];
+    items.push(`<b>Mass land denial:</b> ${{data.mass_land_denial ? 'Yes' + (mldNames.length ? ' (' + mldNames.map(escapeHtml).join(', ') + ')' : '') : 'No'}}`);
+    items.push(`<b>Extra-turn effects:</b> ${{data.extra_turn_count}}${{xtNames.length ? ' (' + xtNames.map(escapeHtml).join(', ') + ')' : ''}}`);
     items.push(`<b>Combos:</b> ${{data.combos_included}} already assembled, ${{data.combos_almost}} one card away`);
   }}
   items.push(`<b>Deck value:</b> $${{data.deck_value.toFixed(2)}} (today's market)`);
@@ -6697,6 +6698,8 @@ def builder_stats():
         combos_included_list=combos.get("included") or [],
         combos_almost_list=combos.get("almost_included") or [],
         mass_land_denial=totals.get("mass_land_denial") or False,
+        mass_land_denial_names=totals.get("mass_land_denial_names") or [],
+        extra_turn_names=totals.get("extra_turn_names") or [],
         extra_turn_count=totals.get("extra_turn_count") or 0,
         is_commander_format=is_commander_format,
         role_counts=role_counts_for_entries(entries),
