@@ -22,11 +22,12 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import re
 import uuid
 import webbrowser
 from datetime import datetime, timezone
 
-from flask import Flask, Response, abort, jsonify, request
+from flask import Flask, Response, abort, jsonify, request, send_file
 
 from brewlist_core import (
     PRICE_INDEX_PATH,
@@ -5202,7 +5203,11 @@ function statBadges(data) {{
         tip: `Estimated from WotC's own published Bracket rules (Game Changers, mass land denial, combos, extra turns): ${{data.wotc_bracket[1]}}`,
       }});
     }}
-    badges.push({{
+    if (data.spellbook_unavailable) badges.push({{
+      label: '&#128279; combos: lookup unavailable',
+      tip: "Commander Spellbook couldn't be reached (no internet?), so combos, mass land denial and extra turns are unknown, not zero, and the bracket estimate may read low. Everything else here is unaffected.",
+    }});
+    else badges.push({{
       label: `&#128279; ${{data.combos_included}} combo${{data.combos_included === 1 ? '' : 's'}}, ${{data.combos_almost}} one away`,
       tip: `${{data.combos_included}} known combo(s) already in this deck, and ${{data.combos_almost}} more you're exactly one card away from completing (via Commander Spellbook)`,
     }});
@@ -5220,11 +5225,14 @@ function rule0Items(data) {{
     if (data.wotc_bracket) {{
       items.push(`<b>Estimated Bracket ${{data.wotc_bracket[0]}}</b> (${{data.wotc_bracket[1]}}) -- WotC's own published rules, from this deck's Game Changers/combos/extra-turns/land-denial`);
     }}
+    if (data.spellbook_unavailable) items.push(`<b>Combo data unavailable:</b> Commander Spellbook couldn't be reached, so mass land denial, extra turns and combos are unknown (not zero)`);
     items.push(`<b>Game Changers (${{data.game_changers}}):</b> ${{data.game_changers_names.length ? data.game_changers_names.join(', ') : 'none'}}`);
     const mldNames = data.mass_land_denial_names || [], xtNames = data.extra_turn_names || [];
-    items.push(`<b>Mass land denial:</b> ${{data.mass_land_denial ? 'Yes' + (mldNames.length ? ' (' + mldNames.map(escapeHtml).join(', ') + ')' : '') : 'No'}}`);
-    items.push(`<b>Extra-turn effects:</b> ${{data.extra_turn_count}}${{xtNames.length ? ' (' + xtNames.map(escapeHtml).join(', ') + ')' : ''}}`);
-    items.push(`<b>Combos:</b> ${{data.combos_included}} already assembled, ${{data.combos_almost}} one card away`);
+    if (!data.spellbook_unavailable) items.push(`<b>Mass land denial:</b> ${{data.mass_land_denial ? 'Yes' + (mldNames.length ? ' (' + mldNames.map(escapeHtml).join(', ') + ')' : '') : 'No'}}`);
+    if (!data.spellbook_unavailable) {{
+      items.push(`<b>Extra-turn effects:</b> ${{data.extra_turn_count}}${{xtNames.length ? ' (' + xtNames.map(escapeHtml).join(', ') + ')' : ''}}`);
+      items.push(`<b>Combos:</b> ${{data.combos_included}} already assembled, ${{data.combos_almost}} one card away`);
+    }}
   }}
   items.push(`<b>Deck value:</b> $${{data.deck_value.toFixed(2)}} (today's market)`);
   return items;
@@ -5275,7 +5283,9 @@ function renderComboReference(data) {{
       </div>
     `).join('') + '</div>';
   }}
-  document.getElementById('combo-reference').innerHTML = html || '<div class="hint" style="margin:0;">No known combos detected (via Commander Spellbook).</div>';
+  document.getElementById('combo-reference').innerHTML = data.spellbook_unavailable
+    ? '<div class="hint" style="margin:0;">Combo lookup unavailable right now (Commander Spellbook couldn\u2019t be reached). Combos are unknown, not absent.</div>'
+    : (html || '<div class="hint" style="margin:0;">No known combos detected (via Commander Spellbook).</div>');
 }}
 
 let lastAnalyzeData = null;
@@ -5762,7 +5772,7 @@ function buildBattleCardHtml(data) {{
     <h2>Combo Reference</h2>
     ${{included.length ? included.map(c => `<div class="bc-combo">&#10003; ${{comboLine(c)}}</div>`).join('') : ''}}
     ${{almost.length ? almost.map(c => `<div class="bc-combo">&#9675; ${{comboLine(c)}} (needs: ${{(c.missing || []).join(', ')}})</div>`).join('') : ''}}
-    ${{!included.length && !almost.length ? '<div class="bc-combo">No known combos detected.</div>' : ''}}
+    ${{data.spellbook_unavailable ? '<div class="bc-combo">Combo lookup unavailable (Commander Spellbook could not be reached).</div>' : (!included.length && !almost.length ? '<div class="bc-combo">No known combos detected.</div>' : '')}}
     <h2>Ask the table</h2>
     <ul>
       <li>How long do you want this game to last?</li>
@@ -6747,6 +6757,9 @@ def builder_stats():
         mass_land_denial_names=totals.get("mass_land_denial_names") or [],
         extra_turn_names=totals.get("extra_turn_names") or [],
         extra_turn_count=totals.get("extra_turn_count") or 0,
+        # Commander Spellbook couldn't be reached (offline, or the service is down): combos, mass land denial and
+        # extra turns are then unknown rather than zero, and the page says so instead of showing 0.
+        spellbook_unavailable=bool(is_commander_format and totals.get("combos") is None),
         is_commander_format=is_commander_format,
         role_counts=role_counts_for_entries(entries),
         karsten=deck_karsten(entries) if is_commander_format else None,
@@ -6881,6 +6894,58 @@ def refresh_price_index():
 
     threading.Thread(target=_run, daemon=True).start()
     return jsonify(job_id=job_id)
+
+
+# ---- card images: served from a local cache so cards you've already looked at still show with no internet ----
+# Every page asks for /img/<size>/<face>/<a>/<b>/<id>.jpg (the same path Scryfall's image host uses). A hit is read
+# from data/image_cache; a miss is fetched from Scryfall once, saved, and served. Offline, only the misses are blank.
+IMAGE_CACHE_DIR = os.path.join(DATA_DIR, "image_cache")
+_IMG_SIZES = {"small", "normal", "large", "art_crop", "border_crop", "png"}
+_IMG_ID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+_IMG_UPSTREAM = threading.BoundedSemaphore(8)  # a screen of tiles asks for dozens at once; be polite to Scryfall
+SCRYFALL_IMG_HOST = "https://cards.scryfall" + ".io/"  # joined so the page rewrite below never touches this line
+
+
+@app.route("/img/<size>/<face>/<a>/<b>/<sid>.jpg", methods=["GET"])
+def card_image(size, face, a, b, sid):
+    version = request.args.get("v", "")
+    if (size not in _IMG_SIZES or face not in ("front", "back") or not _IMG_ID_RE.match(sid)
+            or a != sid[0] or b != sid[1] or (version and not re.fullmatch(r"\d{1,14}", version))):
+        abort(404)
+    path = os.path.join(IMAGE_CACHE_DIR, size, face, sid + (f"_{version}" if version else "") + ".jpg")
+    if not os.path.isfile(path):
+        url = f"{SCRYFALL_IMG_HOST}{size}/{face}/{a}/{b}/{sid}.jpg" + (f"?{version}" if version else "")
+        try:
+            with _IMG_UPSTREAM:
+                req = urllib.request.Request(url, headers={"User-Agent": "brewlist/1.0 (personal use)"})
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    ctype = resp.headers.get("Content-Type", "")
+                    data = resp.read(8_000_001)
+        except urllib.error.HTTPError as e:
+            return Response(status=404 if e.code == 404 else 502, headers={"Cache-Control": "no-store"})
+        except (urllib.error.URLError, TimeoutError, OSError):
+            return Response(status=502, headers={"Cache-Control": "no-store"})  # offline and not cached yet
+        if not ctype.startswith("image/") or not data or len(data) > 8_000_000:
+            return Response(status=502, headers={"Cache-Control": "no-store"})
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            tmp = f"{path}.{uuid.uuid4().hex}.tmp"
+            with open(tmp, "wb") as f:
+                f.write(data)
+            os.replace(tmp, path)
+        except OSError:
+            return Response(data, mimetype=ctype.split(";")[0], headers={"Cache-Control": "no-store"})
+    return send_file(path, mimetype="image/jpeg", max_age=60 * 60 * 24 * 30)
+
+
+@app.after_request
+def _serve_card_images_locally(resp):
+    """Point every card image in the app's own pages at /img (above) instead of straight at Scryfall's host."""
+    if resp.mimetype == "text/html" and not resp.direct_passthrough:
+        body = resp.get_data(as_text=True)
+        if "cards.scryfall.io/" in body:
+            resp.set_data(body.replace("https://cards.scryfall.io/", "/img/"))
+    return resp
 
 
 @app.route("/update/check", methods=["POST"])

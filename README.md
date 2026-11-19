@@ -365,6 +365,21 @@ MTGJSON's, EDHREC's, and (for Commander decks) Commander Spellbook's
 public APIs/pages needed to fetch decklists, prices, combos, and
 commander popularity/synergy data.
 
+## Without internet
+
+Brewlist keeps working from what it has stored: the builder, Suggest and
+Optimize, Analyze, the goldfish sims and Collection insights all run
+locally, using the card database, prices and EDHREC data from the last
+time you were online. Card images are saved under `data/image_cache/` the
+first time you see them, so cards you've already looked at still show;
+ones you haven't are blank until you're back online. Things that need the
+internet say so instead of failing quietly: pasting a Moxfield or Archidekt
+link, Check for Updates, and refreshing the card database. Analyze shows
+"combo lookup unavailable" rather than "0 combos" when Commander
+Spellbook can't be reached. The image cache grows as you browse (roughly
+15 KB per small card image, 100 KB per full-size one); delete the
+`data/image_cache/` folder any time to clear it.
+
 ## Uninstalling
 
 **Non-Docker:** stop the app (the **Shut Down** button, or close the
