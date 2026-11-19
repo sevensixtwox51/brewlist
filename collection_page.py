@@ -97,6 +97,10 @@ table.ins-grid { border-collapse: separate; border-spacing: 4px; width: 100%; mi
 #ins-tip .foot { color: var(--text-dim); font-size: 0.74rem; margin-top: 7px; }
 #ins-tip .thumbs { display: flex; gap: 6px; margin-top: 8px; }
 #ins-tip .thumbs img { width: 84px; aspect-ratio: 5 / 7; border-radius: 5px; background: var(--bg); display: block; }
+#ins-zoom { position: fixed; z-index: 500; display: none; pointer-events: none; width: 300px; border-radius: 14px; box-shadow: 0 10px 34px rgba(0,0,0,0.75); background: #000; }
+#ins-zoom.show { display: block; }
+#ins-zoom img { display: block; width: 100%; border-radius: 14px; }
+.ins-card[data-id] .img-hover { cursor: zoom-in; }
 .ins-empty { padding: 30px 18px; color: var(--text-dim); text-align: center; }
 .ins-tabs { display: inline-flex; }
 .ins-tabs button { background: var(--bg); color: var(--text-dim); border: 1px solid var(--card-border); padding: 5px 12px; cursor: pointer; font: inherit; font-size: 0.82rem; }
@@ -115,6 +119,7 @@ COLLECTION_BODY = """
   <div class="ins-back"><a href="/decks" class="btn ghost small">&larr; Decks</a></div>
   <div id="insights"><div class="ins-loading">Reading your collection&hellip;</div></div>
   <div id="ins-tip" role="tooltip"></div>
+  <div id="ins-zoom"><img alt=""></div>
   <div class="ins-modal" id="ins-modal" role="dialog" aria-modal="true" aria-label="Cards">
     <div class="ins-modal-panel">
       <div class="ins-modal-head">
@@ -266,11 +271,11 @@ function renderModalCards() {
   const tile = (c) => {
     const img = c.scryfall_id ? '<img loading="lazy" alt="' + esc(c.name) + '" src="' + cardImg(c.scryfall_id) + '">' : '<div style="aspect-ratio:5/7;border-radius:6%;background:var(--bg);"></div>';
     if (!missing) {
-      return '<div class="ins-card" title="' + esc(c.name) + '">' + img + ((c.quantity || 1) > 1 ? '<span class="qty">×' + c.quantity + '</span>' : '')
+      return '<div class="ins-card" data-id="' + esc(c.scryfall_id || '') + '">' + img + ((c.quantity || 1) > 1 ? '<span class="qty">×' + c.quantity + '</span>' : '')
         + '<div class="nm">' + esc(c.name) + (c.foil ? ' ✦' : '') + '</div><div class="ty">' + esc(c.type_line || '') + '</div></div>';
     }
     const price = c.price != null ? '<a class="price" target="_blank" rel="noopener noreferrer" href="' + esc(c.url || scryUrl(c.name)) + '" title="Cheapest nonfoil listing">$' + Number(c.price).toFixed(2) + ' · ' + esc(STORES[c.store] || c.store || '') + '</a>' : '';
-    return '<div class="ins-card" title="' + esc(c.name) + '"><a class="img" target="_blank" rel="noopener noreferrer" href="' + scryUrl(c.name) + '">' + img + '</a>'
+    return '<div class="ins-card" data-id="' + esc(c.scryfall_id || '') + '"><a class="img" target="_blank" rel="noopener noreferrer" href="' + scryUrl(c.name) + '">' + img + '</a>'
       + (c.rank ? '<span class="rank">#' + fmt(c.rank) + '</span>' : '')
       + '<div class="nm">' + esc(c.name) + '</div><div class="ty">' + esc(c.type_line || '') + '</div>' + price + '</div>';
   };
@@ -314,6 +319,31 @@ document.getElementById('insights').addEventListener('click', (e) => {
   const el = e.target.closest('[data-key]');
   if (el) openList(el.dataset.key, el.dataset.title || 'Cards');
 });
+
+// ---- zoom a card in the card view on hover ----
+const zoomEl = document.getElementById('ins-zoom');
+const zoomImg = zoomEl.querySelector('img');
+let zoomId = null;
+const hideZoom = () => { zoomId = null; zoomEl.classList.remove('show'); };
+modalBody.addEventListener('mousemove', (e) => {
+  const card = e.target.closest ? e.target.closest('.ins-card[data-id]') : null;
+  const id = card && card.dataset.id;
+  if (!id) { if (zoomId) hideZoom(); return; }
+  if (id !== zoomId) {
+    zoomId = id;
+    zoomImg.src = 'https://cards.scryfall.io/normal/front/' + id[0] + '/' + id[1] + '/' + id + '.jpg';
+    zoomEl.classList.add('show');
+  }
+  const pad = 22, w = zoomEl.offsetWidth, h = zoomEl.offsetHeight || 420;
+  let x = e.clientX + pad, y = e.clientY - h / 2;
+  if (x + w > window.innerWidth - 8) x = e.clientX - w - pad;
+  y = Math.max(8, Math.min(y, window.innerHeight - h - 8));
+  zoomEl.style.left = Math.max(8, x) + 'px'; zoomEl.style.top = y + 'px';
+});
+modalBody.addEventListener('mouseleave', hideZoom);
+modalBody.addEventListener('scroll', hideZoom, true);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideZoom(); });
+document.getElementById('ins-modal-close').addEventListener('click', hideZoom);
 
 // ---- hover cards ----
 const tipEl = document.getElementById('ins-tip');
