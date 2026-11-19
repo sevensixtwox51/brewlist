@@ -160,9 +160,9 @@ card database and Scryfall's Oracle Tags.
 - **Roles by color:** a grid of ramp, card draw, spot removal, board wipes,
   counterspells, tutors, recursion, sacrifice outlets, token makers and
   lifegain against each color. Each cell shows your count and the share of all
-  such cards that exist in that color, and the five colors are shaded **gap**,
-  **thin** or **strong** against your other colors for the same job, so a big
-  color doesn't look strong just for being big
+  such cards that exist in that color. Every row is shaded from red (your
+  lowest color for that job) to green (your highest), and a toggle switches the
+  shading to the share you own instead of the count
 
 ![Collection insights: snapshot, colors and the role-by-color grid](screenshots/collection-insights.png)
 

@@ -35,11 +35,15 @@ table.ins-grid { border-collapse: separate; border-spacing: 4px; width: 100%; mi
 .ins-grid th.role small { color: var(--text-dim); font-weight: 400; margin-left: 4px; }
 .ins-grid td { text-align: center; padding: 9px 4px; border-radius: 7px; background: var(--bg); border: 1px solid var(--card-border);
   font-variant-numeric: tabular-nums; font-weight: 600; font-size: 0.95rem; cursor: default; }
-.ins-grid td.gap { background: color-mix(in srgb, var(--missing) 26%, var(--bg)); border-color: color-mix(in srgb, var(--missing) 60%, var(--card-border)); color: var(--missing); }
-.ins-grid td.thin { background: color-mix(in srgb, var(--gold) 18%, var(--bg)); border-color: color-mix(in srgb, var(--gold) 50%, var(--card-border)); color: var(--gold); }
-.ins-grid td.deep { background: color-mix(in srgb, var(--owned) 20%, var(--bg)); border-color: color-mix(in srgb, var(--owned) 50%, var(--card-border)); color: var(--owned); }
 .ins-grid td .pc { font-weight: 400; font-size: 0.68rem; color: var(--text-dim); margin-top: 1px; }
-.ins-grid td.gap .pc, .ins-grid td.thin .pc, .ins-grid td.deep .pc { color: inherit; opacity: 0.75; }
+.ins-grid td[style*="color"] .pc { color: inherit; opacity: 0.8; }
+.ins-mode { display: inline-flex; align-items: center; gap: 0; margin: 0 0 12px; font-size: 0.82rem; color: var(--text-dim); }
+.ins-mode span { margin-right: 10px; }
+.ins-mode button { background: var(--bg); color: var(--text-dim); border: 1px solid var(--card-border); padding: 5px 12px; cursor: pointer; font: inherit; }
+.ins-mode button:first-of-type { border-radius: 8px 0 0 8px; }
+.ins-mode button:last-of-type { border-radius: 0 8px 8px 0; border-left: none; }
+.ins-mode button.on { color: var(--accent); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--bg)); }
+.ins-key .ins-scale i { display: inline-block; width: 110px; height: 10px; border-radius: 5px; vertical-align: -1px; border: none; margin: 0; background: linear-gradient(90deg, hsl(2 52% 36%), hsl(48 52% 36%), hsl(132 52% 36%)); }
 .ins-key { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 10px; font-size: 0.78rem; color: var(--text-dim); }
 .ins-key i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; border: 1px solid var(--card-border); }
 .ins-theme { display: grid; grid-template-columns: minmax(150px, 230px) 1fr 150px; gap: 12px; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--card-border); }
@@ -130,32 +134,62 @@ function colorsHtml(c) {
   return '<div class="card ins-section"><h2>Colors</h2><p class="ins-sub">Unique nonland cards by color identity.</p><div class="ins-colorbar">' + segs + '</div><div class="ins-legend">' + legend + '</div></div>';
 }
 
+// ---- Roles by color: each row is shaded on its own scale across the five colors, red (lowest) to green (highest) ----
+let heatMode = 'n';  // 'n' = how many cards you own, 'pct' = the share of all such cards that exist
+const heatColor = (t) => {  // t in [0,1] -> a dark-theme cell: red, through amber, to green
+  const hue = t < 0.5 ? 2 + t * 2 * 46 : 48 + (t - 0.5) * 2 * 84;
+  return { bg: 'hsl(' + hue + ' 48% 19%)', border: 'hsl(' + hue + ' 52% 36%)', fg: 'hsl(' + hue + ' 72% 68%)' };
+};
+function paintHeat() {
+  const chips = { low: [], high: [] };
+  document.querySelectorAll('.ins-grid tr[data-role]').forEach((tr) => {
+    const cells = [...tr.querySelectorAll('td')].map((td) => ({ td, v: Number(td.dataset[heatMode]), ok: td.dataset.ok === '1', n: Number(td.dataset.n), color: td.dataset.color, real: Number(td.dataset.pool) >= 30 }));
+    const valid = cells.filter((c) => c.ok);
+    const vals = valid.map((c) => c.v);
+    const lo = Math.min(...vals), hi = Math.max(...vals), mean = vals.reduce((a, b) => a + b, 0) / (vals.length || 1);
+    cells.forEach((c) => { c.td.style.background = ''; c.td.style.borderColor = ''; c.td.style.color = ''; });
+    if (hi === lo) return;  // every color the same: nothing to compare across this row
+    valid.forEach((c) => {
+      // Each row on its own scale across the five colors: its lowest cell is red and its highest is green.
+      const col = heatColor((c.v - lo) / (hi - lo));
+      c.td.style.background = col.bg; c.td.style.borderColor = col.border; c.td.style.color = col.fg;
+    });
+    // The chips skip colors where the job barely exists (black counterspells, blue lifegain): that isn't a weakness.
+    const real = valid.filter((c) => c.real);
+    if (real.length < 3) return;
+    const rlo = Math.min(...real.map((c) => c.v)), rhi = Math.max(...real.map((c) => c.v));
+    const rmean = real.reduce((a, c) => a + c.v, 0) / real.length;
+    const lowest = real.find((c) => c.v === rlo), highest = real.find((c) => c.v === rhi);
+    if (rmean && rlo <= rmean * 0.5) chips.low.push({ role: tr.dataset.role, color: lowest.color, n: lowest.n, ratio: rlo / rmean });
+    if (rmean && rhi >= rmean * 1.5 && highest.n >= 6) chips.high.push({ role: tr.dataset.role, color: highest.color, n: highest.n, ratio: rhi / rmean });
+  });
+  const colName = { W: 'White', U: 'Blue', B: 'Black', R: 'Red', G: 'Green' };
+  const chip = (f, cls) => '<span class="ins-chip ' + cls + '" data-key="role:' + esc(f.role) + ':' + f.color + '" data-title="' + esc(colName[f.color] + ' ' + f.role.toLowerCase()) + '">' + colName[f.color] + ' ' + esc(f.role.toLowerCase()) + ' (' + f.n + ')</span>';
+  chips.low.sort((a, b) => a.ratio - b.ratio); chips.high.sort((a, b) => b.ratio - a.ratio);
+  document.getElementById('ins-chips-low').innerHTML = chips.low.length ? '<span class="lbl">Weakest in their row</span>' + chips.low.slice(0, 6).map((f) => chip(f, 'bad')).join('') : '';
+  document.getElementById('ins-chips-high').innerHTML = chips.high.length ? '<span class="lbl">Strongest in their row</span>' + chips.high.slice(0, 6).map((f) => chip(f, 'good')).join('') : '';
+  document.querySelectorAll('.ins-mode button').forEach((b) => b.classList.toggle('on', b.dataset.mode === heatMode));
+}
+
 function rolesHtml(r) {
   const cols = r.columns;
   const colName = Object.fromEntries(cols.map((c) => [c.key, c.label]));
-  const flagged = [];
-  r.rows.forEach((row) => cols.forEach((c) => {
-    const cell = row.cells[c.key];
-    if (cell.flag && 'WUBRG'.includes(c.key)) flagged.push({ role: row.role, key: c.key, n: cell.n, idx: cell.index, flag: cell.flag });
-  }));
-  const thin = flagged.filter((f) => f.flag === 'gap' || f.flag === 'thin').sort((a, b) => a.idx - b.idx).slice(0, 6);
-  const deep = flagged.filter((f) => f.flag === 'deep').sort((a, b) => b.idx - a.idx).slice(0, 6);
-  const chip = (f, cls) => '<span class="ins-chip ' + cls + '">' + colName[f.key] + ' ' + esc(f.role.toLowerCase()) + ' (' + f.n + ')</span>';
   const head = '<tr><th class="role"></th>' + cols.map((c) => '<th>' + icon(c.key) + (c.key === 'M' || c.key === 'C' ? c.label : '') + '<div style="font-weight:400;">' + fmt(c.total) + '</div></th>').join('') + '</tr>';
-  const body = r.rows.map((row) => '<tr><th class="role">' + esc(row.role) + '<small>' + fmt(row.total) + '</small></th>' + cols.map((c) => {
+  const body = r.rows.map((row) => '<tr data-role="' + esc(row.role) + '"><th class="role">' + esc(row.role) + '<small>' + fmt(row.total) + '</small></th>' + cols.map((c) => {
     const cell = row.cells[c.key];
-    const tip = colName[c.key] + ' ' + row.role.toLowerCase() + ': you own ' + cell.n + ' of ' + fmt(cell.pool) + ' Commander-legal cards'
-      + (cell.index != null ? ' (' + cell.index.toFixed(2) + '× your usual share for this color)' : '') + (cell.names.length ? '. Most played: ' + cell.names.slice(0, 8).join(', ') : '');
+    const ok = 'WUBRG'.includes(c.key);
+    const tip = colName[c.key] + ' ' + row.role.toLowerCase() + ': you own ' + cell.n + ' of the ' + fmt(cell.pool) + ' Commander-legal cards that exist'
+      + (cell.pct != null ? ' (' + cell.pct + '%)' : '') + (cell.names.length ? '. Most played: ' + cell.names.slice(0, 8).join(', ') : '') + (cell.n ? ' — click to see them' : '');
     const key = cell.n ? ' data-key="role:' + esc(row.role) + ':' + c.key + '" data-title="' + esc(colName[c.key] + ' ' + row.role.toLowerCase()) + '"' : '';
     const pc = cell.pct == null ? '' : '<div class="pc">' + (cell.pct >= 10 ? Math.round(cell.pct) : cell.pct.toFixed(1)) + '%</div>';
-    return '<td class="' + (cell.flag || '') + '"' + key + ' title="' + esc(tip + (cell.n ? ' \u2014 click to see them' : '')) + '">' + cell.n + pc + '</td>';
+    return '<td' + key + ' data-ok="' + (ok ? 1 : 0) + '" data-pool="' + cell.pool + '" data-n="' + cell.n + '" data-pct="' + (cell.pct == null ? 0 : cell.pct) + '" data-color="' + c.key + '" title="' + esc(tip) + '">' + cell.n + pc + '</td>';
   }).join('') + '</tr>').join('');
   return '<div class="card ins-section"><h2>Roles by color</h2>'
-    + '<p class="ins-sub">How many cards you own for each job, by color. The small percentage is how much of everything that exists for that job and color you own, and the shading compares that with your other colors for the same job, so a big color doesn’t look strong just for being big and a small count can still be strong when few such cards exist. Click a cell to see the cards.</p>'
-    + (thin.length ? '<div class="ins-chips"><span class="lbl">Thin spots</span>' + thin.map((f) => chip(f, 'bad')).join('') + '</div>' : '')
-    + (deep.length ? '<div class="ins-chips"><span class="lbl">Strong spots</span>' + deep.map((f) => chip(f, 'good')).join('') + '</div>' : '')
+    + '<p class="ins-sub">How many cards you own for each job, by color. Every row is shaded on its own scale across the five colors: the lowest color in each row is red and the highest is green. The small percentage is how much of everything that exists for that job and color you own. Click a cell to see the cards.</p>'
+    + '<div class="ins-mode"><span>Shade by</span><button type="button" data-mode="n">Cards owned</button><button type="button" data-mode="pct">Share of all such cards</button></div>'
+    + '<div class="ins-chips" id="ins-chips-low"></div><div class="ins-chips" id="ins-chips-high"></div>'
     + '<div class="ins-table-wrap"><table class="ins-grid">' + head + body + '</table></div>'
-    + '<div class="ins-key"><span><i style="background:color-mix(in srgb, var(--missing) 40%, var(--bg));"></i>Gap</span><span><i style="background:color-mix(in srgb, var(--gold) 35%, var(--bg));"></i>Thin</span><span><i style="background:color-mix(in srgb, var(--owned) 35%, var(--bg));"></i>Strong</span><span>Counts are unique cards. Only the five colors are shaded, and a role that barely exists in a color (blue creature recursion, say) never is.</span></div></div>';
+    + '<div class="ins-key"><span class="ins-scale"><i></i></span><span>Lowest in its row &rarr; highest</span><span>Counts are unique cards. Multicolor and Colorless are shown but not shaded.</span></div></div>';
 }
 
 function themesHtml(themes) {
@@ -222,6 +256,8 @@ modal.addEventListener('click', (e) => { if (e.target === modal) closeList(); })
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && modal.classList.contains('show')) closeList(); });
 modalFilter.addEventListener('input', renderModalCards);
 document.getElementById('insights').addEventListener('click', (e) => {
+  const mode = e.target.closest('.ins-mode button');
+  if (mode) { heatMode = mode.dataset.mode; paintHeat(); return; }
   const el = e.target.closest('[data-key]');
   if (el) openList(el.dataset.key, el.dataset.title || 'Cards');
 });
@@ -231,6 +267,7 @@ fetch('/collection/data').then((r) => r.json()).then((d) => {
   if (d.error) { el.innerHTML = '<div class="card"><p>' + esc(d.error) + '</p><a class="btn small" href="/">Go to Setup</a></div>'; return; }
   el.innerHTML = snapshotHtml(d.snapshot) + colorsHtml(d.colors) + rolesHtml(d.roles) + themesHtml(d.themes) + typesHtml(d.types)
     + '<p class="ins-note">All of this is worked out on your computer from your collection and the local card database (' + fmt(d.pool_size) + ' Commander-legal nonland cards; you own ' + d.baseline_pct + '% of them). Nothing is sent anywhere.</p>';
+  paintHeat();
 }).catch(() => { showError('Could not reach the server.'); document.getElementById('insights').innerHTML = ''; });
 """
 

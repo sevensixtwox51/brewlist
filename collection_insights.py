@@ -6,9 +6,9 @@ gameplay data, and Scryfall's Oracle Tags -- so it works offline and costs no ne
 
   - snapshot:  how many cards, copies, rough value, foils, sets.
   - colors:    unique nonland cards per color identity.
-  - roles:     a role x color grid (ramp, draw, removal, wipes, counterspells, tutors, recursion, ...), each cell
-               flagged "thin" / "deep" against what the collection's own size per color would predict, so a big
-               color doesn't look strong just for being big.
+  - roles:     a role x color grid (ramp, draw, removal, wipes, counterspells, tutors, recursion, ...): how many
+               cards you own for each job in each color, and how many such cards exist in the game. The page shades
+               each row on its own scale, red to green.
   - themes:    graveyard, sacrifice, tokens, counters... with how much of each theme in the whole game you own,
                compared with your other themes (every theme reads high against the game as a whole, since themed
                cards are the better-known ones).
@@ -30,7 +30,7 @@ from brewlist_core import (
     scryfall_prices_in_index,
     sets_data_in_index,
 )
-from deck_builder import _NON_LIBRARY_TYPE_RE, _ROLE_TAG_LABELS
+from deck_builder import _NON_LIBRARY_TYPE_RE, _ROLE_TAG_LABELS, _role_member_names
 
 COLOR_ORDER = ["W", "U", "B", "R", "G"]
 COLOR_NAMES = {"W": "White", "U": "Blue", "B": "Black", "R": "Red", "G": "Green", "M": "Multicolor", "C": "Colorless"}
@@ -40,12 +40,16 @@ COLUMNS = COLOR_ORDER + ["M", "C"]
 _JUNK = re.compile(r"achievement|flowstone|inscryption|set.s mechanic|set mechanic|conjure|^sneak-|vanilla|auraify|more expensive")
 
 _INTERACTION = _ROLE_TAG_LABELS["Interaction"]
+# Ramp, Card draw and the three Interaction rows start from the builder's own cleaned role lists (deck_builder.
+# _role_member_names), so this page never disagrees with the builder: that cleanup drops "end the turn" cards like
+# Sundial of the Infinite from Interaction, "pay life" cards that draw nothing from Draw, land-fetch removal that
+# ramps the opponent from Ramp, and so on. "within" narrows the cleaned Interaction list to one kind by tag.
 _ROLES: list[tuple[str, dict]] = [
-    ("Ramp", {"labels": _ROLE_TAG_LABELS["Ramp"]}),
-    ("Card draw", {"labels": _ROLE_TAG_LABELS["Draw"]}),
-    ("Spot removal", {"labels": {l for l in _INTERACTION if not l.startswith(("sweeper", "counterspell"))}}),
-    ("Board wipes", {"labels": {l for l in _INTERACTION if l.startswith("sweeper")}}),
-    ("Counterspells", {"labels": {l for l in _INTERACTION if l.startswith("counterspell")}}),
+    ("Ramp", {"clean": "Ramp"}),
+    ("Card draw", {"clean": "Draw"}),
+    ("Spot removal", {"within": "Interaction", "labels": {l for l in _INTERACTION if not l.startswith(("sweeper", "counterspell"))}}),
+    ("Board wipes", {"within": "Interaction", "labels": {l for l in _INTERACTION if l.startswith("sweeper")}}),
+    ("Counterspells", {"within": "Interaction", "labels": {l for l in _INTERACTION if l.startswith("counterspell")}}),
     ("Tutors", {"regex": r"^tutor-(?!land)"}),
     ("Recursion", {"regex": r"^reanimate|castable from graveyard|^regrowth|activate from graveyard"}),
     ("Sacrifice outlets", {"regex": r"sacrifice outlet"}),
@@ -114,11 +118,22 @@ def _definition_filter(defn: dict):
     return lambda label: bool((labels and label in labels) or (rx and rx.search(label)))
 
 
-def _pool_members(defn: dict, pool: list[dict], groups: dict, labels: dict) -> set[str]:
+def _expand(names) -> set[str]:
+    out: set[str] = set()
+    for n in names:
+        out |= _aliases(n)
+    return out
+
+
+def _pool_members(defn: dict, pool: list[dict], groups: dict, labels: dict, cleaned: dict | None = None) -> set[str]:
     """Normalized names (front face included) of pool cards that fit a role/theme definition."""
     members: set[str] = set()
+    if defn.get("clean") and cleaned:
+        return _expand(cleaned.get(defn["clean"]) or ())
     if defn.get("labels") or defn.get("regex"):
         members |= _tag_members(_definition_filter(defn), groups, labels)
+    if defn.get("within") and cleaned:
+        members &= _expand(cleaned.get(defn["within"]) or ())
     if defn.get("oracle"):
         rx = re.compile(defn["oracle"], re.I)
         for g in pool:
@@ -199,16 +214,12 @@ def build_insights(owned: dict, owned_rows: list[dict]) -> dict:
     colors = {"columns": [{"key": c, "label": COLOR_NAMES[c], "unique": col_totals[c]} for c in COLUMNS], "nonland_total": len(mine)}
 
     # ---- roles x colors ---------------------------------------------------------------------------------------
-    # A cell is judged against how many such cards exist in the whole game for that color, and against how much of
-    # that color you own overall -- so blue counterspells aren't "deep" and black ones a "gap" just because
-    # counterspells are blue, and a big color doesn't look strong only for being big.
-    pool_col_totals = {c: 0 for c in COLUMNS}
-    for g in pool:
-        pool_col_totals[_color_bucket(g.get("color_identity"))] += 1
-    col_baseline = {c: (col_totals[c] / pool_col_totals[c]) if pool_col_totals[c] else 0 for c in COLUMNS}
+    # Each cell is a count of cards you own, with the number that exist in the whole game for that role and color so
+    # the page can also show the share you own. How it is shaded is decided on the page, across each row.
+    cleaned = _role_member_names(groups, labels)
     role_rows = []
     for role, defn in _ROLES:
-        members = _pool_members(defn, pool, groups, labels)
+        members = _pool_members(defn, pool, groups, labels, cleaned)
         pool_hits = {c: 0 for c in COLUMNS}
         for g in pool:
             if _aliases(g["name"]) & members:
@@ -222,30 +233,13 @@ def build_insights(owned: dict, owned_rows: list[dict]) -> dict:
                 seen.add(normalize_name(r["name"]))
                 hits[_color_bucket(r.get("color_identity"))].append(r)
         total = sum(len(v) for v in hits.values())
-        # Role-tagged cards are the good, popular ones, so you own a bigger share of them than of the average card in
-        # every color. "role_lift" removes that, so a cell reads relative to the rest of its own row.
-        pool_total = sum(pool_hits.values())
-        expected_cov = sum(pool_hits[c] * col_baseline[c] for c in COLUMNS) / pool_total if pool_total else 0
-        role_lift = ((total / pool_total) / expected_cov) if pool_total and expected_cov else 1
         cells = {}
         for c in COLUMNS:
             n = len(hits[c])
             pool_n = pool_hits[c]
-            index = (n / pool_n) / (col_baseline[c] * role_lift) if pool_n and col_baseline[c] and role_lift else None
-            flag = None
-            # Only the five colors are flagged: Multicolor and Colorless each mix many kinds of cards, and their small
-            # pools made the flags noisy (a "strong" colorless cell next to a bigger count in black read as a bug).
-            if index is not None and pool_n >= 30 and c in COLOR_ORDER:  # a role that barely exists in a color isn't a gap
-                if index < 0.35:
-                    flag = "gap"
-                elif index < 0.7:
-                    flag = "thin"
-                elif index > 1.4 and n >= 6:
-                    flag = "deep"
             top = sorted(hits[c], key=lambda r: (r.get("edhrec_rank") or 10**9))[:12]
             lists[f"role:{role}:{c}"] = _sorted_cards(hits[c])
             cells[c] = {"n": n, "pool": pool_n, "pct": round(100 * n / pool_n, 1) if pool_n else None,
-                        "index": round(index, 2) if index is not None else None, "flag": flag,
                         "names": [r["name"] for r in top]}
         role_rows.append({"role": role, "total": total, "cells": cells})
     roles = {"columns": [{"key": c, "label": COLOR_NAMES[c], "total": col_totals[c]} for c in COLUMNS], "rows": role_rows}
