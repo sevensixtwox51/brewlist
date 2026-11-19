@@ -87,7 +87,7 @@ from deck_builder import (
 import tag_synergy
 from edhrec_data import bulk_commander_popularity, commander_data_problem, commander_profile, commander_theme_page
 from edhrec_data import refresh_all as edhrec_refresh_all
-from collection_insights import get_insights
+from collection_insights import get_insights, cards_for
 from collection_page import render_collection_page
 from edhrec_data import top_list_status as edhrec_top_list_status
 
@@ -5862,6 +5862,21 @@ def collection_insights_data():
         return jsonify(get_insights(COLLECTION_PATH, os.path.getmtime(COLLECTION_PATH), load_collection, owned_collection_gameplay_view))
     except ValueError as e:
         return jsonify(error=str(e))
+
+
+@app.route("/collection/cards", methods=["GET"])
+def collection_insights_cards():
+    """The cards behind one number on the insights page (a role cell, theme, color, type...)."""
+    if not os.path.isfile(COLLECTION_PATH):
+        return jsonify(error="No ManaBox collection on file yet."), 400
+    try:
+        get_insights(COLLECTION_PATH, os.path.getmtime(COLLECTION_PATH), load_collection, owned_collection_gameplay_view)
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+    cards = cards_for(request.args.get("key", ""))
+    if cards is None:
+        return jsonify(error="Nothing to show for that."), 404
+    return jsonify(cards=cards)
 
 
 @app.route("/collection/upload", methods=["POST"])

@@ -38,6 +38,8 @@ table.ins-grid { border-collapse: separate; border-spacing: 4px; width: 100%; mi
 .ins-grid td.gap { background: color-mix(in srgb, var(--missing) 26%, var(--bg)); border-color: color-mix(in srgb, var(--missing) 60%, var(--card-border)); color: var(--missing); }
 .ins-grid td.thin { background: color-mix(in srgb, var(--gold) 18%, var(--bg)); border-color: color-mix(in srgb, var(--gold) 50%, var(--card-border)); color: var(--gold); }
 .ins-grid td.deep { background: color-mix(in srgb, var(--owned) 20%, var(--bg)); border-color: color-mix(in srgb, var(--owned) 50%, var(--card-border)); color: var(--owned); }
+.ins-grid td .pc { font-weight: 400; font-size: 0.68rem; color: var(--text-dim); margin-top: 1px; }
+.ins-grid td.gap .pc, .ins-grid td.thin .pc, .ins-grid td.deep .pc { color: inherit; opacity: 0.75; }
 .ins-key { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 10px; font-size: 0.78rem; color: var(--text-dim); }
 .ins-key i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; border: 1px solid var(--card-border); }
 .ins-theme { display: grid; grid-template-columns: minmax(150px, 230px) 1fr 150px; gap: 12px; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--card-border); }
@@ -62,12 +64,44 @@ table.ins-grid { border-collapse: separate; border-spacing: 4px; width: 100%; mi
 .ins-curve .col b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; margin-bottom: 3px; }
 .ins-tribes { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
 .ins-note { color: var(--text-dim); font-size: 0.78rem; margin-top: 18px; max-width: 80ch; }
+[data-key] { cursor: pointer; }
+.ins-grid td[data-key]:hover, .ins-chip[data-key]:hover { border-color: var(--accent); filter: brightness(1.25); }
+.ins-theme[data-key]:hover .nm { color: var(--accent); }
+.ins-bars .row[data-key]:hover > span:first-child, .ins-curve .col[data-key]:hover { color: var(--accent); }
+.ins-colorbar > div[data-key]:hover, .ins-legend span[data-key]:hover { filter: brightness(1.15); }
+.ins-legend span[data-key]:hover { color: var(--accent); }
+.ins-modal { display: none; position: fixed; inset: 0; z-index: 300; background: rgba(8, 6, 4, 0.78); align-items: flex-start; justify-content: center; padding: 4vh 16px; overflow-y: auto; }
+.ins-modal.show { display: flex; }
+.ins-modal-panel { background: var(--bg-elevated); border: 1px solid var(--card-border); border-radius: 14px; width: min(1100px, 100%); box-shadow: var(--shadow); }
+.ins-modal-head { display: flex; align-items: center; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--card-border); position: sticky; top: 0; background: var(--bg-elevated); border-radius: 14px 14px 0 0; z-index: 2; }
+.ins-modal-head h3 { font-family: var(--serif); font-weight: 600; font-size: 1.3rem; color: var(--accent); margin: 0; flex: 1; }
+.ins-modal-head .count { color: var(--text-dim); font-size: 0.85rem; white-space: nowrap; }
+.ins-modal-head input { width: 190px; margin: 0; padding: 6px 10px; }
+.ins-modal-close { background: none; border: none; color: var(--text-dim); font-size: 1.6rem; line-height: 1; cursor: pointer; }
+.ins-modal-close:hover { color: var(--accent); }
+.ins-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; padding: 16px 18px 20px; }
+.ins-card { position: relative; min-width: 0; }
+.ins-card img { width: 100%; aspect-ratio: 5 / 7; border-radius: 6.5%; background: var(--bg); display: block; box-shadow: 0 2px 10px rgba(0,0,0,0.5); }
+.ins-card .nm { font-size: 0.8rem; font-weight: 600; margin-top: 6px; line-height: 1.2; }
+.ins-card .ty { font-size: 0.7rem; color: var(--text-dim); line-height: 1.25; }
+.ins-card .qty { position: absolute; top: 6px; right: 6px; background: rgba(0,0,0,0.78); color: var(--accent); font-weight: 700; font-size: 0.75rem; padding: 1px 7px; border-radius: 999px; }
+.ins-empty { padding: 30px 18px; color: var(--text-dim); text-align: center; }
 @media (max-width: 800px) { .ins-two { grid-template-columns: 1fr; } .ins-theme { grid-template-columns: 1fr; gap: 4px; } .ins-pill { justify-self: start; } }
 """
 
 COLLECTION_BODY = """
   <div class="ins-back"><a href="/decks" class="btn ghost small">&larr; Decks</a></div>
   <div id="insights"><div class="ins-loading">Reading your collection&hellip;</div></div>
+  <div class="ins-modal" id="ins-modal" role="dialog" aria-modal="true" aria-label="Cards">
+    <div class="ins-modal-panel">
+      <div class="ins-modal-head">
+        <h3 id="ins-modal-title"></h3><span class="count" id="ins-modal-count"></span>
+        <input type="text" id="ins-modal-filter" placeholder="Filter these cards&hellip;" autocomplete="off">
+        <button type="button" class="ins-modal-close" id="ins-modal-close" aria-label="Close">&times;</button>
+      </div>
+      <div id="ins-modal-body"></div>
+    </div>
+  </div>
 """
 
 COLLECTION_SCRIPT = r"""
@@ -91,8 +125,8 @@ function snapshotHtml(s) {
 function colorsHtml(c) {
   const total = c.nonland_total || 1;
   const segs = c.columns.filter((x) => x.unique > 0).map((x) =>
-    '<div style="flex:' + x.unique + ';background:' + MANA_HEX[x.key] + ';" title="' + x.label + ': ' + fmt(x.unique) + '">' + (x.unique / total >= 0.06 ? Math.round(100 * x.unique / total) + '%' : '') + '</div>').join('');
-  const legend = c.columns.map((x) => '<span>' + (icon(x.key) || '<i style="display:inline-block;width:14px;height:14px;border-radius:50%;background:' + MANA_HEX[x.key] + ';"></i>') + x.label + ' <b>' + fmt(x.unique) + '</b></span>').join('');
+    '<div data-key="color:' + x.key + '" data-title="' + x.label + ' cards" style="flex:' + x.unique + ';background:' + MANA_HEX[x.key] + ';" title="' + x.label + ': ' + fmt(x.unique) + ' (click to see them)">' + (x.unique / total >= 0.06 ? Math.round(100 * x.unique / total) + '%' : '') + '</div>').join('');
+  const legend = c.columns.map((x) => '<span data-key="color:' + x.key + '" data-title="' + x.label + ' cards">' + (icon(x.key) || '<i style="display:inline-block;width:14px;height:14px;border-radius:50%;background:' + MANA_HEX[x.key] + ';"></i>') + x.label + ' <b>' + fmt(x.unique) + '</b></span>').join('');
   return '<div class="card ins-section"><h2>Colors</h2><p class="ins-sub">Unique nonland cards by color identity.</p><div class="ins-colorbar">' + segs + '</div><div class="ins-legend">' + legend + '</div></div>';
 }
 
@@ -112,21 +146,23 @@ function rolesHtml(r) {
     const cell = row.cells[c.key];
     const tip = colName[c.key] + ' ' + row.role.toLowerCase() + ': you own ' + cell.n + ' of ' + fmt(cell.pool) + ' Commander-legal cards'
       + (cell.index != null ? ' (' + cell.index.toFixed(2) + '× your usual share for this color)' : '') + (cell.names.length ? '. Most played: ' + cell.names.slice(0, 8).join(', ') : '');
-    return '<td class="' + (cell.flag || '') + '" title="' + esc(tip) + '">' + cell.n + '</td>';
+    const key = cell.n ? ' data-key="role:' + esc(row.role) + ':' + c.key + '" data-title="' + esc(colName[c.key] + ' ' + row.role.toLowerCase()) + '"' : '';
+    const pc = cell.pct == null ? '' : '<div class="pc">' + (cell.pct >= 10 ? Math.round(cell.pct) : cell.pct.toFixed(1)) + '%</div>';
+    return '<td class="' + (cell.flag || '') + '"' + key + ' title="' + esc(tip + (cell.n ? ' \u2014 click to see them' : '')) + '">' + cell.n + pc + '</td>';
   }).join('') + '</tr>').join('');
   return '<div class="card ins-section"><h2>Roles by color</h2>'
-    + '<p class="ins-sub">How many cards you own for each job, by color. Each cell is judged against how many such cards exist in that color and how much of that color you own, so a big color doesn’t look strong just for being big. Hover a cell for details.</p>'
+    + '<p class="ins-sub">How many cards you own for each job, by color. The small percentage is how much of everything that exists for that job and color you own, and the shading compares that with your other colors for the same job, so a big color doesn’t look strong just for being big and a small count can still be strong when few such cards exist. Click a cell to see the cards.</p>'
     + (thin.length ? '<div class="ins-chips"><span class="lbl">Thin spots</span>' + thin.map((f) => chip(f, 'bad')).join('') + '</div>' : '')
     + (deep.length ? '<div class="ins-chips"><span class="lbl">Strong spots</span>' + deep.map((f) => chip(f, 'good')).join('') + '</div>' : '')
     + '<div class="ins-table-wrap"><table class="ins-grid">' + head + body + '</table></div>'
-    + '<div class="ins-key"><span><i style="background:color-mix(in srgb, var(--missing) 40%, var(--bg));"></i>Gap</span><span><i style="background:color-mix(in srgb, var(--gold) 35%, var(--bg));"></i>Thin</span><span><i style="background:color-mix(in srgb, var(--owned) 35%, var(--bg));"></i>Strong</span><span>Counts are unique cards; a role that barely exists in a color (blue creature recursion, say) is never flagged.</span></div></div>';
+    + '<div class="ins-key"><span><i style="background:color-mix(in srgb, var(--missing) 40%, var(--bg));"></i>Gap</span><span><i style="background:color-mix(in srgb, var(--gold) 35%, var(--bg));"></i>Thin</span><span><i style="background:color-mix(in srgb, var(--owned) 35%, var(--bg));"></i>Strong</span><span>Counts are unique cards. Only the five colors are shaded, and a role that barely exists in a color (blue creature recursion, say) never is.</span></div></div>';
 }
 
 function themesHtml(themes) {
   const rows = themes.map((t) => {
     const pct = Math.min(100, (t.index / 2) * 100);
     const label = t.level === 'deep' ? 'Deep' : (t.level === 'thin' ? 'Thin' : 'Typical');
-    return '<div class="ins-theme ' + t.level + '" title="' + esc(t.examples.length ? 'Most played of yours: ' + t.examples.join(', ') : '') + '">'
+    return '<div class="ins-theme ' + t.level + '" data-key="theme:' + esc(t.name) + '" data-title="' + esc(t.name) + '" title="' + esc(t.examples.length ? 'Most played of yours: ' + t.examples.join(', ') : '') + '">'
       + '<div class="nm">' + esc(t.name) + '<small>' + fmt(t.owned) + ' of ' + fmt(t.pool) + ' (' + t.share + '%)</small></div>'
       + '<div class="ins-meter"><div class="fill" style="width:' + pct + '%;"></div><div class="mid" style="left:50%;" title="A typical theme for you"></div></div>'
       + '<div class="ins-pill">' + label + ' &middot; ' + t.index.toFixed(1) + '×</div></div>';
@@ -138,14 +174,57 @@ function themesHtml(themes) {
 
 function typesHtml(t) {
   const maxU = Math.max(...t.by_category.map((x) => x.unique), 1);
-  const cats = t.by_category.map((x) => '<div class="row"><span>' + esc(x.type) + '</span><div><div class="bar" style="width:' + (100 * x.unique / maxU) + '%;"></div></div><span class="num">' + fmt(x.unique) + '</span></div>').join('');
+  const cats = t.by_category.map((x) => '<div class="row" data-key="type:' + esc(x.type) + '" data-title="' + esc(x.type) + '"><span>' + esc(x.type) + '</span><div><div class="bar" style="width:' + (100 * x.unique / maxU) + '%;"></div></div><span class="num">' + fmt(x.unique) + '</span></div>').join('');
   const maxC = Math.max(...t.curve, 1);
-  const curve = t.curve.map((n, i) => '<div class="col"><b>' + n + '</b><div class="bar" style="height:' + Math.max(2, 100 * n / maxC * 0.78) + '%;"></div>' + (i === 7 ? '7+' : i) + '</div>').join('');
-  const tribes = t.tribes.map((x) => '<span class="ins-chip">' + esc(x.type) + ' <b>' + x.n + '</b></span>').join('');
+  const curve = t.curve.map((n, i) => '<div class="col" data-key="cmc:' + i + '" data-title="Mana value ' + (i === 7 ? '7+' : i) + '"><b>' + n + '</b><div class="bar" style="height:' + Math.max(2, 100 * n / maxC * 0.78) + '%;"></div>' + (i === 7 ? '7+' : i) + '</div>').join('');
+  const tribes = t.tribes.map((x) => '<span class="ins-chip" data-key="tribe:' + esc(x.type) + '" data-title="' + esc(x.type) + ' creatures">' + esc(x.type) + ' <b>' + x.n + '</b></span>').join('');
   return '<div class="ins-two"><div class="card ins-section"><h2>Card types</h2><p class="ins-sub">Unique cards of each type.</p><div class="ins-bars">' + cats + '</div></div>'
     + '<div class="card ins-section"><h2>Mana curve</h2><p class="ins-sub">Nonland cards by mana value (average ' + t.avg_cmc + ').</p><div class="ins-curve">' + curve + '</div></div></div>'
     + '<div class="card ins-section"><h2>Creature types</h2><p class="ins-sub">Your deepest tribes, by unique creatures.</p><div class="ins-tribes">' + tribes + '</div></div>';
 }
+
+// ---- the cards behind a number ----
+const modal = document.getElementById('ins-modal');
+const modalBody = document.getElementById('ins-modal-body');
+const modalFilter = document.getElementById('ins-modal-filter');
+let modalCards = [], modalSeq = 0;
+const cardImg = (id) => id ? 'https://cards.scryfall.io/normal/front/' + id[0] + '/' + id[1] + '/' + id + '.jpg' : '';
+function renderModalCards() {
+  const q = modalFilter.value.trim().toLowerCase();
+  const shown = q ? modalCards.filter((c) => (c.name + ' ' + (c.type_line || '')).toLowerCase().includes(q)) : modalCards;
+  const copies = shown.reduce((n, c) => n + (c.quantity || 1), 0);
+  document.getElementById('ins-modal-count').textContent = shown.length + (shown.length === 1 ? ' card' : ' cards') + (copies !== shown.length ? ' \u00b7 ' + copies + ' copies' : '');
+  modalBody.innerHTML = shown.length
+    ? '<div class="ins-cards">' + shown.map((c) => '<div class="ins-card" title="' + esc(c.name) + '">'
+        + (c.scryfall_id ? '<img loading="lazy" alt="' + esc(c.name) + '" src="' + cardImg(c.scryfall_id) + '">' : '<div style="aspect-ratio:5/7;border-radius:6%;background:var(--bg);"></div>')
+        + ((c.quantity || 1) > 1 ? '<span class="qty">\u00d7' + c.quantity + '</span>' : '')
+        + '<div class="nm">' + esc(c.name) + (c.foil ? ' \u2726' : '') + '</div><div class="ty">' + esc(c.type_line || '') + '</div></div>').join('') + '</div>'
+    : '<div class="ins-empty">No cards match.</div>';
+}
+function openList(key, title) {
+  const mine = ++modalSeq;
+  document.getElementById('ins-modal-title').textContent = title;
+  document.getElementById('ins-modal-count').textContent = '';
+  modalFilter.value = '';
+  modalBody.innerHTML = '<div class="ins-empty">Loading\u2026</div>';
+  modal.classList.add('show');
+  document.body.style.overflow = 'hidden';
+  fetch('/collection/cards?key=' + encodeURIComponent(key)).then((r) => r.json()).then((d) => {
+    if (mine !== modalSeq) return;
+    if (d.error) { modalBody.innerHTML = '<div class="ins-empty">' + esc(d.error) + '</div>'; return; }
+    modalCards = d.cards;
+    renderModalCards();
+  }).catch(() => { if (mine === modalSeq) modalBody.innerHTML = '<div class="ins-empty">Could not reach the server.</div>'; });
+}
+function closeList() { modalSeq++; modal.classList.remove('show'); document.body.style.overflow = ''; }
+document.getElementById('ins-modal-close').addEventListener('click', closeList);
+modal.addEventListener('click', (e) => { if (e.target === modal) closeList(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && modal.classList.contains('show')) closeList(); });
+modalFilter.addEventListener('input', renderModalCards);
+document.getElementById('insights').addEventListener('click', (e) => {
+  const el = e.target.closest('[data-key]');
+  if (el) openList(el.dataset.key, el.dataset.title || 'Cards');
+});
 
 fetch('/collection/data').then((r) => r.json()).then((d) => {
   const el = document.getElementById('insights');

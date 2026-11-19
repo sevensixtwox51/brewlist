@@ -127,6 +127,15 @@ def _pool_members(defn: dict, pool: list[dict], groups: dict, labels: dict) -> s
     return members
 
 
+def _card(r: dict) -> dict:
+    return {"name": r["name"], "scryfall_id": r.get("scryfall_id"), "type_line": r.get("type_line"), "mana_cost": r.get("mana_cost"),
+            "quantity": r.get("quantity") or 1, "set_code": r.get("set_code"), "foil": bool(r.get("foil")), "layout": r.get("layout")}
+
+
+def _sorted_cards(rows: list[dict]) -> list[dict]:
+    return [_card(r) for r in sorted(rows, key=lambda r: (r.get("edhrec_rank") or 10**9, r["name"]))]
+
+
 def _creature_types(type_line: str) -> list[str]:
     if "Creature" not in (type_line or "") or "—" not in type_line:
         return []
@@ -178,9 +187,15 @@ def build_insights(owned: dict, owned_rows: list[dict]) -> dict:
     baseline = len(mine) / max(1, len(pool))
 
     # ---- colors ---------------------------------------------------------------------------------------------
+    lists: dict[str, list[dict]] = {}  # the cards behind every number, looked up by key when something is clicked
     col_totals = {c: 0 for c in COLUMNS}
+    by_color: dict[str, list[dict]] = {c: [] for c in COLUMNS}
     for r in mine:
-        col_totals[_color_bucket(r.get("color_identity"))] += 1
+        b = _color_bucket(r.get("color_identity"))
+        col_totals[b] += 1
+        by_color[b].append(r)
+    for c in COLUMNS:
+        lists[f"color:{c}"] = _sorted_cards(by_color[c])
     colors = {"columns": [{"key": c, "label": COLOR_NAMES[c], "unique": col_totals[c]} for c in COLUMNS], "nonland_total": len(mine)}
 
     # ---- roles x colors ---------------------------------------------------------------------------------------
@@ -218,7 +233,9 @@ def build_insights(owned: dict, owned_rows: list[dict]) -> dict:
             pool_n = pool_hits[c]
             index = (n / pool_n) / (col_baseline[c] * role_lift) if pool_n and col_baseline[c] and role_lift else None
             flag = None
-            if index is not None and pool_n >= 30:  # a role that barely exists in this color isn't a gap
+            # Only the five colors are flagged: Multicolor and Colorless each mix many kinds of cards, and their small
+            # pools made the flags noisy (a "strong" colorless cell next to a bigger count in black read as a bug).
+            if index is not None and pool_n >= 30 and c in COLOR_ORDER:  # a role that barely exists in a color isn't a gap
                 if index < 0.35:
                     flag = "gap"
                 elif index < 0.7:
@@ -226,7 +243,9 @@ def build_insights(owned: dict, owned_rows: list[dict]) -> dict:
                 elif index > 1.4 and n >= 6:
                     flag = "deep"
             top = sorted(hits[c], key=lambda r: (r.get("edhrec_rank") or 10**9))[:12]
-            cells[c] = {"n": n, "pool": pool_n, "index": round(index, 2) if index is not None else None, "flag": flag,
+            lists[f"role:{role}:{c}"] = _sorted_cards(hits[c])
+            cells[c] = {"n": n, "pool": pool_n, "pct": round(100 * n / pool_n, 1) if pool_n else None,
+                        "index": round(index, 2) if index is not None else None, "flag": flag,
                         "names": [r["name"] for r in top]}
         role_rows.append({"role": role, "total": total, "cells": cells})
     roles = {"columns": [{"key": c, "label": COLOR_NAMES[c], "total": col_totals[c]} for c in COLUMNS], "rows": role_rows}
@@ -243,6 +262,7 @@ def build_insights(owned: dict, owned_rows: list[dict]) -> dict:
         index = share / baseline if baseline else 0
         level = "deep" if index >= 1.25 else ("thin" if index < 0.75 else "average")
         top = sorted(owned_hits, key=lambda r: (r.get("edhrec_rank") or 10**9))[:8]
+        lists[f"theme:{name}"] = _sorted_cards(owned_hits)
         themes.append({"name": name, "owned": len(owned_hits), "pool": pool_n, "share": round(share * 100, 1),
                        "index": round(index, 2), "level": level, "examples": [r["name"] for r in top]})
     # Theme cards are also the better-known ones, so every theme tends to read "deep"; judge each against the middle theme.
@@ -262,13 +282,27 @@ def build_insights(owned: dict, owned_rows: list[dict]) -> dict:
     curve = [0] * 8
     cmc_sum = cmc_n = 0
     tribes: dict[str, int] = {}
+    curve_rows: dict[int, list[dict]] = {i: [] for i in range(8)}
+    tribe_rows: dict[str, list[dict]] = {}
     for r in mine:
         c = int(r.get("cmc") or 0)
         curve[min(c, 7)] += 1
+        curve_rows[min(c, 7)].append(r)
         cmc_sum += float(r.get("cmc") or 0)
         cmc_n += 1
         for t in _creature_types(r.get("type_line")):
             tribes[t] = tribes.get(t, 0) + 1
+            tribe_rows.setdefault(t, []).append(r)
+    cat_rows: dict[str, list[dict]] = {}
+    for r in owned_rows:
+        cat_rows.setdefault(r.get("category") or "Other", []).append(r)
+    for k, rows in cat_rows.items():
+        lists[f"type:{k}"] = _sorted_cards(rows)
+    for i, rows in curve_rows.items():
+        lists[f"cmc:{i}"] = _sorted_cards(rows)
+    for k, rows in tribe_rows.items():
+        if tribes[k] >= 3:
+            lists[f"tribe:{k}"] = _sorted_cards(rows)
     types = {
         "by_category": [{"type": k, **v} for k, v in sorted(by_cat.items(), key=lambda kv: -kv[1]["unique"])],
         "curve": curve,
@@ -277,7 +311,7 @@ def build_insights(owned: dict, owned_rows: list[dict]) -> dict:
     }
 
     return {"snapshot": snapshot, "colors": colors, "roles": roles, "themes": themes, "types": types,
-            "baseline_pct": round(baseline * 100, 1), "pool_size": len(pool)}
+            "baseline_pct": round(baseline * 100, 1), "pool_size": len(pool), "_lists": lists}
 
 
 def get_insights(collection_path: str, collection_mtime: float, load_owned, owned_view) -> dict:
@@ -290,5 +324,11 @@ def get_insights(collection_path: str, collection_mtime: float, load_owned, owne
     owned = load_owned(collection_path)
     data = build_insights(owned, owned_view(owned, gp))
     data["seconds"] = round(time.time() - t, 1)
-    _cache.update(key=key, data=data)
+    _cache.update(key=key, lists=data.pop("_lists"), data=data)
     return data
+
+
+def cards_for(key: str) -> list[dict] | None:
+    """The cards behind a number on the page ("role:Tutors:R", "theme:Tokens", "color:B", "type:Creatures", "cmc:3",
+    "tribe:Elf"), or None for an unknown key. Only valid after get_insights has run."""
+    return (_cache.get("lists") or {}).get(key)

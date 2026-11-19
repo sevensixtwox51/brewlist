@@ -159,12 +159,19 @@ card database and Scryfall's Oracle Tags.
   your unique nonland cards by color identity
 - **Roles by color:** a grid of ramp, card draw, spot removal, board wipes,
   counterspells, tutors, recursion, sacrifice outlets, token makers and
-  lifegain against each color. Cells are flagged **gap**, **thin** or
-  **strong** against how many such cards exist in that color and how much of
-  that color you own, so a big color doesn't look strong just for being big.
-  Hover a cell for how many exist and the most-played ones you own
+  lifegain against each color. Each cell shows your count and the share of all
+  such cards that exist in that color, and the five colors are shaded **gap**,
+  **thin** or **strong** against your other colors for the same job, so a big
+  color doesn't look strong just for being big
 
 ![Collection insights: snapshot, colors and the role-by-color grid](screenshots/collection-insights.png)
+
+- **Click any number to see the cards:** a role cell, a theme, a color, a card
+  type, a curve bar or a creature type opens a card view of exactly those
+  cards, with a filter box (click the white tutors cell and you get your white
+  tutors)
+
+![Clicking a cell shows the cards behind it](screenshots/collection-cards.png)
 
 - **Themes:** graveyard, sacrifice, tokens, +1/+1 counters, landfall,
   spellslinger and more, each showing how much of that plan's cards you own
