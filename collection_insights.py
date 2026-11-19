@@ -169,7 +169,7 @@ def _missing_card(g: dict, price_data: dict) -> dict:
     offers = [o for o in (entry.get("nonfoil") or []) if o and o[0] != "CM" and o[1] is not None]  # CM is EUR; never mixed in
     best = min(offers, key=lambda o: o[1]) if offers else None
     return {"name": g["name"], "scryfall_id": g.get("scryfall_id"), "type_line": g.get("type_line"), "mana_cost": g.get("mana_cost"),
-            "rank": _rank(g) if _rank(g) < 10**9 else None, "price": best[1] if best else None,
+            "layout": g.get("layout"), "rank": _rank(g) if _rank(g) < 10**9 else None, "price": best[1] if best else None,
             "store": best[0] if best else None, "url": best[2] if best else None}
 
 

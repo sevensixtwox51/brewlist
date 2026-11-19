@@ -109,6 +109,9 @@ table.ins-grid { border-collapse: separate; border-spacing: 4px; width: 100%; mi
 .ins-tabs button.on { color: var(--accent); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--bg)); }
 .ins-modal-hint { padding: 12px 18px 0; color: var(--text-dim); font-size: 0.8rem; }
 .ins-card a.img { display: block; }
+.ins-card .flip { position: absolute; top: 6px; right: 6px; z-index: 2; width: 26px; height: 26px; border-radius: 999px; border: 1px solid var(--card-border); background: rgba(0,0,0,0.78); color: var(--text); font-size: 0.95rem; line-height: 1; cursor: pointer; padding: 0; }
+.ins-card .flip:hover { color: var(--accent); border-color: var(--accent); }
+.ins-card .qty { right: 38px; }
 .ins-card .rank { position: absolute; top: 6px; left: 6px; background: rgba(0,0,0,0.78); color: var(--text); font-weight: 600; font-size: 0.7rem; padding: 1px 7px; border-radius: 999px; }
 .ins-card .price { display: inline-block; margin-top: 4px; font-size: 0.74rem; font-weight: 600; color: var(--owned); text-decoration: none; border: 1px solid color-mix(in srgb, var(--owned) 50%, var(--card-border)); border-radius: 999px; padding: 1px 8px; }
 .ins-card .price:hover { background: color-mix(in srgb, var(--owned) 16%, transparent); }
@@ -257,7 +260,10 @@ const modal = document.getElementById('ins-modal');
 const modalBody = document.getElementById('ins-modal-body');
 const modalFilter = document.getElementById('ins-modal-filter');
 let modalCards = [], modalSeq = 0, modalKey = '', modalMode = 'owned', modalCache = {};
-const cardImg = (id) => id ? 'https://cards.scryfall.io/normal/front/' + id[0] + '/' + id[1] + '/' + id + '.jpg' : '';
+const cardImg = (id, face) => id ? 'https://cards.scryfall.io/normal/' + (face || 'front') + '/' + id[0] + '/' + id[1] + '/' + id + '.jpg' : '';
+// only these layouts have a second image on Scryfall (adventure/split cards 404 on /back/)
+const FLIPS = ['transform', 'modal_dfc'];
+const flipBtn = (c) => (c.scryfall_id && FLIPS.includes(c.layout)) ? '<button type="button" class="flip" title="Show the other face">\u21bb</button>' : '';
 const STORES = { MP: 'ManaPool', TCGP: 'TCGplayer', CK: 'Card Kingdom' };
 const scryUrl = (name) => 'https://scryfall.com/search?q=' + encodeURIComponent('!"' + name + '"');
 function renderModalCards() {
@@ -271,11 +277,11 @@ function renderModalCards() {
   const tile = (c) => {
     const img = c.scryfall_id ? '<img loading="lazy" alt="' + esc(c.name) + '" src="' + cardImg(c.scryfall_id) + '">' : '<div style="aspect-ratio:5/7;border-radius:6%;background:var(--bg);"></div>';
     if (!missing) {
-      return '<div class="ins-card" data-id="' + esc(c.scryfall_id || '') + '">' + img + ((c.quantity || 1) > 1 ? '<span class="qty">×' + c.quantity + '</span>' : '')
+      return '<div class="ins-card" data-id="' + esc(c.scryfall_id || '') + '">' + img + flipBtn(c) + ((c.quantity || 1) > 1 ? '<span class="qty">×' + c.quantity + '</span>' : '')
         + '<div class="nm">' + esc(c.name) + (c.foil ? ' ✦' : '') + '</div><div class="ty">' + esc(c.type_line || '') + '</div></div>';
     }
     const price = c.price != null ? '<a class="price" target="_blank" rel="noopener noreferrer" href="' + esc(c.url || scryUrl(c.name)) + '" title="Cheapest nonfoil listing">$' + Number(c.price).toFixed(2) + ' · ' + esc(STORES[c.store] || c.store || '') + '</a>' : '';
-    return '<div class="ins-card" data-id="' + esc(c.scryfall_id || '') + '"><a class="img" target="_blank" rel="noopener noreferrer" href="' + scryUrl(c.name) + '">' + img + '</a>'
+    return '<div class="ins-card" data-id="' + esc(c.scryfall_id || '') + '"><a class="img" target="_blank" rel="noopener noreferrer" href="' + scryUrl(c.name) + '">' + img + '</a>' + flipBtn(c)
       + (c.rank ? '<span class="rank">#' + fmt(c.rank) + '</span>' : '')
       + '<div class="nm">' + esc(c.name) + '</div><div class="ty">' + esc(c.type_line || '') + '</div>' + price + '</div>';
   };
@@ -324,14 +330,16 @@ document.getElementById('insights').addEventListener('click', (e) => {
 const zoomEl = document.getElementById('ins-zoom');
 const zoomImg = zoomEl.querySelector('img');
 let zoomId = null;
+const faceOf = (card) => card.dataset.face === 'back' ? 'back' : 'front';
 const hideZoom = () => { zoomId = null; zoomEl.classList.remove('show'); };
 modalBody.addEventListener('mousemove', (e) => {
   const card = e.target.closest ? e.target.closest('.ins-card[data-id]') : null;
   const id = card && card.dataset.id;
   if (!id) { if (zoomId) hideZoom(); return; }
-  if (id !== zoomId) {
-    zoomId = id;
-    zoomImg.src = 'https://cards.scryfall.io/normal/front/' + id[0] + '/' + id[1] + '/' + id + '.jpg';
+  const key = id + faceOf(card);
+  if (key !== zoomId) {
+    zoomId = key;
+    zoomImg.src = cardImg(id, faceOf(card));
     zoomEl.classList.add('show');
   }
   const pad = 22, w = zoomEl.offsetWidth, h = zoomEl.offsetHeight || 420;
@@ -340,6 +348,17 @@ modalBody.addEventListener('mousemove', (e) => {
   y = Math.max(8, Math.min(y, window.innerHeight - h - 8));
   zoomEl.style.left = Math.max(8, x) + 'px'; zoomEl.style.top = y + 'px';
 });
+// the flip button turns a double-faced card (tile and zoom) to its other face
+modalBody.addEventListener('click', (e) => {
+  const btn = e.target.closest ? e.target.closest('.flip') : null;
+  if (!btn) return;
+  e.preventDefault(); e.stopPropagation();
+  const card = btn.closest('.ins-card');
+  const face = faceOf(card) === 'back' ? 'front' : 'back';
+  card.dataset.face = face;
+  card.querySelector('img').src = cardImg(card.dataset.id, face);
+  if (zoomId) { zoomId = card.dataset.id + face; zoomImg.src = cardImg(card.dataset.id, face); }
+}, true);
 modalBody.addEventListener('mouseleave', hideZoom);
 modalBody.addEventListener('scroll', hideZoom, true);
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideZoom(); });
