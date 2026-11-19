@@ -176,7 +176,8 @@ card database and Scryfall's Oracle Tags.
 - **Popular cards to add:** the same card view has a **Popular to add** tab with
   the most popular Commander-legal cards like these that you don't own (by EDHREC
   rank), each with its cheapest nonfoil price and a link to that listing, so a thin
-  spot comes with suggestions for filling it
+  spot comes with suggestions for filling it (a cell with none owned opens on
+  that tab)
 
 ![Popular to add: the most popular white tutors you don't own, with prices](screenshots/collection-popular.png)
 

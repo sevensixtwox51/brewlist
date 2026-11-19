@@ -191,8 +191,8 @@ function rolesHtml(r) {
     const cell = row.cells[c.key];
     const ok = 'WUBRG'.includes(c.key);
     const tip = colName[c.key] + ' ' + row.role.toLowerCase() + ': you own ' + cell.n + ' of the ' + fmt(cell.pool) + ' Commander-legal cards that exist'
-      + (cell.pct != null ? ' (' + cell.pct + '%)' : '') + (cell.names.length ? '. Most played: ' + cell.names.slice(0, 8).join(', ') : '') + (cell.n ? ' — click to see them' : '');
-    const key = cell.n ? ' data-key="role:' + esc(row.role) + ':' + c.key + '" data-title="' + esc(colName[c.key] + ' ' + row.role.toLowerCase()) + '"' : '';
+      + (cell.pct != null ? ' (' + cell.pct + '%)' : '') + (cell.names.length ? '. Most played: ' + cell.names.slice(0, 8).join(', ') : '') + (cell.n ? ' — click to see them' : ' — click for popular cards to add');
+    const key = ' data-key="role:' + esc(row.role) + ':' + c.key + '" data-title="' + esc(colName[c.key] + ' ' + row.role.toLowerCase()) + '"';
     const pc = cell.pct == null ? '' : '<div class="pc">' + (cell.pct >= 10 ? Math.round(cell.pct) : cell.pct.toFixed(1)) + '%</div>';
     return '<td' + key + ' data-ok="' + (ok ? 1 : 0) + '" data-pool="' + cell.pool + '" data-n="' + cell.n + '" data-pct="' + (cell.pct == null ? 0 : cell.pct) + '" data-color="' + c.key + '" title="' + esc(tip) + '">' + cell.n + pc + '</td>';
   }).join('') + '</tr>').join('');
@@ -243,7 +243,8 @@ function renderModalCards() {
   const missing = modalMode === 'missing';
   const copies = shown.reduce((n, c) => n + (c.quantity || 1), 0);
   document.getElementById('ins-modal-count').textContent = shown.length + (shown.length === 1 ? ' card' : ' cards') + (!missing && copies !== shown.length ? ' · ' + copies + ' copies' : '');
-  const hint = missing ? '<div class="ins-modal-hint">The most popular Commander-legal cards like this that aren’t in your collection, most popular first (EDHREC rank). Prices are the cheapest nonfoil from TCGplayer, Card Kingdom and ManaPool; click a price to open that listing, or a card for its Scryfall page.</div>' : '';
+  const noneOwned = modalCache.owned && modalCache.owned.length === 0;
+  const hint = missing ? '<div class="ins-modal-hint">' + (noneOwned ? 'You don\u2019t own any of these yet. ' : '') + 'The most popular Commander-legal cards like this that aren’t in your collection, most popular first (EDHREC rank). Prices are the cheapest nonfoil from TCGplayer, Card Kingdom and ManaPool; click a price to open that listing, or a card for its Scryfall page.</div>' : '';
   const tile = (c) => {
     const img = c.scryfall_id ? '<img loading="lazy" alt="' + esc(c.name) + '" src="' + cardImg(c.scryfall_id) + '">' : '<div style="aspect-ratio:5/7;border-radius:6%;background:var(--bg);"></div>';
     if (!missing) {
@@ -269,6 +270,7 @@ function loadModalMode() {
     if (d.error) { modalBody.innerHTML = '<div class="ins-empty">' + esc(d.error) + '</div>'; return; }
     modalCache[modalMode] = d.cards;
     modalCards = d.cards;
+    if (modalMode === 'owned' && !d.cards.length) { modalMode = 'missing'; loadModalMode(); return; }  // nothing owned: show what to add
     renderModalCards();
   }).catch(() => { if (mine === modalSeq) modalBody.innerHTML = '<div class="ins-empty">Could not reach the server.</div>'; });
 }
