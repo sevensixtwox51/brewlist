@@ -87,6 +87,8 @@ from deck_builder import (
 import tag_synergy
 from edhrec_data import bulk_commander_popularity, commander_data_problem, commander_profile, commander_theme_page
 from edhrec_data import refresh_all as edhrec_refresh_all
+from collection_insights import get_insights
+from collection_page import render_collection_page
 from edhrec_data import top_list_status as edhrec_top_list_status
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -974,6 +976,7 @@ def render_decks_page(error: str | None = None, prefill_url: str = "") -> str:
   {header_html}
   <div style="margin-bottom:16px;">
     <a href="/" class="btn ghost small">&#9881; Collection &amp; Settings</a>
+    <a href="/collection" class="btn ghost small" title="Where your collection is deep and where it is thin">&#128202; Collection insights</a>
   </div>
   <form class="compare-panel" id="compare-form">
     <div class="compare-title">
@@ -5842,6 +5845,23 @@ def home():
 def decks():
     prefill = request.args.get("deck", "")
     return render_decks_page(prefill_url=prefill)
+
+
+@app.route("/collection", methods=["GET"])
+def collection_insights_page():
+    """Where the collection is deep and where it's thin -- its own page, separate from the builder and compare."""
+    header_html, footer_html = _page_chrome("Where your collection is deep, and where it's thin.", None)
+    return render_collection_page(PAGE_STYLE, header_html, footer_html, SHUTDOWN_BTN_SCRIPT + SERVER_WATCH_SCRIPT)
+
+
+@app.route("/collection/data", methods=["GET"])
+def collection_insights_data():
+    if not os.path.isfile(COLLECTION_PATH):
+        return jsonify(error="No ManaBox collection on file yet -- upload your export on the Setup page first.")
+    try:
+        return jsonify(get_insights(COLLECTION_PATH, os.path.getmtime(COLLECTION_PATH), load_collection, owned_collection_gameplay_view))
+    except ValueError as e:
+        return jsonify(error=str(e))
 
 
 @app.route("/collection/upload", methods=["POST"])

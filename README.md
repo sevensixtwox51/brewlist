@@ -17,6 +17,8 @@ and checks any [Moxfield](https://moxfield.com) or
 - **Compare a decklist**: paste a deck URL to see what you already own,
   what's missing, and what it'll cost to finish at today's market prices,
   with budget alternatives, Game Changers, legality and combos.
+- **See your collection**: a **Collection insights** page shows where your
+  collection is deep and where it's thin, by color, role and theme.
 
 Available two ways: a **web app** (upload a CSV, build or paste a URL, done —
 no terminal needed) and the original **CLI** (menu-driven, generates
@@ -145,6 +147,34 @@ Paste a Moxfield or Archidekt link on the Decks page:
   remembered
 - The same **View** menu and flavor-name search as the builder, and a blurred
   commander-art backdrop
+
+## Collection insights
+
+The **Collection insights** link on the Decks page opens `/collection`, a
+read-only look at what you own that stays out of the builder and the compare
+flow. Everything is worked out on your computer from your collection, the local
+card database and Scryfall's Oracle Tags.
+
+- **Snapshot and colors:** unique cards, copies, rough value, foils, sets, and
+  your unique nonland cards by color identity
+- **Roles by color:** a grid of ramp, card draw, spot removal, board wipes,
+  counterspells, tutors, recursion, sacrifice outlets, token makers and
+  lifegain against each color. Cells are flagged **gap**, **thin** or
+  **strong** against how many such cards exist in that color and how much of
+  that color you own, so a big color doesn't look strong just for being big.
+  Hover a cell for how many exist and the most-played ones you own
+
+![Collection insights: snapshot, colors and the role-by-color grid](screenshots/collection-insights.png)
+
+- **Themes:** graveyard, sacrifice, tokens, +1/+1 counters, landfall,
+  spellslinger and more, each showing how much of that plan's cards you own
+  next to your other plans (Oracle Tags are crowd-made, so read it as "roughly
+  how deep")
+
+![Collection insights: how deep each theme is](screenshots/collection-themes.png)
+
+- **Types, curve and tribes:** card types, the mana curve, and your deepest
+  creature types
 
 ## Requirements
 
@@ -358,6 +388,7 @@ appreciated!
 | `tag_synergy.py` | Scryfall Oracle Tags from the local card database: tag search, "Works with…" and similar-card suggestions. |
 | `mana_sim.py`, `turn_clock.py` | Goldfish simulations behind the Analyze panel's Mana Sim and Turn Clock. |
 | `index_worker.py` | Runs Refresh Database in its own process so the web app stays responsive while it downloads and rebuilds. |
+| `collection_insights.py`, `collection_page.py` | The Collection insights page: the calculations (read-only, nothing from the builder or compare code) and its page. |
 | `app.py` | Flask web app, including the Deck Builder (`/builder`). Its `static/` folder holds the mana-symbol SVGs. |
 | `brewlist_cli.py` | Terminal CLI (interactive menu or scriptable flags). |
 | `Brewlist.command` | macOS double-click launcher for the web app. |
