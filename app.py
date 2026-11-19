@@ -87,7 +87,7 @@ from deck_builder import (
 import tag_synergy
 from edhrec_data import bulk_commander_popularity, commander_data_problem, commander_profile, commander_theme_page
 from edhrec_data import refresh_all as edhrec_refresh_all
-from collection_insights import get_insights, cards_for
+from collection_insights import get_insights, cards_for, missing_for
 from collection_page import render_collection_page
 from edhrec_data import top_list_status as edhrec_top_list_status
 
@@ -5873,7 +5873,10 @@ def collection_insights_cards():
         get_insights(COLLECTION_PATH, os.path.getmtime(COLLECTION_PATH), load_collection, owned_collection_gameplay_view)
     except ValueError as e:
         return jsonify(error=str(e)), 400
-    cards = cards_for(request.args.get("key", ""))
+    key = request.args.get("key", "")
+    cards = missing_for(key) if request.args.get("missing") else cards_for(key)
+    if cards is None and request.args.get("missing") and cards_for(key) is not None:
+        cards = []  # a real key with nothing popular left to add
     if cards is None:
         return jsonify(error="Nothing to show for that."), 404
     return jsonify(cards=cards)

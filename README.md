@@ -173,6 +173,13 @@ card database and Scryfall's Oracle Tags.
 
 ![Clicking a cell shows the cards behind it](screenshots/collection-cards.png)
 
+- **Popular cards to add:** the same card view has a **Popular to add** tab with
+  the most popular Commander-legal cards like these that you don't own (by EDHREC
+  rank), each with its cheapest nonfoil price and a link to that listing, so a thin
+  spot comes with suggestions for filling it
+
+![Popular to add: the most popular white tutors you don't own, with prices](screenshots/collection-popular.png)
+
 - **Themes:** graveyard, sacrifice, tokens, +1/+1 counters, landfall,
   spellslinger and more, each showing how much of that plan's cards you own
   next to your other plans (Oracle Tags are crowd-made, so read it as "roughly

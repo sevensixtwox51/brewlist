@@ -90,6 +90,16 @@ table.ins-grid { border-collapse: separate; border-spacing: 4px; width: 100%; mi
 .ins-card .ty { font-size: 0.7rem; color: var(--text-dim); line-height: 1.25; }
 .ins-card .qty { position: absolute; top: 6px; right: 6px; background: rgba(0,0,0,0.78); color: var(--accent); font-weight: 700; font-size: 0.75rem; padding: 1px 7px; border-radius: 999px; }
 .ins-empty { padding: 30px 18px; color: var(--text-dim); text-align: center; }
+.ins-tabs { display: inline-flex; }
+.ins-tabs button { background: var(--bg); color: var(--text-dim); border: 1px solid var(--card-border); padding: 5px 12px; cursor: pointer; font: inherit; font-size: 0.82rem; }
+.ins-tabs button:first-child { border-radius: 8px 0 0 8px; }
+.ins-tabs button:last-child { border-radius: 0 8px 8px 0; border-left: none; }
+.ins-tabs button.on { color: var(--accent); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--bg)); }
+.ins-modal-hint { padding: 12px 18px 0; color: var(--text-dim); font-size: 0.8rem; }
+.ins-card a.img { display: block; }
+.ins-card .rank { position: absolute; top: 6px; left: 6px; background: rgba(0,0,0,0.78); color: var(--text); font-weight: 600; font-size: 0.7rem; padding: 1px 7px; border-radius: 999px; }
+.ins-card .price { display: inline-block; margin-top: 4px; font-size: 0.74rem; font-weight: 600; color: var(--owned); text-decoration: none; border: 1px solid color-mix(in srgb, var(--owned) 50%, var(--card-border)); border-radius: 999px; padding: 1px 8px; }
+.ins-card .price:hover { background: color-mix(in srgb, var(--owned) 16%, transparent); }
 @media (max-width: 800px) { .ins-two { grid-template-columns: 1fr; } .ins-theme { grid-template-columns: 1fr; gap: 4px; } .ins-pill { justify-self: start; } }
 """
 
@@ -99,7 +109,9 @@ COLLECTION_BODY = """
   <div class="ins-modal" id="ins-modal" role="dialog" aria-modal="true" aria-label="Cards">
     <div class="ins-modal-panel">
       <div class="ins-modal-head">
-        <h3 id="ins-modal-title"></h3><span class="count" id="ins-modal-count"></span>
+        <h3 id="ins-modal-title"></h3>
+        <div class="ins-tabs"><button type="button" data-mode="owned">Your cards</button><button type="button" data-mode="missing" title="The most popular cards like these that you don't own yet">Popular to add</button></div>
+        <span class="count" id="ins-modal-count"></span>
         <input type="text" id="ins-modal-filter" placeholder="Filter these cards&hellip;" autocomplete="off">
         <button type="button" class="ins-modal-close" id="ins-modal-close" aria-label="Close">&times;</button>
       </div>
@@ -221,40 +233,61 @@ function typesHtml(t) {
 const modal = document.getElementById('ins-modal');
 const modalBody = document.getElementById('ins-modal-body');
 const modalFilter = document.getElementById('ins-modal-filter');
-let modalCards = [], modalSeq = 0;
+let modalCards = [], modalSeq = 0, modalKey = '', modalMode = 'owned', modalCache = {};
 const cardImg = (id) => id ? 'https://cards.scryfall.io/normal/front/' + id[0] + '/' + id[1] + '/' + id + '.jpg' : '';
+const STORES = { MP: 'ManaPool', TCGP: 'TCGplayer', CK: 'Card Kingdom' };
+const scryUrl = (name) => 'https://scryfall.com/search?q=' + encodeURIComponent('!"' + name + '"');
 function renderModalCards() {
   const q = modalFilter.value.trim().toLowerCase();
   const shown = q ? modalCards.filter((c) => (c.name + ' ' + (c.type_line || '')).toLowerCase().includes(q)) : modalCards;
+  const missing = modalMode === 'missing';
   const copies = shown.reduce((n, c) => n + (c.quantity || 1), 0);
-  document.getElementById('ins-modal-count').textContent = shown.length + (shown.length === 1 ? ' card' : ' cards') + (copies !== shown.length ? ' \u00b7 ' + copies + ' copies' : '');
-  modalBody.innerHTML = shown.length
-    ? '<div class="ins-cards">' + shown.map((c) => '<div class="ins-card" title="' + esc(c.name) + '">'
-        + (c.scryfall_id ? '<img loading="lazy" alt="' + esc(c.name) + '" src="' + cardImg(c.scryfall_id) + '">' : '<div style="aspect-ratio:5/7;border-radius:6%;background:var(--bg);"></div>')
-        + ((c.quantity || 1) > 1 ? '<span class="qty">\u00d7' + c.quantity + '</span>' : '')
-        + '<div class="nm">' + esc(c.name) + (c.foil ? ' \u2726' : '') + '</div><div class="ty">' + esc(c.type_line || '') + '</div></div>').join('') + '</div>'
-    : '<div class="ins-empty">No cards match.</div>';
+  document.getElementById('ins-modal-count').textContent = shown.length + (shown.length === 1 ? ' card' : ' cards') + (!missing && copies !== shown.length ? ' · ' + copies + ' copies' : '');
+  const hint = missing ? '<div class="ins-modal-hint">The most popular Commander-legal cards like this that aren’t in your collection, most popular first (EDHREC rank). Prices are the cheapest nonfoil from TCGplayer, Card Kingdom and ManaPool; click a price to open that listing, or a card for its Scryfall page.</div>' : '';
+  const tile = (c) => {
+    const img = c.scryfall_id ? '<img loading="lazy" alt="' + esc(c.name) + '" src="' + cardImg(c.scryfall_id) + '">' : '<div style="aspect-ratio:5/7;border-radius:6%;background:var(--bg);"></div>';
+    if (!missing) {
+      return '<div class="ins-card" title="' + esc(c.name) + '">' + img + ((c.quantity || 1) > 1 ? '<span class="qty">×' + c.quantity + '</span>' : '')
+        + '<div class="nm">' + esc(c.name) + (c.foil ? ' ✦' : '') + '</div><div class="ty">' + esc(c.type_line || '') + '</div></div>';
+    }
+    const price = c.price != null ? '<a class="price" target="_blank" rel="noopener noreferrer" href="' + esc(c.url || scryUrl(c.name)) + '" title="Cheapest nonfoil listing">$' + Number(c.price).toFixed(2) + ' · ' + esc(STORES[c.store] || c.store || '') + '</a>' : '';
+    return '<div class="ins-card" title="' + esc(c.name) + '"><a class="img" target="_blank" rel="noopener noreferrer" href="' + scryUrl(c.name) + '">' + img + '</a>'
+      + (c.rank ? '<span class="rank">#' + fmt(c.rank) + '</span>' : '')
+      + '<div class="nm">' + esc(c.name) + '</div><div class="ty">' + esc(c.type_line || '') + '</div>' + price + '</div>';
+  };
+  modalBody.innerHTML = hint + (shown.length ? '<div class="ins-cards">' + shown.map(tile).join('') + '</div>' : '<div class="ins-empty">' + (missing && !modalCards.length ? 'Nothing popular left to add here.' : 'No cards match.') + '</div>');
 }
-function openList(key, title) {
+function loadModalMode() {
   const mine = ++modalSeq;
-  document.getElementById('ins-modal-title').textContent = title;
-  document.getElementById('ins-modal-count').textContent = '';
+  document.querySelectorAll('.ins-tabs button').forEach((b) => b.classList.toggle('on', b.dataset.mode === modalMode));
   modalFilter.value = '';
-  modalBody.innerHTML = '<div class="ins-empty">Loading\u2026</div>';
-  modal.classList.add('show');
-  document.body.style.overflow = 'hidden';
-  fetch('/collection/cards?key=' + encodeURIComponent(key)).then((r) => r.json()).then((d) => {
+  if (modalCache[modalMode]) { modalCards = modalCache[modalMode]; renderModalCards(); return; }
+  document.getElementById('ins-modal-count').textContent = '';
+  modalBody.innerHTML = '<div class="ins-empty">Loading…</div>';
+  fetch('/collection/cards?key=' + encodeURIComponent(modalKey) + (modalMode === 'missing' ? '&missing=1' : '')).then((r) => r.json()).then((d) => {
     if (mine !== modalSeq) return;
     if (d.error) { modalBody.innerHTML = '<div class="ins-empty">' + esc(d.error) + '</div>'; return; }
+    modalCache[modalMode] = d.cards;
     modalCards = d.cards;
     renderModalCards();
   }).catch(() => { if (mine === modalSeq) modalBody.innerHTML = '<div class="ins-empty">Could not reach the server.</div>'; });
+}
+function openList(key, title) {
+  modalKey = key; modalMode = 'owned'; modalCache = {};
+  document.getElementById('ins-modal-title').textContent = title;
+  modal.classList.add('show');
+  document.body.style.overflow = 'hidden';
+  loadModalMode();
 }
 function closeList() { modalSeq++; modal.classList.remove('show'); document.body.style.overflow = ''; }
 document.getElementById('ins-modal-close').addEventListener('click', closeList);
 modal.addEventListener('click', (e) => { if (e.target === modal) closeList(); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && modal.classList.contains('show')) closeList(); });
 modalFilter.addEventListener('input', renderModalCards);
+document.querySelector('.ins-tabs').addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (b && b.dataset.mode !== modalMode) { modalMode = b.dataset.mode; loadModalMode(); }
+});
 document.getElementById('insights').addEventListener('click', (e) => {
   const mode = e.target.closest('.ins-mode button');
   if (mode) { heatMode = mode.dataset.mode; paintHeat(); return; }

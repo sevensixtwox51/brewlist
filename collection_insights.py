@@ -26,7 +26,9 @@ from brewlist_core import (
     gameplay_data_in_index,
     budget_alt_data_in_index,
     normalize_name,
+    categorize,
     price_for_printing,
+    prices_data_in_index,
     scryfall_prices_in_index,
     sets_data_in_index,
 )
@@ -151,6 +153,26 @@ def _sorted_cards(rows: list[dict]) -> list[dict]:
     return [_card(r) for r in sorted(rows, key=lambda r: (r.get("edhrec_rank") or 10**9, r["name"]))]
 
 
+MISSING_PER_KEY = 60
+
+
+def _rank(g: dict) -> int:
+    try:
+        return int(g.get("edhrec_rank") or 10**9)
+    except (TypeError, ValueError):
+        return 10**9
+
+
+def _missing_card(g: dict, price_data: dict) -> dict:
+    """A card you don't own, for the "popular to add" view: its EDHREC rank and the cheapest nonfoil price found."""
+    entry = (price_data.get(normalize_name(g["name"])) or price_data.get(normalize_name(g["name"]).split(" // ")[0]) or {})
+    offers = [o for o in (entry.get("nonfoil") or []) if o and o[0] != "CM" and o[1] is not None]  # CM is EUR; never mixed in
+    best = min(offers, key=lambda o: o[1]) if offers else None
+    return {"name": g["name"], "scryfall_id": g.get("scryfall_id"), "type_line": g.get("type_line"), "mana_cost": g.get("mana_cost"),
+            "rank": _rank(g) if _rank(g) < 10**9 else None, "price": best[1] if best else None,
+            "store": best[0] if best else None, "url": best[2] if best else None}
+
+
 def _creature_types(type_line: str) -> list[str]:
     if "Creature" not in (type_line or "") or "—" not in type_line:
         return []
@@ -217,9 +239,11 @@ def build_insights(owned: dict, owned_rows: list[dict]) -> dict:
     # Each cell is a count of cards you own, with the number that exist in the whole game for that role and color so
     # the page can also show the share you own. How it is shaded is decided on the page, across each row.
     cleaned = _role_member_names(groups, labels)
+    role_members: dict[str, set[str]] = {}
     role_rows = []
     for role, defn in _ROLES:
         members = _pool_members(defn, pool, groups, labels, cleaned)
+        role_members[role] = members
         pool_hits = {c: 0 for c in COLUMNS}
         for g in pool:
             if _aliases(g["name"]) & members:
@@ -246,8 +270,10 @@ def build_insights(owned: dict, owned_rows: list[dict]) -> dict:
 
     # ---- themes -----------------------------------------------------------------------------------------------
     themes = []
+    theme_members: dict[str, set[str]] = {}
     for name, defn in _THEMES:
         members = _pool_members(defn, pool, groups, labels)
+        theme_members[name] = members
         pool_n = sum(1 for g in pool if _aliases(g["name"]) & members)
         owned_hits = [r for r in mine if _aliases(r["name"]) & members]
         if pool_n < 40:
@@ -304,8 +330,37 @@ def build_insights(owned: dict, owned_rows: list[dict]) -> dict:
         "tribes": [{"type": k, "n": v} for k, v in sorted(tribes.items(), key=lambda kv: -kv[1])[:14]],
     }
 
+    # ---- the most popular cards you don't own, behind every number (the "popular to add" view) ----------------
+    price_data = prices_data_in_index()
+    missing: dict[str, list[dict]] = {}
+    pool_aliases = {id(g): _aliases(g["name"]) for g in pool}
+    not_owned = sorted((g for g in pool if not (pool_aliases[id(g)] & my_names.keys())), key=_rank)
+    wanted_tribes = {k.split(":", 1)[1] for k in lists if k.startswith("tribe:")}
+
+    def add(key: str, g: dict) -> None:
+        bucket_list = missing.setdefault(key, [])
+        if len(bucket_list) < MISSING_PER_KEY:
+            bucket_list.append(_missing_card(g, price_data))
+
+    for g in not_owned:
+        if _rank(g) >= 10**9:
+            break  # unranked cards come last, and aren't "popular"
+        al, b = pool_aliases[id(g)], _color_bucket(g.get("color_identity"))
+        add(f"color:{b}", g)
+        for role, members in role_members.items():
+            if al & members:
+                add(f"role:{role}:{b}", g)
+        for name, members in theme_members.items():
+            if al & members:
+                add(f"theme:{name}", g)
+        add(f"type:{categorize(g.get('type_line') or '')}", g)
+        add(f"cmc:{min(int(g.get('cmc') or 0), 7)}", g)
+        for t in _creature_types(g.get("type_line")):
+            if t in wanted_tribes:
+                add(f"tribe:{t}", g)
+
     return {"snapshot": snapshot, "colors": colors, "roles": roles, "themes": themes, "types": types,
-            "baseline_pct": round(baseline * 100, 1), "pool_size": len(pool), "_lists": lists}
+            "baseline_pct": round(baseline * 100, 1), "pool_size": len(pool), "_lists": lists, "_missing": missing}
 
 
 def get_insights(collection_path: str, collection_mtime: float, load_owned, owned_view) -> dict:
@@ -318,8 +373,13 @@ def get_insights(collection_path: str, collection_mtime: float, load_owned, owne
     owned = load_owned(collection_path)
     data = build_insights(owned, owned_view(owned, gp))
     data["seconds"] = round(time.time() - t, 1)
-    _cache.update(key=key, lists=data.pop("_lists"), data=data)
+    _cache.update(key=key, lists=data.pop("_lists"), missing=data.pop("_missing"), data=data)
     return data
+
+
+def missing_for(key: str) -> list[dict] | None:
+    """The most popular Commander-legal cards behind a number that you DON'T own, most popular first."""
+    return (_cache.get("missing") or {}).get(key)
 
 
 def cards_for(key: str) -> list[dict] | None:
