@@ -169,7 +169,7 @@ card database and Scryfall's Oracle Tags.
 - **Hover for a quick look, click for the cards:** hovering a number shows its
   count, the most-played cards and their art; clicking a role cell, a theme, a color, a card
   type, a curve bar or a creature type opens a card view of exactly those
-  cards (hover a card to enlarge it), with a filter box (click the white tutors cell and you get your white
+  cards (hover a card to enlarge it; double-faced cards have a flip button), with a filter box (click the white tutors cell and you get your white
   tutors)
 
 ![Clicking a cell shows the cards behind it](screenshots/collection-cards.png)
