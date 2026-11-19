@@ -2520,6 +2520,9 @@ function scryfallImg(scryfallId, size, face) {{
 // most suggestion rows carry just a scryfall_id.
 const FLIP_LAYOUTS = ['transform', 'modal_dfc'];
 const flippableIds = new Set();
+const flipNames = new Set();   // front-face names of every double-faced card (from the server), owned or not
+// The layout to pass to thumbHtml for a card object: its own, else 'transform' when its name is a known double-faced card.
+function layoutFor(c) {{ return c.layout || (flipNames.has(c.name.trim().toLowerCase().split(' // ')[0]) ? 'transform' : ''); }}
 
 // Same category order as brewlist_core.BUCKET_ORDER (the compare report's
 // own bucket ordering) -- reused so Suggest's grouped results read in the
@@ -3487,7 +3490,7 @@ function renderCommanderSlot() {{
   const art = scryfallImg(brew.commander.scryfall_id, 'art_crop');
   const stripe = identityColors(brew.commander.color_identity).map(c => `<span style="background:${{MANA_HEX[c]}}"></span>`).join('');
   wrap.innerHTML = `<div class="commander-slot commander-banner" data-full="${{scryfallImg(brew.commander.scryfall_id, 'normal') || ''}}"${{art ? ` style="--cb-art:url('${{art}}')"` : ''}}>`
-    + `<span class="commander-info">${{thumbHtml(brew.commander.scryfall_id, 'card-thumb small')}}<span><span class="cb-label">Commander</span><span class="cb-name">${{escapeHtml(brew.commander.name)}}</span>${{colorIconsHtml(brew.commander.color_identity)}}</span></span>`
+    + `<span class="commander-info">${{thumbHtml(brew.commander.scryfall_id, 'card-thumb small', layoutFor(brew.commander))}}<span><span class="cb-label">Commander</span><span class="cb-name">${{escapeHtml(brew.commander.name)}}</span>${{colorIconsHtml(brew.commander.color_identity)}}</span></span>`
     + `<span class="cb-stripe">${{stripe}}</span></div>`;
   wrap.querySelector('.commander-slot').appendChild(Object.assign(document.createElement('button'), {{
     type: 'button', className: 'btn ghost small', textContent: 'Clear',
@@ -3518,7 +3521,7 @@ function renderDeckList() {{
       const deckFillerBadge = c.filler
         ? `<span class="filler-badge" title="${{FILLER_TIP}}${{escapeHtml(c.fill_note ? ' ' + c.fill_note : (c.fill_role ? ' Picked to fill ' + c.fill_role + '.' : ''))}}">Slot filler</span>`
         : '';
-      row.innerHTML = `<span class="row-name">${{thumbHtml(c.scryfall_id, 'card-thumb small')}}<span>${{c.name}}</span>${{colorIconsHtml(c.color_identity)}}${{deckFillerBadge}}</span>`;
+      row.innerHTML = `<span class="row-name">${{thumbHtml(c.scryfall_id, 'card-thumb small', layoutFor(c))}}<span>${{c.name}}</span>${{colorIconsHtml(c.color_identity)}}${{deckFillerBadge}}</span>`;
       const deckPill = row.querySelector('.filler-badge');
       if (deckPill && c.fill_role) {{
         deckPill.classList.add('filler-link');
@@ -3587,7 +3590,7 @@ function openReplacePopup(btn, card) {{
       replacePopup.innerHTML = '<h5>Suggested replacements</h5>' +
         data.replacements.map((r, i) => `
           <div class="replace-item" data-i="${{i}}" data-full="${{scryfallImg(r.scryfall_id, 'normal') || ''}}">
-            ${{thumbHtml(r.scryfall_id, 'card-thumb small')}}
+            ${{thumbHtml(r.scryfall_id, 'card-thumb small', layoutFor(r))}}
             <div><div>${{r.name}}</div><div class="reason">${{r.reason}}</div></div>
           </div>`).join('');
       placePopup(replacePopup, btn, 260);
@@ -3745,6 +3748,7 @@ fetch('/builder/collection-data')
     collectionIndex = {{}};
     collection.forEach(c => {{ collectionIndex[normalizeName(c.name)] = c; }});
     imageVersions = data.image_versions || {{}};
+    (data.flip_names || []).forEach(n => flipNames.add(n));
     for (const c of (data.cards || [])) if (c.scryfall_id && FLIP_LAYOUTS.includes(c.layout)) flippableIds.add(c.scryfall_id);
     annotateFilterCounts();
     renderAll();
@@ -4729,7 +4733,7 @@ function renderMaybeboard() {{
     row.className = 'suggestion-row';
     row.dataset.full = scryfallImg(c.scryfall_id, 'normal') || '';
     const replacesNote = c.replaces ? ` &mdash; could replace ${{escapeHtml(c.replaces)}}` : '';
-    row.innerHTML = `<span class="row-name">${{thumbHtml(c.scryfall_id, 'card-thumb small')}}<span>${{escapeHtml(c.name)}} ${{colorIconsHtml(c.color_identity)}}<div class="reason">${{escapeHtml(c.reason)}}${{replacesNote}}</div></span></span>`;
+    row.innerHTML = `<span class="row-name">${{thumbHtml(c.scryfall_id, 'card-thumb small', layoutFor(c))}}<span>${{escapeHtml(c.name)}} ${{colorIconsHtml(c.color_identity)}}<div class="reason">${{escapeHtml(c.reason)}}${{replacesNote}}</div></span></span>`;
     const addBtn = Object.assign(document.createElement('button'), {{
       className: 'btn ghost tile-icon-btn', textContent: '+', title: 'Add to deck',
       onclick: () => {{
@@ -5965,7 +5969,11 @@ def builder_collection_data():
     for c in cards:
         c["set_release"] = (sets.get((c.get("set_code") or "").upper()) or {}).get("release_date", "")
     image_versions = scryfall_image_versions([(c.get("scryfall_id"), c.get("set_code")) for c in cards])
-    return jsonify(cards=cards, image_versions=image_versions)
+    # Front-face names of every card with a second image, so a double-faced card gets its flip button wherever it
+    # shows up (an unowned suggestion, a saved deck) and not only when it's in the collection.
+    flip_names = sorted({(g.get("name") or "").lower().split(" // ")[0] for g in gameplay_data_in_index().values()
+                         if g.get("layout") in ("transform", "modal_dfc")})
+    return jsonify(cards=cards, image_versions=image_versions, flip_names=flip_names)
 
 
 @app.route("/builder/tags", methods=["GET"])
