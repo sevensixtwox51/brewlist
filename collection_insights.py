@@ -278,7 +278,8 @@ def build_insights(owned: dict, owned_rows: list[dict]) -> dict:
             top = sorted(hits[c], key=lambda r: (r.get("edhrec_rank") or 10**9))[:12]
             lists[f"role:{role}:{c}"] = _sorted_cards(hits[c])
             cells[c] = {"n": n, "pool": pool_n, "pct": round(100 * n / pool_n, 1) if pool_n else None,
-                        "names": [r["name"] for r in top]}
+                        "names": [r["name"] for r in top],
+                        "top": [{"name": r["name"], "id": r.get("scryfall_id")} for r in top[:5]]}
         role_rows.append({"role": role, "total": total, "cells": cells})
     roles = {"columns": [{"key": c, "label": COLOR_NAMES[c], "total": col_totals[c]} for c in COLUMNS], "rows": role_rows}
 
@@ -298,7 +299,8 @@ def build_insights(owned: dict, owned_rows: list[dict]) -> dict:
         top = sorted(owned_hits, key=lambda r: (r.get("edhrec_rank") or 10**9))[:8]
         lists[f"theme:{name}"] = _sorted_cards(owned_hits)
         themes.append({"name": name, "owned": len(owned_hits), "pool": pool_n, "share": round(share * 100, 1),
-                       "index": round(index, 2), "level": level, "examples": [r["name"] for r in top]})
+                       "index": round(index, 2), "level": level, "examples": [r["name"] for r in top],
+                       "top": [{"name": r["name"], "id": r.get("scryfall_id")} for r in top[:5]]})
     # Theme cards are also the better-known ones, so every theme tends to read "deep"; judge each against the middle theme.
     if themes:
         mid = sorted(t["index"] for t in themes)[len(themes) // 2] or 1

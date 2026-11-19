@@ -89,6 +89,14 @@ table.ins-grid { border-collapse: separate; border-spacing: 4px; width: 100%; mi
 .ins-card .nm { font-size: 0.8rem; font-weight: 600; margin-top: 6px; line-height: 1.2; }
 .ins-card .ty { font-size: 0.7rem; color: var(--text-dim); line-height: 1.25; }
 .ins-card .qty { position: absolute; top: 6px; right: 6px; background: rgba(0,0,0,0.78); color: var(--accent); font-weight: 700; font-size: 0.75rem; padding: 1px 7px; border-radius: 999px; }
+#ins-tip { position: fixed; z-index: 400; display: none; pointer-events: none; max-width: 470px; padding: 10px 12px 11px; background: var(--bg-elevated); border: 1px solid var(--accent);
+  border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,0.6); font-size: 0.82rem; line-height: 1.35; }
+#ins-tip.show { display: block; }
+#ins-tip b { color: var(--accent); }
+#ins-tip .tt { font-family: var(--serif); font-size: 1.05rem; color: var(--accent); margin-bottom: 2px; }
+#ins-tip .foot { color: var(--text-dim); font-size: 0.74rem; margin-top: 7px; }
+#ins-tip .thumbs { display: flex; gap: 6px; margin-top: 8px; }
+#ins-tip .thumbs img { width: 84px; aspect-ratio: 5 / 7; border-radius: 5px; background: var(--bg); display: block; }
 .ins-empty { padding: 30px 18px; color: var(--text-dim); text-align: center; }
 .ins-tabs { display: inline-flex; }
 .ins-tabs button { background: var(--bg); color: var(--text-dim); border: 1px solid var(--card-border); padding: 5px 12px; cursor: pointer; font: inherit; font-size: 0.82rem; }
@@ -106,6 +114,7 @@ table.ins-grid { border-collapse: separate; border-spacing: 4px; width: 100%; mi
 COLLECTION_BODY = """
   <div class="ins-back"><a href="/decks" class="btn ghost small">&larr; Decks</a></div>
   <div id="insights"><div class="ins-loading">Reading your collection&hellip;</div></div>
+  <div id="ins-tip" role="tooltip"></div>
   <div class="ins-modal" id="ins-modal" role="dialog" aria-modal="true" aria-label="Cards">
     <div class="ins-modal-panel">
       <div class="ins-modal-head">
@@ -125,6 +134,14 @@ const MANA_HEX = { W: '#e8dfb8', U: '#4a90c8', B: '#8d7aa0', R: '#d1553a', G: '#
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = (n) => Number(n || 0).toLocaleString();
 const icon = (k) => (k === 'M' || k === 'C') ? '' : '<img src="/static/mana/' + k + '.svg" alt="' + k + '">';
+const smallImg = (id) => 'https://cards.scryfall.io/small/front/' + id[0] + '/' + id[1] + '/' + id + '.jpg';
+// The hover card used by every clickable element: one instant tooltip (the browser's own title tooltips are slow and unreliable here).
+function tipHtml(title, lines, top, foot) {
+  const thumbs = (top || []).filter((t) => t.id).map((t) => '<img src="' + smallImg(t.id) + '" alt="' + esc(t.name) + '">').join('');
+  const names = (top || []).length ? '<div style="margin-top:6px;">Most played: ' + (top || []).map((t) => esc(t.name)).join(', ') + '</div>' : '';
+  return '<div class="tt">' + esc(title) + '</div>' + lines.map((l) => '<div>' + l + '</div>').join('') + names + (thumbs ? '<div class="thumbs">' + thumbs + '</div>' : '') + (foot ? '<div class="foot">' + esc(foot) + '</div>' : '');
+}
+const tipAttr = (html) => ' data-tip="' + esc(html) + '"';
 const showError = (m) => { const b = document.getElementById('error-box'); if (b) { b.textContent = m; b.style.display = 'block'; } };
 
 function snapshotHtml(s) {
@@ -141,8 +158,8 @@ function snapshotHtml(s) {
 function colorsHtml(c) {
   const total = c.nonland_total || 1;
   const segs = c.columns.filter((x) => x.unique > 0).map((x) =>
-    '<div data-key="color:' + x.key + '" data-title="' + x.label + ' cards" style="flex:' + x.unique + ';background:' + MANA_HEX[x.key] + ';" title="' + x.label + ': ' + fmt(x.unique) + ' (click to see them)">' + (x.unique / total >= 0.06 ? Math.round(100 * x.unique / total) + '%' : '') + '</div>').join('');
-  const legend = c.columns.map((x) => '<span data-key="color:' + x.key + '" data-title="' + x.label + ' cards">' + (icon(x.key) || '<i style="display:inline-block;width:14px;height:14px;border-radius:50%;background:' + MANA_HEX[x.key] + ';"></i>') + x.label + ' <b>' + fmt(x.unique) + '</b></span>').join('');
+    '<div data-key="color:' + x.key + '" data-title="' + x.label + ' cards" style="flex:' + x.unique + ';background:' + MANA_HEX[x.key] + ';" ' + tipAttr(tipHtml(x.label + ' cards', ['<b>' + fmt(x.unique) + '</b> unique nonland cards (' + Math.round(100 * x.unique / total) + '% of your collection)'], null, 'Click to see them, or for popular cards to add')) + '>' + (x.unique / total >= 0.06 ? Math.round(100 * x.unique / total) + '%' : '') + '</div>').join('');
+  const legend = c.columns.map((x) => '<span data-key="color:' + x.key + '" data-title="' + x.label + ' cards"' + tipAttr(tipHtml(x.label + ' cards', ['<b>' + fmt(x.unique) + '</b> unique nonland cards'], null, 'Click to see them, or for popular cards to add')) + '>' + (icon(x.key) || '<i style="display:inline-block;width:14px;height:14px;border-radius:50%;background:' + MANA_HEX[x.key] + ';"></i>') + x.label + ' <b>' + fmt(x.unique) + '</b></span>').join('');
   return '<div class="card ins-section"><h2>Colors</h2><p class="ins-sub">Unique nonland cards by color identity.</p><div class="ins-colorbar">' + segs + '</div><div class="ins-legend">' + legend + '</div></div>';
 }
 
@@ -176,7 +193,7 @@ function paintHeat() {
     if (rmean && rhi >= rmean * 1.5 && highest.n >= 6) chips.high.push({ role: tr.dataset.role, color: highest.color, n: highest.n, ratio: rhi / rmean });
   });
   const colName = { W: 'White', U: 'Blue', B: 'Black', R: 'Red', G: 'Green' };
-  const chip = (f, cls) => '<span class="ins-chip ' + cls + '" data-key="role:' + esc(f.role) + ':' + f.color + '" data-title="' + esc(colName[f.color] + ' ' + f.role.toLowerCase()) + '">' + colName[f.color] + ' ' + esc(f.role.toLowerCase()) + ' (' + f.n + ')</span>';
+  const chip = (f, cls) => '<span class="ins-chip ' + cls + '" data-key="role:' + esc(f.role) + ':' + f.color + '" data-title="' + esc(colName[f.color] + ' ' + f.role.toLowerCase()) + '"' + tipAttr(tipHtml(colName[f.color] + ' ' + f.role.toLowerCase(), ['You own <b>' + f.n + '</b>; click to see them or popular cards to add'], null, '')) + '>' + colName[f.color] + ' ' + esc(f.role.toLowerCase()) + ' (' + f.n + ')</span>';
   chips.low.sort((a, b) => a.ratio - b.ratio); chips.high.sort((a, b) => b.ratio - a.ratio);
   document.getElementById('ins-chips-low').innerHTML = chips.low.length ? '<span class="lbl">Weakest in their row</span>' + chips.low.slice(0, 6).map((f) => chip(f, 'bad')).join('') : '';
   document.getElementById('ins-chips-high').innerHTML = chips.high.length ? '<span class="lbl">Strongest in their row</span>' + chips.high.slice(0, 6).map((f) => chip(f, 'good')).join('') : '';
@@ -190,11 +207,12 @@ function rolesHtml(r) {
   const body = r.rows.map((row) => '<tr data-role="' + esc(row.role) + '"><th class="role">' + esc(row.role) + '<small>' + fmt(row.total) + '</small></th>' + cols.map((c) => {
     const cell = row.cells[c.key];
     const ok = 'WUBRG'.includes(c.key);
-    const tip = colName[c.key] + ' ' + row.role.toLowerCase() + ': you own ' + cell.n + ' of the ' + fmt(cell.pool) + ' Commander-legal cards that exist'
-      + (cell.pct != null ? ' (' + cell.pct + '%)' : '') + (cell.names.length ? '. Most played: ' + cell.names.slice(0, 8).join(', ') : '') + (cell.n ? ' — click to see them' : ' — click for popular cards to add');
+    const tip = tipHtml(colName[c.key] + ' ' + row.role.toLowerCase(),
+      ['You own <b>' + cell.n + '</b> of the ' + fmt(cell.pool) + ' Commander-legal cards that exist' + (cell.pct != null ? ' (' + cell.pct + '%)' : '')],
+      cell.top, cell.n ? 'Click to see all ' + cell.n + ', or for popular cards to add' : 'None owned yet. Click for popular cards to add');
     const key = ' data-key="role:' + esc(row.role) + ':' + c.key + '" data-title="' + esc(colName[c.key] + ' ' + row.role.toLowerCase()) + '"';
     const pc = cell.pct == null ? '' : '<div class="pc">' + (cell.pct >= 10 ? Math.round(cell.pct) : cell.pct.toFixed(1)) + '%</div>';
-    return '<td' + key + ' data-ok="' + (ok ? 1 : 0) + '" data-pool="' + cell.pool + '" data-n="' + cell.n + '" data-pct="' + (cell.pct == null ? 0 : cell.pct) + '" data-color="' + c.key + '" title="' + esc(tip) + '">' + cell.n + pc + '</td>';
+    return '<td' + key + ' data-ok="' + (ok ? 1 : 0) + '" data-pool="' + cell.pool + '" data-n="' + cell.n + '" data-pct="' + (cell.pct == null ? 0 : cell.pct) + '" data-color="' + c.key + '"' + tipAttr(tip) + '>' + cell.n + pc + '</td>';
   }).join('') + '</tr>').join('');
   return '<div class="card ins-section"><h2>Roles by color</h2>'
     + '<p class="ins-sub">How many cards you own for each job, by color. Every row is shaded on its own scale across the five colors: the lowest color in each row is red and the highest is green. The small percentage is how much of everything that exists for that job and color you own. Click a cell to see the cards.</p>'
@@ -208,9 +226,9 @@ function themesHtml(themes) {
   const rows = themes.map((t) => {
     const pct = Math.min(100, (t.index / 2) * 100);
     const label = t.level === 'deep' ? 'Deep' : (t.level === 'thin' ? 'Thin' : 'Typical');
-    return '<div class="ins-theme ' + t.level + '" data-key="theme:' + esc(t.name) + '" data-title="' + esc(t.name) + '" title="' + esc(t.examples.length ? 'Most played of yours: ' + t.examples.join(', ') : '') + '">'
+    return '<div class="ins-theme ' + t.level + '" data-key="theme:' + esc(t.name) + '" data-title="' + esc(t.name) + '"' + tipAttr(tipHtml(t.name, ['You own <b>' + fmt(t.owned) + '</b> of the ' + fmt(t.pool) + ' cards in this theme (' + t.share + '%), ' + t.index.toFixed(1) + '\u00d7 a typical theme for you'], t.top, 'Click to see them, or for popular cards to add')) + '>'
       + '<div class="nm">' + esc(t.name) + '<small>' + fmt(t.owned) + ' of ' + fmt(t.pool) + ' (' + t.share + '%)</small></div>'
-      + '<div class="ins-meter"><div class="fill" style="width:' + pct + '%;"></div><div class="mid" style="left:50%;" title="A typical theme for you"></div></div>'
+      + '<div class="ins-meter"><div class="fill" style="width:' + pct + '%;"></div><div class="mid" style="left:50%;"></div></div>'
       + '<div class="ins-pill">' + label + ' &middot; ' + t.index.toFixed(1) + '×</div></div>';
   }).join('');
   return '<div class="card ins-section"><h2>Themes</h2>'
@@ -220,10 +238,10 @@ function themesHtml(themes) {
 
 function typesHtml(t) {
   const maxU = Math.max(...t.by_category.map((x) => x.unique), 1);
-  const cats = t.by_category.map((x) => '<div class="row" data-key="type:' + esc(x.type) + '" data-title="' + esc(x.type) + '"><span>' + esc(x.type) + '</span><div><div class="bar" style="width:' + (100 * x.unique / maxU) + '%;"></div></div><span class="num">' + fmt(x.unique) + '</span></div>').join('');
+  const cats = t.by_category.map((x) => '<div class="row" data-key="type:' + esc(x.type) + '" data-title="' + esc(x.type) + '"' + tipAttr(tipHtml(x.type, ['<b>' + fmt(x.unique) + '</b> unique cards, ' + fmt(x.copies) + ' copies'], null, 'Click to see them, or for popular cards to add')) + '><span>' + esc(x.type) + '</span><div><div class="bar" style="width:' + (100 * x.unique / maxU) + '%;"></div></div><span class="num">' + fmt(x.unique) + '</span></div>').join('');
   const maxC = Math.max(...t.curve, 1);
-  const curve = t.curve.map((n, i) => '<div class="col" data-key="cmc:' + i + '" data-title="Mana value ' + (i === 7 ? '7+' : i) + '"><b>' + n + '</b><div class="bar" style="height:' + Math.max(2, 100 * n / maxC * 0.78) + '%;"></div>' + (i === 7 ? '7+' : i) + '</div>').join('');
-  const tribes = t.tribes.map((x) => '<span class="ins-chip" data-key="tribe:' + esc(x.type) + '" data-title="' + esc(x.type) + ' creatures">' + esc(x.type) + ' <b>' + x.n + '</b></span>').join('');
+  const curve = t.curve.map((n, i) => '<div class="col" data-key="cmc:' + i + '" data-title="Mana value ' + (i === 7 ? '7+' : i) + '"' + tipAttr(tipHtml('Mana value ' + (i === 7 ? '7+' : i), ['<b>' + n + '</b> nonland cards'], null, 'Click to see them, or for popular cards to add')) + '><b>' + n + '</b><div class="bar" style="height:' + Math.max(2, 100 * n / maxC * 0.78) + '%;"></div>' + (i === 7 ? '7+' : i) + '</div>').join('');
+  const tribes = t.tribes.map((x) => '<span class="ins-chip" data-key="tribe:' + esc(x.type) + '" data-title="' + esc(x.type) + ' creatures"' + tipAttr(tipHtml(x.type + ' creatures', ['<b>' + x.n + '</b> unique creatures'], null, 'Click to see them, or for popular cards to add')) + '>' + esc(x.type) + ' <b>' + x.n + '</b></span>').join('');
   return '<div class="ins-two"><div class="card ins-section"><h2>Card types</h2><p class="ins-sub">Unique cards of each type.</p><div class="ins-bars">' + cats + '</div></div>'
     + '<div class="card ins-section"><h2>Mana curve</h2><p class="ins-sub">Nonland cards by mana value (average ' + t.avg_cmc + ').</p><div class="ins-curve">' + curve + '</div></div></div>'
     + '<div class="card ins-section"><h2>Creature types</h2><p class="ins-sub">Your deepest tribes, by unique creatures.</p><div class="ins-tribes">' + tribes + '</div></div>';
@@ -296,6 +314,24 @@ document.getElementById('insights').addEventListener('click', (e) => {
   const el = e.target.closest('[data-key]');
   if (el) openList(el.dataset.key, el.dataset.title || 'Cards');
 });
+
+// ---- hover cards ----
+const tipEl = document.getElementById('ins-tip');
+let tipOwner = null;
+const hideTip = () => { tipOwner = null; tipEl.classList.remove('show'); };
+document.addEventListener('mousemove', (e) => {
+  const el = modal.classList.contains('show') ? null : (e.target.closest ? e.target.closest('[data-tip]') : null);
+  if (!el) { if (tipOwner) hideTip(); return; }
+  if (el !== tipOwner) { tipOwner = el; tipEl.innerHTML = el.dataset.tip; tipEl.classList.add('show'); }
+  const pad = 16, w = tipEl.offsetWidth, h = tipEl.offsetHeight;
+  let x = e.clientX + pad, y = e.clientY + pad;
+  if (x + w > window.innerWidth - 8) x = e.clientX - w - pad;
+  if (y + h > window.innerHeight - 8) y = e.clientY - h - pad;
+  tipEl.style.left = Math.max(8, x) + 'px'; tipEl.style.top = Math.max(8, y) + 'px';
+});
+document.addEventListener('mouseleave', hideTip);
+document.addEventListener('scroll', hideTip, true);
+document.addEventListener('click', hideTip, true);
 
 fetch('/collection/data').then((r) => r.json()).then((d) => {
   const el = document.getElementById('insights');

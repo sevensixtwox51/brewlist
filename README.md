@@ -166,7 +166,8 @@ card database and Scryfall's Oracle Tags.
 
 ![Collection insights: snapshot, colors and the role-by-color grid](screenshots/collection-insights.png)
 
-- **Click any number to see the cards:** a role cell, a theme, a color, a card
+- **Hover for a quick look, click for the cards:** hovering a number shows its
+  count, the most-played cards and their art; clicking a role cell, a theme, a color, a card
   type, a curve bar or a creature type opens a card view of exactly those
   cards, with a filter box (click the white tutors cell and you get your white
   tutors)
