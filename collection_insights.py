@@ -173,6 +173,20 @@ def _missing_card(g: dict, price_data: dict) -> dict:
             "store": best[0] if best else None, "url": best[2] if best else None}
 
 
+def _one_per_card(cards: list[dict]) -> list[dict]:
+    """The card database can hold the same card more than once: a double-faced card as "A // B" and as "A", or a
+    reversible printing as "Sol Ring // Sol Ring" next to "Sol Ring". Count each once, preferring the plain
+    front-face entry, so game-wide totals aren't inflated and a card isn't suggested twice."""
+    best: dict[str, tuple[bool, dict]] = {}
+    for g in cards:
+        full = normalize_name(g["name"])
+        front = full.split(" // ")[0]
+        cur = best.get(front)
+        if cur is None or (full == front and cur[0]):
+            best[front] = (full != front, g)
+    return [g for _, g in best.values()]
+
+
 def _creature_types(type_line: str) -> list[str]:
     if "Creature" not in (type_line or "") or "—" not in type_line:
         return []
@@ -214,8 +228,8 @@ def build_insights(owned: dict, owned_rows: list[dict]) -> dict:
     }
 
     # ---- the pool (every Commander-legal nonland card in the game) and what you own of it -------------------
-    pool = [g for g in gameplay.values()
-            if _legal(g) and not _is_land(g.get("type_line")) and not _NON_LIBRARY_TYPE_RE.search(g.get("type_line") or "")]
+    pool = _one_per_card([g for g in gameplay.values()
+                          if _legal(g) and not _is_land(g.get("type_line")) and not _NON_LIBRARY_TYPE_RE.search(g.get("type_line") or "")])
     mine = [r for r in owned_rows if not _is_land(r.get("type_line")) and _legal(r) and not _NON_LIBRARY_TYPE_RE.search(r.get("type_line") or "")]
     my_names = {}
     for r in mine:
