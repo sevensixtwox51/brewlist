@@ -1799,6 +1799,10 @@ body.gallery .builder-tile.in-deck::after { content:"\2713"; position:absolute; 
 .color-pip img { width:24px; height:24px; display:block; }
 .color-pip:hover { opacity:0.85; transform:translateY(-1px); }
 .color-pip.on { opacity:1; border-color:var(--accent); box-shadow:0 0 10px -2px var(--accent); }
+.btn.busy { pointer-events:none; opacity:.85; }
+.btn.busy::before { content:''; display:inline-block; width:0.8em; height:0.8em; margin-right:7px; vertical-align:-1px; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; animation:btn-spin .7s linear infinite; }
+@keyframes btn-spin { to { transform:rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .btn.busy::before { animation-duration:2s; } }
 .brewing { display:flex; flex-direction:column; align-items:center; gap:12px; padding:34px 6px; color:var(--text-dim); font-size:0.85rem; text-align:center; }
 .brewing .brew-pips { display:flex; gap:8px; }
 .brewing .brew-pips img { width:26px; height:26px; animation:brew-bob 1.2s ease-in-out infinite; }
@@ -3734,7 +3738,18 @@ function drawSampleHand() {{
     pool.slice(0, 7).map(c => thumbHtml(c.scryfall_id, 'sample-hand-thumb card-thumb')).join('');
 }}
 
+// Adding a batch of cards (Add All, the guided picker) used to re-render the whole builder once per card -- about
+// 1.7 s of frozen page for a full 99-card batch. batchRender holds renders back and does a single one at the end.
+let renderHold = 0, renderPending = false;
+function batchRender(fn) {{
+  renderHold++;
+  try {{ fn(); }} finally {{
+    renderHold--;
+    if (!renderHold && renderPending) {{ renderPending = false; renderAll(); }}
+  }}
+}}
 function renderAll() {{
+  if (renderHold) {{ renderPending = true; return; }}
   renderGrid();
   renderCommanderSlot();
   renderDeckList();
@@ -4447,12 +4462,14 @@ function finishWizard() {{
   wizard.steps.forEach(step => wizardCards(step).forEach(c => {{
     if (wizard.selected.has(wizardKey(c)) && !findCard(c.name)) toAdd.push(c);
   }}));
-  toAdd.forEach(c => addCard(c, cardQty(c)));
   let basicsAdded = 0;
-  wizard.steps.forEach(step => step.basics.forEach(b => {{
-    const n = wizard.basicQty[b.name] || 0;
-    if (n > 0) {{ addCard(b, n); basicsAdded += n; }}
-  }}));
+  batchRender(() => {{
+    toAdd.forEach(c => addCard(c, cardQty(c)));
+    wizard.steps.forEach(step => step.basics.forEach(b => {{
+      const n = wizard.basicQty[b.name] || 0;
+      if (n > 0) {{ addCard(b, n); basicsAdded += n; }}
+    }}));
+  }});
   closeWizard();
   const panel = document.getElementById('suggestions-panel');
   const unowned = toAdd.filter(c => c.owned === false);
@@ -4526,7 +4543,13 @@ suggestBtn.addEventListener('click', () => {{
       let remaining = data.suggestions.slice();
       const addAllBtn = Object.assign(document.createElement('button'), {{
         className: 'btn ghost small', style: 'margin-bottom:8px;margin-right:8px;',
-        onclick: () => {{ remaining.forEach(sg => addCard(sg, cardQty(sg))); panel.innerHTML = ''; }},
+        onclick: async () => {{
+          // Spinner first (and let it paint), then add the whole batch with a single re-render.
+          addAllBtn.disabled = true; addAllBtn.classList.add('busy'); addAllBtn.textContent = 'Adding\u2026';
+          await new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));
+          batchRender(() => remaining.forEach(sg => addCard(sg, cardQty(sg))));
+          panel.innerHTML = '';
+        }},
       }});
       const dismissAllBtn = Object.assign(document.createElement('button'), {{
         className: 'btn ghost small', textContent: 'Dismiss All', style: 'margin-bottom:8px;',
