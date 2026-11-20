@@ -88,7 +88,8 @@ table.ins-grid { border-collapse: separate; border-spacing: 4px; width: 100%; mi
 .ins-card img { width: 100%; aspect-ratio: 5 / 7; border-radius: 6.5%; background: var(--bg); display: block; box-shadow: 0 2px 10px rgba(0,0,0,0.5); }
 .ins-card .nm { font-size: 0.8rem; font-weight: 600; margin-top: 6px; line-height: 1.2; }
 .ins-card .ty { font-size: 0.7rem; color: var(--text-dim); line-height: 1.25; }
-.ins-card .qty { position: absolute; top: 6px; right: 6px; background: rgba(0,0,0,0.78); color: var(--accent); font-weight: 700; font-size: 0.75rem; padding: 1px 7px; border-radius: 999px; }
+.ins-card .pic { position: relative; }
+.ins-card .qty { position: absolute; bottom: 6px; left: 6px; background: rgba(0,0,0,0.78); color: var(--accent); font-weight: 700; font-size: 0.75rem; padding: 1px 7px; border-radius: 999px; }
 #ins-tip { position: fixed; z-index: 400; display: none; pointer-events: none; max-width: 470px; padding: 10px 12px 11px; background: var(--bg-elevated); border: 1px solid var(--accent);
   border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,0.6); font-size: 0.82rem; line-height: 1.35; }
 #ins-tip.show { display: block; }
@@ -111,8 +112,7 @@ table.ins-grid { border-collapse: separate; border-spacing: 4px; width: 100%; mi
 .ins-card a.img { display: block; }
 .ins-card .flip { position: absolute; top: 6px; right: 6px; z-index: 2; width: 26px; height: 26px; border-radius: 999px; border: 1px solid var(--card-border); background: rgba(0,0,0,0.78); color: var(--text); font-size: 0.95rem; line-height: 1; cursor: pointer; padding: 0; }
 .ins-card .flip:hover { color: var(--accent); border-color: var(--accent); }
-.ins-card .qty { right: 38px; }
-.ins-card .rank { position: absolute; top: 6px; left: 6px; background: rgba(0,0,0,0.78); color: var(--text); font-weight: 600; font-size: 0.7rem; padding: 1px 7px; border-radius: 999px; }
+.ins-card .rank { position: absolute; bottom: 6px; left: 6px; background: rgba(0,0,0,0.78); color: var(--text); font-weight: 600; font-size: 0.7rem; padding: 1px 7px; border-radius: 999px; }
 .ins-card .price { display: inline-block; margin-top: 4px; font-size: 0.74rem; font-weight: 600; color: var(--owned); text-decoration: none; border: 1px solid color-mix(in srgb, var(--owned) 50%, var(--card-border)); border-radius: 999px; padding: 1px 8px; }
 .ins-card .price:hover { background: color-mix(in srgb, var(--owned) 16%, transparent); }
 @media (max-width: 800px) { .ins-two { grid-template-columns: 1fr; } .ins-theme { grid-template-columns: 1fr; gap: 4px; } .ins-pill { justify-self: start; } }
@@ -277,12 +277,12 @@ function renderModalCards() {
   const tile = (c) => {
     const img = c.scryfall_id ? '<img loading="lazy" alt="' + esc(c.name) + '" src="' + cardImg(c.scryfall_id) + '">' : '<div style="aspect-ratio:5/7;border-radius:6%;background:var(--bg);"></div>';
     if (!missing) {
-      return '<div class="ins-card" data-id="' + esc(c.scryfall_id || '') + '">' + img + flipBtn(c) + ((c.quantity || 1) > 1 ? '<span class="qty">×' + c.quantity + '</span>' : '')
+      return '<div class="ins-card" data-id="' + esc(c.scryfall_id || '') + '"><div class="pic">' + img + flipBtn(c) + ((c.quantity || 1) > 1 ? '<span class="qty">×' + c.quantity + '</span>' : '') + '</div>'
         + '<div class="nm">' + esc(c.name) + (c.foil ? ' ✦' : '') + '</div><div class="ty">' + esc(c.type_line || '') + '</div></div>';
     }
     const price = c.price != null ? '<a class="price" target="_blank" rel="noopener noreferrer" href="' + esc(c.url || scryUrl(c.name)) + '" title="Cheapest nonfoil listing">$' + Number(c.price).toFixed(2) + ' · ' + esc(STORES[c.store] || c.store || '') + '</a>' : '';
-    return '<div class="ins-card" data-id="' + esc(c.scryfall_id || '') + '"><a class="img" target="_blank" rel="noopener noreferrer" href="' + scryUrl(c.name) + '">' + img + '</a>' + flipBtn(c)
-      + (c.rank ? '<span class="rank">#' + fmt(c.rank) + '</span>' : '')
+    return '<div class="ins-card" data-id="' + esc(c.scryfall_id || '') + '"><div class="pic"><a class="img" target="_blank" rel="noopener noreferrer" href="' + scryUrl(c.name) + '">' + img + '</a>' + flipBtn(c)
+      + (c.rank ? '<span class="rank">#' + fmt(c.rank) + '</span>' : '') + '</div>'
       + '<div class="nm">' + esc(c.name) + '</div><div class="ty">' + esc(c.type_line || '') + '</div>' + price + '</div>';
   };
   modalBody.innerHTML = hint + (shown.length ? '<div class="ins-cards">' + shown.map(tile).join('') + '</div>' : '<div class="ins-empty">' + (missing && !modalCards.length ? 'Nothing popular left to add here.' : 'No cards match.') + '</div>');
