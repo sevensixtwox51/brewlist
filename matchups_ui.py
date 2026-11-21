@@ -44,6 +44,9 @@ details.mu-weak.heavy .mu-level { color:var(--missing); }
 .mu-card.buy { border-style:dashed; color:var(--text-dim); }
 .mu-card.buy i { font-style:normal; color:var(--gold); margin-left:3px; }
 .mu-card.cmdr { border-color:color-mix(in srgb, var(--gold) 55%, var(--card-border)); color:var(--gold); text-decoration:none; cursor:pointer; }
+.mu-card.cmdr.own { border-color:color-mix(in srgb, var(--owned) 60%, var(--card-border)); color:var(--owned); background:color-mix(in srgb, var(--owned) 12%, var(--card-bg)); }
+.mu-card.cmdr.buy { border-style:dashed; }
+.mu-card.cmdr.buy i { font-style:normal; color:var(--text-dim); margin-left:3px; }
 .mu-card.cmdr:hover { background:color-mix(in srgb, var(--gold) 14%, var(--card-bg)); }
 .mu-have { font-size:0.8rem; margin:2px 0 9px; padding:6px 9px; border-radius:8px; background:color-mix(in srgb, var(--owned) 10%, transparent); }
 .mu-have.none { background:color-mix(in srgb, var(--missing) 12%, transparent); }
@@ -83,7 +86,11 @@ function muChips(cards, marks) {
 // Opposing commanders: not cards to add, but decks to watch out for. Crowned pills that open that commander in
 // Commander research (in a new tab, so an unsaved deck in the builder is never lost).
 function muCommanderChips(cards) {
-  return (cards || []).map(c => `<a class="mu-card cmdr" href="/research?commander=${encodeURIComponent(c.name)}" target="_blank" rel="noopener"${c.id ? ` data-full="${muImg(c.id)}"` : ''}>&#9813; ${escapeHtml(c.name)}</a>`).join('');
+  return (cards || []).map(c => {
+    const mark = c.owned ? ' own' : ' buy';
+    const label = c.owned ? '&#10003; ' + escapeHtml(c.name) : escapeHtml(c.name) + (c.price != null ? ' <i>$' + Number(c.price).toFixed(2) + '</i>' : '');
+    return `<a class="mu-card cmdr${mark}" href="/research?commander=${encodeURIComponent(c.name)}" target="_blank" rel="noopener"${c.id ? ` data-full="${muImg(c.id)}"` : ''}>&#9813; ${label}</a>`;
+  }).join('');
 }
 // One thing the deck is exposed to: a collapsible card. The big exposures start open, the rest closed.
 function muExposure(w, deckWord) {
@@ -93,7 +100,7 @@ function muExposure(w, deckWord) {
     const m = w.mitigation;
     mit = `<div class="mu-have ${m.count ? 'ok' : 'none'}"><b>${escapeHtml(m.label)} in ${deckWord}: ${m.count}</b>${m.count ? ' &mdash; ' + m.cards.map(c => escapeHtml(c.name)).join(', ') : ''}${m.note ? '<div class="mu-why">' + escapeHtml(m.note) + '</div>' : ''}</div>`;
   }
-  const cmd = w.commanders ? `<details class="mu-more"><summary>Opposing commanders that already do this (${w.commanders.cards.length})</summary><div class="mu-why">If someone leads with one of these, this exposure comes built into their deck. They're decks to watch out for, not cards to add. Click one to research it.</div><div class="mu-cards">${muCommanderChips(w.commanders.cards)}</div></details>` : '';
+  const cmd = w.commanders ? `<details class="mu-more"><summary>Opposing commanders that already do this (${w.commanders.cards.length})</summary><div class="mu-why">If someone leads with one of these, this exposure comes built into their deck. They're decks to watch out for, not cards to add. A check means you own that commander; a price is the cheapest copy if you don\u2019t. Click one to research it.</div><div class="mu-cards">${muCommanderChips(w.commanders.cards)}</div></details>` : '';
   return `<details class="mu-weak ${w.level}"${w.level === 'heavy' ? ' open' : ''}><summary><span class="mu-level">${w.level === 'heavy' ? 'Big exposure' : 'Some exposure'}</span><span class="mu-title">${escapeHtml(w.title)}</span><span class="mu-because">${escapeHtml(w.because)}</span></summary><div class="mu-body">${groups}${mit}${cmd}</div></details>`;
 }
 // A deck type this build beats, or loses to, with the popular commanders of that kind tucked behind a toggle.
