@@ -468,7 +468,7 @@ def analyze_matchups(cards: list[dict], commander: dict | None, owned_ids: dict[
     n_protect = len(protection) + len(recursion)
     strengths = [
         verdict("Go-wide tokens and aggro", len(sweepers) >= 3 or (len(sweepers) >= 2 and len(token_makers) >= 8), len(sweepers) == 0 and len(token_makers) < 3,
-                f"{len(sweepers)} sweepers ({names_of(sweepers)}) and {len(token_makers)} token makers to blunt a wide board.",
+                f"{len(sweepers)} sweeper{'s' if len(sweepers) != 1 else ''} ({names_of(sweepers)})" + (f" and {len(token_makers)} token makers" if token_makers else "") + " to blunt a wide board.",
                 "No sweepers and few token makers, so a wide board can overrun it.",
                 f"{len(sweepers)} sweeper{'s' if len(sweepers) != 1 else ''} and {len(token_makers)} token makers: some answers, nothing decisive.", sweepers),
         verdict("Voltron and one big threat", n_inter >= 8 or (n_inter >= 6 and len(free_sac) >= 2), n_inter <= 3,

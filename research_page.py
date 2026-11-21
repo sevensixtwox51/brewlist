@@ -202,7 +202,7 @@ function renderDeck(d) {
     + cmdTile + '</div>'
     + '<div class="rs-tabs"><button type="button" class="on" data-tab="miss">Missing (' + miss.length + ')</button><button type="button" data-tab="have">You own (' + have.length + ')</button></div>'
     + '<div class="rs-cards" id="rs-cardlist">' + (miss.length ? miss.map((x) => cardTile(x, true)).join('') : '<p class="rs-sub">You own every card in the typical list.</p>') + '</div></div>'
-    + '<div class="rs-section"><h2>What this build is weak to</h2><p class="rs-sub">Worked out from the typical list above. Handy if someone keeps beating you with this commander: the pills marked &#10003; are cards you already own that you could add to a deck of yours. Hover any pill to see the card.</p>'
+    + '<div class="rs-section"><h2>Weaknesses and strengths of this build</h2><p class="rs-sub">Worked out from the typical list above. Handy if someone keeps beating you with this commander: the pills marked &#10003; are cards you already own that you could add to a deck of yours. Hover any pill to see the card.</p>'
     + '<div id="rs-matchups">' + muRender(d.matchups, { deckWord: 'this build', intro: 'Cards that punish this build.' }) + '</div></div>';
   deckEl.querySelectorAll('.rs-tabs button').forEach((b) => b.addEventListener('click', () => {
     deckEl.querySelectorAll('.rs-tabs button').forEach((x) => x.classList.toggle('on', x === b));
