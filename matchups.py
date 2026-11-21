@@ -20,7 +20,7 @@ import re
 import urllib.error
 import urllib.request
 
-from brewlist_core import PRICE_INDEX_PATH, gameplay_data_in_index, normalize_name, prices_data_in_index
+from brewlist_core import PRICE_INDEX_PATH, commander_eligible, gameplay_data_in_index, normalize_name, prices_data_in_index
 import edhrec_data
 from tag_synergy import _index as _tag_index
 from turn_clock import _PROTECT_RE, _REANIMATE_RE
@@ -265,8 +265,7 @@ def _popular_commanders(pool: dict, label: str, exclude_front: str, limit: int =
         ranks = commander_ranks()["2years"]
         seen, rows = set(), []
         for r in pool.values():
-            tl = r.get("type_line") or ""
-            if not ((("Legendary" in tl and "Creature" in tl)) or "can be your commander" in (r.get("oracle_text") or "")):
+            if not commander_eligible(r.get("type_line"), r.get("oracle_text")):
                 continue
             if str((r.get("legalities") or {}).get("commander")).lower() != "legal":
                 continue
@@ -318,8 +317,7 @@ def _watch_commanders(pool: dict, key: str, limit: int = 5) -> list[dict]:
     label_rx = _WATCH[key][1]
     out = []
     for r in pool.values():
-        tl = r.get("type_line") or ""
-        if not ((("Legendary" in tl and "Creature" in tl)) or "can be your commander" in (r.get("oracle_text") or "")):
+        if not commander_eligible(r.get("type_line"), r.get("oracle_text")):
             continue
         if str((r.get("legalities") or {}).get("commander")).lower() != "legal":
             continue

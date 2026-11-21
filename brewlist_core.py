@@ -43,7 +43,7 @@ __all__ = [
     "categorize", "shopping_group", "shopping_group_rank",
     "best_prices", "priced_for_finish", "build_comparison",
     "render_markdown", "write_missing_csv", "render_html",
-    "scryfall_image_url",
+    "scryfall_image_url", "commander_eligible",
 ]
 
 MOXFIELD_API = "https://api2.moxfield.com/v2/decks/all/{deck_id}"
@@ -106,6 +106,20 @@ def cached_image_version(scryfall_id: str | None) -> str:
     except (OSError, ValueError):
         return ""
     return (_image_version_cache["data"].get(scryfall_id) or {}).get("v", "")
+
+
+def commander_eligible(type_line: str | None, oracle_text: str | None) -> bool:
+    """Whether a card can be a Commander (CR 903.3): a legendary creature, a legendary Vehicle, a legendary Spacecraft
+    that becomes a creature (so it has power and toughness; the database has no power/toughness field, but those
+    Spacecraft all say "creature at"), or any card whose own text says it can be your commander (Jace, Multiverse
+    Architect). The one place this rule lives, so the builder, Commander research and Matchups can't disagree."""
+    tl, text = type_line or "", oracle_text or ""
+    if "Legendary" in tl:
+        if "Creature" in tl or "Vehicle" in tl:
+            return True
+        if "Spacecraft" in tl and "creature at" in text:
+            return True
+    return "can be your commander" in text
 
 
 def scryfall_image_url(scryfall_id: str | None, size: str = "normal") -> str | None:

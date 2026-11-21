@@ -12,7 +12,7 @@ real decklist.
 """
 from __future__ import annotations
 
-from brewlist_core import gameplay_data_in_index, normalize_name
+from brewlist_core import commander_eligible, gameplay_data_in_index, normalize_name
 from edhrec_data import commander_data_problem, commander_profile, commander_theme_page
 from matchups import _front, _lookup, _use_best_printings, analyze_matchups, commander_ranks
 
@@ -28,8 +28,7 @@ def _commander_rows() -> list[dict]:
         return cached[1]
     best: dict[str, dict] = {}
     for r in pool.values():
-        tl = r.get("type_line") or ""
-        if not ((("Legendary" in tl) and ("Creature" in tl)) or "can be your commander" in (r.get("oracle_text") or "")):
+        if not commander_eligible(r.get("type_line"), r.get("oracle_text")):
             continue
         if str((r.get("legalities") or {}).get("commander")).lower() != "legal":
             continue

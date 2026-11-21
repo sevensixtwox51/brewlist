@@ -31,6 +31,7 @@ from flask import Flask, Response, abort, jsonify, request, send_file
 
 from brewlist_core import (
     PRICE_INDEX_PATH,
+    commander_eligible,
     scryfall_image_versions,
     BUCKET_ORDER,
     PICKABLE_STORE_LABELS,
@@ -2901,8 +2902,11 @@ function isCommanderEligible(card) {{
   // wasn't selectable here since only the type-line half of the rule was
   // checked. oracle_text is already carried on every card object at no
   // extra cost (see owned_collection_gameplay_view), so this is free.
-  if (card.type_line.includes('Legendary') && card.type_line.includes('Creature')) return true;
-  return (card.oracle_text || '').includes('can be your commander');
+  // Same rule as commander_eligible() in brewlist_core.py: a legendary Vehicle, or a legendary Spacecraft that becomes a
+  // creature, can lead a deck too (Inspirit, Flagship Vessel).
+  const tl = card.type_line || '', text = card.oracle_text || '';
+  if (tl.includes('Legendary') && (tl.includes('Creature') || tl.includes('Vehicle') || (tl.includes('Spacecraft') && text.includes('creature at')))) return true;
+  return text.includes('can be your commander');
 }}
 
 // Switches the type filter the same way the dropdown does (sort defaults, popularity controls, re-render).
@@ -6222,7 +6226,7 @@ def _save_cache(scores: dict, names: set) -> None:
 def _eligible_commander_rows(owned_view: list[dict]) -> list[dict]:
     return [
         r for r in owned_view
-        if (("Legendary" in r["type_line"] and "Creature" in r["type_line"]) or "can be your commander" in (r.get("oracle_text") or ""))
+        if commander_eligible(r["type_line"], r.get("oracle_text"))
         and (r.get("legalities") or {}).get("commander") in (None, "Legal")
     ]
 
@@ -6391,8 +6395,7 @@ def builder_commander_popularity():
     # a creature would never get an EDHREC popularity rank fetched for it.
     names = [
         c["name"] for c in cards
-        if ("Legendary" in c["type_line"] and "Creature" in c["type_line"])
-        or "can be your commander" in (c.get("oracle_text") or "")
+        if commander_eligible(c["type_line"], c.get("oracle_text"))
     ]
     popularity = bulk_commander_popularity(names)
     status = edhrec_top_list_status()
