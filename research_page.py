@@ -229,7 +229,16 @@ document.addEventListener('mousemove', (e) => {
 document.addEventListener('scroll', hideZoom, true);
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideZoom(); });
 
+// An opposing-commander pill (here or in Analyze) opens that commander; here it switches in place.
+detailEl.addEventListener('click', (e) => {
+  const a = e.target.closest ? e.target.closest('a.mu-card.cmdr') : null;
+  if (!a) return;
+  e.preventDefault();
+  chooseCommander(decodeURIComponent((a.getAttribute('href') || '').split('commander=')[1] || ''));
+});
 runSearch();
+const wanted = new URLSearchParams(location.search).get('commander');
+if (wanted) chooseCommander(wanted);
 """.replace("__MATCHUPS_JS__", MATCHUPS_JS)
 
 

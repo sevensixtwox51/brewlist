@@ -19,6 +19,9 @@ MATCHUPS_CSS = r"""
 .mu-card { font-size:0.76rem; padding:2px 8px; border-radius:999px; border:1px solid var(--card-border); background:var(--card-bg); cursor:default; }
 .mu-card[data-full]:hover { border-color:var(--accent); color:var(--accent); }
 .mu-card.own { border-color:color-mix(in srgb, var(--owned) 55%, var(--card-border)); background:color-mix(in srgb, var(--owned) 12%, var(--card-bg)); }
+.mu-card.cmdr { border-color:color-mix(in srgb, var(--gold) 55%, var(--card-border)); color:var(--gold); text-decoration:none; cursor:pointer; }
+.mu-card.cmdr:hover { background:color-mix(in srgb, var(--gold) 14%, var(--card-bg)); }
+.mu-cmdr { border-top:1px dashed var(--card-border); padding-top:8px; margin-top:4px; }
 .mu-card.buy { border-style:dashed; color:var(--text-dim); }
 .mu-card.buy i { font-style:normal; color:var(--gold); margin-left:3px; }
 .mu-have { font-size:0.8rem; margin:2px 0 8px; padding:6px 9px; border-radius:8px; background:color-mix(in srgb, var(--owned) 10%, transparent); }
@@ -47,6 +50,11 @@ function muChips(cards, marks) {
     return `<span class="${cls}"${full ? ` data-full="${full}"` : ''}>${label}</span>`;
   }).join('');
 }
+// Opposing commanders: not cards to add, but decks to watch out for. Shown as crowned pills that open that commander in
+// Commander research (in a new tab, so an unsaved deck in the builder is never lost).
+function muCommanderChips(cards) {
+  return (cards || []).map(c => `<a class="mu-card cmdr" href="/research?commander=${encodeURIComponent(c.name)}" target="_blank" rel="noopener"${c.id ? ` data-full="${muImg(c.id)}"` : ''}>&#9813; ${escapeHtml(c.name)}</a>`).join('');
+}
 // The Matchups panel's HTML for the server's analysis. opts.intro: the sentence above the pills; opts.deckWord: how
 // the deck is named in "answers in ..." lines ("your deck", "this build").
 function muRender(res, opts) {
@@ -65,7 +73,7 @@ function muRender(res, opts) {
       const m = w.mitigation;
       mit = `<div class="mu-have ${m.count ? 'ok' : 'none'}"><b>${escapeHtml(m.label)} in ${deckWord}: ${m.count}</b>${m.count ? ' &mdash; ' + m.cards.map(c => escapeHtml(c.name)).join(', ') : ''}${m.note ? '<div class="mu-why">' + escapeHtml(m.note) + '</div>' : ''}</div>`;
     }
-    const cmd = w.commanders ? `<div class="mu-group"><div class="mu-group-title">${escapeHtml(w.commanders.title)}</div><div class="mu-cards">${muChips(w.commanders.cards)}</div></div>` : '';
+    const cmd = w.commanders ? `<div class="mu-group mu-cmdr"><div class="mu-group-title">&#9813; Opposing commanders to watch for: ${escapeHtml(w.commanders.title.replace(/^Commanders that /, 'ones that '))}</div><div class="mu-why">If someone leads with one of these, this weakness comes built into their deck. These are decks to watch out for, not cards to add. Click one to research it.</div><div class="mu-cards">${muCommanderChips(w.commanders.cards)}</div></div>` : '';
     parts.push(`<div class="mu-weak ${w.level}"><div class="mu-head"><span class="mu-level">${w.level === 'heavy' ? 'Big exposure' : 'Some exposure'}</span><b>${escapeHtml(w.title)}</b><span class="mu-because">${escapeHtml(w.because)}</span></div>${groups}${mit}${cmd}</div>`);
   });
   parts.push('<h5 class="mu-sub">Strong or weak against, by deck type</h5>');
