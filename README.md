@@ -204,7 +204,8 @@ card database and Scryfall's Oracle Tags.
 
 The **Commander research** link on the Decks page opens `/research`. Pick any
 Commander-legal commander, one you own or one you're thinking of buying, and it
-shows:
+shows (the list is sorted by how popular each commander is as a commander on
+EDHREC, with the same past 2 years / month / week choice the builder has):
 
 - **How people build it:** EDHREC's deck types for that commander, most played
   first.

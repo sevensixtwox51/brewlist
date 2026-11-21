@@ -66,6 +66,11 @@ RESEARCH_BODY = """
     <p class="rs-sub">Any Commander-legal commander, owned or not, most popular first. Pick one to see how people build it, how much of that you own, and what that build is weak to.</p>
     <div class="rs-controls">
       <input type="text" id="rs-search" placeholder="Search by name, e.g. Teysa Karlov" autocomplete="off">
+      <select id="rs-window" aria-label="Popularity window" title="How popular each commander is, counted over this period (the same choice the builder offers)">
+        <option value="2years">Popularity: past 2 years</option>
+        <option value="month">Popularity: past month</option>
+        <option value="week">Popularity: past week</option>
+      </select>
       <select id="rs-scope" aria-label="Which commanders">
         <option value="all">All commanders</option>
         <option value="owned">Ones I own</option>
@@ -91,7 +96,8 @@ __MATCHUPS_JS__
 
 const pickEl = document.getElementById('rs-pick'), resultsEl = document.getElementById('rs-results');
 const detailEl = document.getElementById('rs-detail'), changeBtn = document.getElementById('rs-change');
-const searchEl = document.getElementById('rs-search'), scopeEl = document.getElementById('rs-scope');
+const searchEl = document.getElementById('rs-search'), scopeEl = document.getElementById('rs-scope'), windowEl = document.getElementById('rs-window');
+const WINDOW_LABEL = { '2years': 'past 2 years', month: 'past month', week: 'past week' };
 let searchSeq = 0, selected = null, archetype = null, deckSeq = 0;
 const deckCache = {};
 
@@ -100,13 +106,13 @@ function tileHtml(c) {
   return '<div class="rs-tile" data-name="' + esc(c.name) + '" data-full="' + esc(imgUrl(c.id, 'normal')) + '">'
     + '<img loading="lazy" alt="' + esc(c.name) + '" src="' + imgUrl(c.id, 'normal') + '">'
     + '<div class="nm">' + esc(c.name) + '</div>'
-    + '<div class="meta">' + icons(c.color_identity) + (c.rank ? '<span>#' + fmt(c.rank) + '</span>' : '')
+    + '<div class="meta">' + icons(c.color_identity) + (c.rank ? '<span title="Rank as a commander, ' + WINDOW_LABEL[windowEl.value] + '">#' + fmt(c.rank) + '</span>' : '<span title="Not played as a commander in this period">unranked</span>')
     + '<span class="rs-badge ' + (c.owned ? 'own' : 'no') + '">' + (c.owned ? '&#10003; Owned' : 'Not owned') + '</span></div></div>';
 }
 function runSearch() {
   const mine = ++searchSeq;
   resultsEl.innerHTML = '<div class="rs-loading">Searching&hellip;</div>';
-  fetch('/research/search?q=' + encodeURIComponent(searchEl.value.trim()) + '&scope=' + scopeEl.value).then((r) => r.json()).then((d) => {
+  fetch('/research/search?q=' + encodeURIComponent(searchEl.value.trim()) + '&scope=' + scopeEl.value + '&window=' + windowEl.value).then((r) => r.json()).then((d) => {
     if (mine !== searchSeq) return;
     if (d.error) { resultsEl.innerHTML = '<div class="rs-loading">' + esc(d.error) + '</div>'; return; }
     resultsEl.innerHTML = d.results.length ? d.results.map(tileHtml).join('') : '<div class="rs-loading">No commanders match.</div>';
@@ -115,6 +121,7 @@ function runSearch() {
 let searchTimer = null;
 searchEl.addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(runSearch, 200); });
 scopeEl.addEventListener('change', runSearch);
+windowEl.addEventListener('change', runSearch);
 resultsEl.addEventListener('click', (e) => { const t = e.target.closest('.rs-tile'); if (t) chooseCommander(t.dataset.name); });
 changeBtn.addEventListener('click', () => { selected = null; deckSeq++; detailEl.innerHTML = ''; pickEl.style.display = ''; changeBtn.style.display = 'none'; hideZoom(); window.scrollTo({ top: 0, behavior: 'smooth' }); });
 
@@ -124,7 +131,7 @@ function chooseCommander(name) {
   pickEl.style.display = 'none'; changeBtn.style.display = ''; hideZoom();
   detailEl.innerHTML = '<div class="rs-loading">Looking up ' + esc(name) + '&hellip; (the first look at a commander that isn’t saved yet needs the internet)</div>';
   window.scrollTo({ top: 0 });
-  fetch('/research/commander?name=' + encodeURIComponent(name)).then((r) => r.json()).then((d) => {
+  fetch('/research/commander?name=' + encodeURIComponent(name) + '&window=' + windowEl.value).then((r) => r.json()).then((d) => {
     if (mine !== deckSeq) return;
     if (d.error) { detailEl.innerHTML = '<div class="rs-pick"><p>' + esc(d.error) + '</p></div>'; return; }
     selected = d; archetype = null;
@@ -141,7 +148,7 @@ function renderCommander(d) {
   detailEl.innerHTML =
     '<div class="rs-banner"><img class="big" data-full="' + esc(imgUrl(c.id, 'normal')) + '" alt="' + esc(c.name) + '" src="' + imgUrl(c.id, 'normal') + '">'
     + '<div class="info"><h1>' + esc(c.name) + '</h1>'
-    + '<div class="meta">' + icons(c.color_identity) + '<span>' + esc(c.type_line || '') + '</span>' + (c.rank ? '<span>EDHREC rank #' + fmt(c.rank) + '</span>' : '') + own + '</div>'
+    + '<div class="meta">' + icons(c.color_identity) + '<span>' + esc(c.type_line || '') + '</span>' + (c.rank ? '<span>#' + fmt(c.rank) + ' commander on EDHREC (' + WINDOW_LABEL[windowEl.value] + ')</span>' : '<span>Not ranked as a commander in this period</span>') + own + '</div>'
     + '<div id="rs-buildable"></div>'
     + '<div class="rs-section" style="margin:6px 0 0;"><h2>How people build it</h2><p class="rs-sub">EDHREC’s deck types for this commander, most played first. Pick one.</p>' + archs + '</div></div></div>'
     + '<div id="rs-deck"></div>';

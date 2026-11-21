@@ -12,7 +12,10 @@ real decklist.
 """
 from __future__ import annotations
 
+import os
+
 from brewlist_core import gameplay_data_in_index, normalize_name
+import edhrec_data
 from edhrec_data import commander_data_problem, commander_profile, commander_theme_page
 from matchups import _front, _lookup, _use_best_printings, analyze_matchups
 
@@ -42,14 +45,45 @@ def _commander_rows() -> list[dict]:
     return rows
 
 
-def _card_for(row: dict, owned_ids: dict[str, str]) -> dict:
+WINDOWS = ("2years", "month", "week")  # the same three time windows the builder's popularity sort offers
+_UNRANKED = 10**9
+
+
+def _ranks() -> dict[str, dict[str, int]]:
+    """{window: {front-face normalized name: EDHREC's rank among commanders actually played that way in that window}}.
+    This is how popular a card is AS A COMMANDER (the builder's "popular commander" ranking), not the card's overall
+    popularity. Read from the saved EDHREC rankings and rebuilt only when that file changes."""
+    path = os.path.join(os.path.dirname(os.path.abspath(edhrec_data.__file__)), "data", "edhrec_cache.json")
+    try:
+        stamp = os.path.getmtime(path)
+    except OSError:
+        stamp = None
+    cached = _cache.get("ranks")
+    if cached and cached[0] == stamp:
+        return cached[1]
+    out: dict[str, dict[str, int]] = {w: {} for w in WINDOWS}
+    for window, entry in (edhrec_data._load_cache().get("top") or {}).items():
+        for c in entry.get("cards", []):
+            if window in out and c.get("name") and isinstance(c.get("rank"), int):
+                out[window].setdefault(_front(c["name"]), c["rank"])
+    _cache["ranks"] = (stamp, out)
+    return out
+
+
+def _rank_of(row: dict, window: str) -> int | None:
+    r = _ranks().get(window if window in WINDOWS else "2years", {}).get(_front(row["name"]))
+    return r if r is not None else None
+
+
+def _card_for(row: dict, owned_ids: dict[str, str], window: str = "2years") -> dict:
     front = _front(row["name"])
     return {"name": row["name"], "id": owned_ids.get(front) or row.get("scryfall_id"), "color_identity": row.get("color_identity") or [],
-            "rank": int(row["edhrec_rank"]) if row.get("edhrec_rank") else None, "owned": front in owned_ids}
+            "rank": _rank_of(row, window), "owned": front in owned_ids}
 
 
-def search_commanders(query: str, owned_ids: dict[str, str], limit: int = 24) -> list[dict]:
-    """Commanders whose name contains the query, most popular first. With no query: the most popular overall."""
+def search_commanders(query: str, owned_ids: dict[str, str], limit: int = 24, window: str = "2years") -> list[dict]:
+    """Commanders whose name contains the query, most popular AS A COMMANDER first (in the chosen time window);
+    commanders nobody has played in that window come last. With no query: the most popular overall."""
     q = normalize_name(query or "")
     rows = _commander_rows()
     if q:
@@ -57,14 +91,16 @@ def search_commanders(query: str, owned_ids: dict[str, str], limit: int = 24) ->
         starts = [r for r in rows if normalize_name(r["name"]).startswith(q)]
         has = [r for r in rows if r not in starts and all(w in normalize_name(r["name"]) for w in words)]
         rows = starts + has
-    return [_card_for(r, owned_ids) for r in rows[:limit]]
+    ranks = _ranks().get(window if window in WINDOWS else "2years", {})
+    rows = sorted(rows, key=lambda r: (ranks.get(_front(r["name"]), _UNRANKED), int(r.get("edhrec_rank") or _UNRANKED)))
+    return [_card_for(r, owned_ids, window) for r in rows[:limit]]
 
 
-def commander_summary(name: str, owned_ids: dict[str, str]) -> dict | None:
+def commander_summary(name: str, owned_ids: dict[str, str], window: str = "2years") -> dict | None:
     row = _lookup(gameplay_data_in_index(), name)
     if not row:
         return None
-    card = _card_for(row, owned_ids)
+    card = _card_for(row, owned_ids, window)
     card["type_line"] = row.get("type_line")
     return card
 

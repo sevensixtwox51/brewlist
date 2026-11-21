@@ -5966,7 +5966,8 @@ def commander_research_page():
 def commander_research_search():
     owned_ids = _owned_print_ids()
     scope = request.args.get("scope", "all")
-    results = search_commanders(request.args.get("q", ""), owned_ids, limit=400 if scope != "all" else 24)
+    window = request.args.get("window", "2years")
+    results = search_commanders(request.args.get("q", ""), owned_ids, limit=4000 if scope != "all" else 24, window=window)
     if scope == "owned":
         results = [r for r in results if r["owned"]]
     elif scope == "unowned":
@@ -5985,7 +5986,7 @@ def _cached_commander_score(name: str) -> dict | None:
 @app.route("/research/commander", methods=["GET"])
 def commander_research_commander():
     name = request.args.get("name", "")
-    summary = commander_summary(name, _owned_print_ids())
+    summary = commander_summary(name, _owned_print_ids(), request.args.get("window", "2years"))
     if not summary:
         return jsonify(error="That commander isn't in the card database."), 404
     info = research_archetypes(summary["name"])
