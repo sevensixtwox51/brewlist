@@ -2905,7 +2905,9 @@ function isCommanderEligible(card) {{
   // Same rule as commander_eligible() in brewlist_core.py: a legendary Vehicle, or a legendary Spacecraft that becomes a
   // creature, can lead a deck too (Inspirit, Flagship Vessel).
   const tl = card.type_line || '', text = card.oracle_text || '';
-  if (tl.includes('Legendary') && (tl.includes('Creature') || tl.includes('Vehicle') || (tl.includes('Spacecraft') && text.includes('creature at')))) return true;
+  if (tl.includes('Legendary') && (tl.includes('Creature') || tl.includes('Vehicle')
+      || (tl.includes('Spacecraft') && (text.includes('creature at') || /(^|\\n)\\d+\\+ \\| (Flying|Vigilance|Haste|Trample|Menace|Deathtouch|First strike|Double strike|Lifelink|Hexproof|Reach|Indestructible)/.test(text)))
+      || /isn't on the battlefield, it's an? [^.\\n]*creature/i.test(text))) return true;
   return text.includes('can be your commander');
 }}
 

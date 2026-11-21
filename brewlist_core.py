@@ -108,16 +108,25 @@ def cached_image_version(scryfall_id: str | None) -> str:
     return (_image_version_cache["data"].get(scryfall_id) or {}).get("v", "")
 
 
+_SPACECRAFT_CREATURE_LEVEL_RE = re.compile(r"(?:^|\n)\d+\+ \| (?:Flying|Vigilance|Haste|Trample|Menace|Deathtouch|First strike|Double strike|Lifelink|Hexproof|Reach|Indestructible)")
+_CREATURE_OFF_BATTLEFIELD_RE = re.compile(r"isn't on the battlefield, it's an? [^.\n]*creature", re.I)
+
+
 def commander_eligible(type_line: str | None, oracle_text: str | None) -> bool:
-    """Whether a card can be a Commander (CR 903.3): a legendary creature, a legendary Vehicle, a legendary Spacecraft
-    that becomes a creature (so it has power and toughness; the database has no power/toughness field, but those
-    Spacecraft all say "creature at"), or any card whose own text says it can be your commander (Jace, Multiverse
-    Architect). The one place this rule lives, so the builder, Commander research and Matchups can't disagree."""
+    """Whether a card can be a Commander (CR 903.3): a legendary creature; a legendary Vehicle; a legendary Spacecraft
+    that becomes a creature (so it has power and toughness -- the database has no power/toughness field, so this reads
+    the card text: the Station reminder says "creature at", and a few cards omit it but their top level row starts with a
+    creature keyword like "8+ | Flying"); a legendary card that is a creature card while off the battlefield (Grist, the
+    Hunger Tide); or any card whose own text says it can be your commander (Jace, Multiverse Architect). The one place
+    this rule lives, so the builder, Commander research and Matchups can't disagree. Checked against EDHREC's list of
+    every card ever played as a commander: nothing it ranks is rejected."""
     tl, text = type_line or "", oracle_text or ""
     if "Legendary" in tl:
         if "Creature" in tl or "Vehicle" in tl:
             return True
-        if "Spacecraft" in tl and "creature at" in text:
+        if "Spacecraft" in tl and ("creature at" in text or _SPACECRAFT_CREATURE_LEVEL_RE.search(text)):
+            return True
+        if _CREATURE_OFF_BATTLEFIELD_RE.search(text):
             return True
     return "can be your commander" in text
 
