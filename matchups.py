@@ -78,9 +78,9 @@ _CMDR_PHRASE = {
 _HATE = {
     "dies": [
         ("Removal that doesn't kill", "Exile, bounce and tuck all take a creature away without it dying, so no death trigger fires.",
-         ["Swords to Plowshares", "Path to Exile", "Generous Gift", "Chaos Warp", "Cyclonic Rift", "Settle the Wreckage",
-          "Beast Within", "Oblivion Ring", "Banishing Light", "Anguished Unmaking", "Vanishing Verse", "Unexpectedly Absent"]),
-        ("Dies-becomes-exile effects", "These exile a creature instead of letting it die, which shuts off death triggers even though it never reaches the graveyard.",
+         ["Swords to Plowshares", "Path to Exile", "Chaos Warp", "Cyclonic Rift", "Settle the Wreckage",
+          "Oblivion Ring", "Banishing Light", "Anguished Unmaking", "Vanishing Verse", "Unexpectedly Absent"]),
+        ("Dies-becomes-exile effects", "These exile a creature instead of letting it die, which shuts off death triggers even though it never reaches the graveyard. (Kalitas only exiles nontoken creatures.)",
          ["Rest in Peace", "Leyline of the Void", "Kalitas, Traitor of Ghet", "Dauthi Voidwalker"]),
     ],
     "etb": [
@@ -131,6 +131,11 @@ _WATCH = {
     "graveyard": ("Commanders that exile graveyards", re.compile(r"exile (?:all|each|target) cards? from (?:all |each |a |target |your opponents' )?graveyards?|cards in graveyards? can't|can't (?:cast|play|activate)[^.]*graveyard", re.I)),
     "spells": ("Commanders that tax or stop spells", re.compile(r"(?:opponents|players) (?:can't cast|spells cost)|spells (?:your opponents cast |opponents cast )?cost \{\d\} more|counter target spell", re.I)),
 }
+
+# Groups whose whole point is that the creature does NOT die: a card that says "destroy" must never be listed in
+# them (Beast Within and Generous Gift were, wrongly, until caught). Enforced from the card's own Oracle text.
+_MUST_NOT_DESTROY = {"Removal that doesn't kill"}
+_DESTROY_RE = re.compile(r"\bdestroy\b", re.I)
 
 _cache: dict = {}
 
@@ -350,6 +355,8 @@ def analyze_matchups(cards: list[dict], commander: dict | None, owned_ids: dict[
             mit_out = {"label": mit[0], "count": len(mit[1]), "cards": refs(mit[1]), "note": mit[2]}
         groups = []
         for title, why, hate_names in _HATE[key]:
+            if title in _MUST_NOT_DESTROY:
+                hate_names = [n for n in hate_names if not _DESTROY_RE.search((_lookup(pool, n) or {}).get("oracle_text") or "")]
             ex = _named(pool, hate_names)
             if ex:
                 groups.append({"title": title, "why": why, "examples": ex[:8]})
