@@ -192,8 +192,10 @@ function renderDeck(d) {
   const c = d.commander;
   const miss = d.cards.filter((x) => !x.owned), have = d.cards.filter((x) => x.owned);
   const pctCls = d.owned_pct >= 80 ? 'good' : d.owned_pct >= 50 ? 'ok' : 'bad';
-  const cmdTile = '<div class="stat-tile ' + (c.owned ? 'good' : 'bad') + '"><div class="stat-value">' + (c.owned ? 'Owned' : (c.price != null ? money(c.price) : 'Not owned')) + '</div>'
-    + '<div class="stat-label">The commander</div><div class="stat-sub">' + (c.owned ? 'You have it.' : (c.price != null ? 'Cheapest copy found.' : 'You don’t own it.')) + '</div></div>';
+  // The banner already says whether you own the commander, so this tile only appears when there is something to add:
+  // what it costs to get one.
+  const cmdTile = c.owned ? '' : '<div class="stat-tile"><div class="stat-value">' + (c.price != null ? money(c.price) : '&mdash;') + '</div>'
+    + '<div class="stat-label">To buy the commander</div><div class="stat-sub">' + (c.price != null ? 'Cheapest copy found.' : 'No price found.') + '</div></div>';
   deckEl.innerHTML =
     '<div class="rs-section"><h2>What you own of it</h2><p class="rs-sub">' + esc(d.note) + '</p>'
     + '<div class="stat-tiles">'
