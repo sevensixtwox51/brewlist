@@ -21,6 +21,7 @@ import urllib.error
 import urllib.request
 
 from brewlist_core import PRICE_INDEX_PATH, gameplay_data_in_index, normalize_name, prices_data_in_index
+import edhrec_data
 from tag_synergy import _index as _tag_index
 from turn_clock import _PROTECT_RE, _REANIMATE_RE
 
@@ -223,6 +224,64 @@ def _cheapest(price_data: dict, name: str) -> float | None:
     return min(prices) if prices else None
 
 
+def commander_ranks() -> dict[str, dict[str, int]]:
+    """{window: {front-face normalized name: EDHREC's rank among commanders actually played that way in that window}}
+    for "2years", "month" and "week". How popular a card is AS A COMMANDER (the builder's "popular commander" ranking),
+    not the card's overall popularity. Read from the saved EDHREC rankings, rebuilt only when that file changes."""
+    path = os.path.join(os.path.dirname(os.path.abspath(edhrec_data.__file__)), "data", "edhrec_cache.json")
+    try:
+        stamp = os.path.getmtime(path)
+    except OSError:
+        stamp = None
+    cached = _cache.get("ranks")
+    if cached and cached[0] == stamp:
+        return cached[1]
+    out: dict[str, dict[str, int]] = {w: {} for w in ("2years", "month", "week")}
+    for window, entry in (edhrec_data._load_cache().get("top") or {}).items():
+        for c in entry.get("cards", []):
+            if window in out and c.get("name") and isinstance(c.get("rank"), int):
+                out[window].setdefault(_front(c["name"]), c["rank"])
+    _cache["ranks"] = (stamp, out)
+    return out
+
+
+# Which popular commanders lean on each deck type, read from the commander's own Oracle text. Used to show, under each
+# "strong"/"weak" verdict, real commanders of that kind. (Combo has no reliable text signal, so it gets no list.)
+_ARCH_COMMANDERS = {
+    "Go-wide tokens and aggro": re.compile(r"\bcreates?\b[^.\n]*(?:\b\d+/\d+\b|\bcreature\b)[^.\n]*\btokens?\b|\bpopulate\b|\bamass\b|\bcreature tokens? you control\b", re.I),
+    "Voltron and one big threat": re.compile(r"\bequip(?:ped|ment)\b|\bauras?\b|\battach(?:ed)?\b|\bdouble strike\b", re.I),
+    "Graveyard and reanimator": re.compile(r"from (?:your|a|any) graveyard|graveyard (?:to|onto) the battlefield|\breanimat|\bunearth\b|\bescape\b|\bdredge\b|\bdelve\b|cards? in your graveyard", re.I),
+    "Artifact and enchantment stax": re.compile(r"(?:your opponents?|each opponent|opponents|players|each player|creatures your opponents control) (?:can't|cannot|don't|doesn't)\b|(?:opponents|players)[^.\n]* cast[^.\n]* cost \{\d\} more|can't attack you", re.I),
+    "Control and board wipes": re.compile(r"(?:destroy|exile) all (?:other )?(?:creatures|nonland permanents|permanents)|each creature gets -\d+/-\d+|counter target spell|each (?:player|opponent) sacrifices", re.I),
+}
+
+
+def _popular_commanders(pool: dict, label: str, exclude_front: str, limit: int = 6) -> list[dict]:
+    """The most popular commanders (past 2 years, as commanders) whose text leans on this deck type."""
+    key = ("archcmd", label, id(pool), _cache.get("ranks", (None,))[0])
+    full = _cache.get(key)
+    if full is None:
+        rx = _ARCH_COMMANDERS[label]
+        ranks = commander_ranks()["2years"]
+        seen, rows = set(), []
+        for r in pool.values():
+            tl = r.get("type_line") or ""
+            if not ((("Legendary" in tl and "Creature" in tl)) or "can be your commander" in (r.get("oracle_text") or "")):
+                continue
+            if str((r.get("legalities") or {}).get("commander")).lower() != "legal":
+                continue
+            f = _front(r["name"])
+            rank = ranks.get(f)
+            if rank is None or f in seen or not rx.search(r.get("oracle_text") or ""):
+                continue
+            seen.add(f)
+            rows.append((rank, r))
+        rows.sort(key=lambda t: t[0])
+        full = [r for _, r in rows[:40]]
+        _cache[key] = full
+    return [_card_ref(r) for r in full if _front(r["name"]) != exclude_front][:limit]
+
+
 def _pool() -> dict:
     return gameplay_data_in_index()
 
@@ -394,6 +453,10 @@ def analyze_matchups(cards: list[dict], commander: dict | None, owned_ids: dict[
         if bad: return {"archetype": label, "verdict": "weak", "why": bad_why}
         return {"archetype": label, "verdict": "even", "why": even_why}
 
+    def only(n, noun):
+        """"No spot-removal pieces" / "Only 1 spot-removal piece" / "Only 3 spot-removal pieces"."""
+        return f"No {noun}s" if n == 0 else f"Only {n} {noun}{'s' if n != 1 else ''}"
+
     def names_of(rs, limit=3):
         return ", ".join(r["name"] for r in rs[:limit])
 
@@ -410,24 +473,29 @@ def analyze_matchups(cards: list[dict], commander: dict | None, owned_ids: dict[
                 f"{len(sweepers)} sweeper{'s' if len(sweepers) != 1 else ''} and {len(token_makers)} token makers: some answers, nothing decisive.", sweepers),
         verdict("Voltron and one big threat", n_inter >= 8 or (n_inter >= 6 and len(free_sac) >= 2), n_inter <= 3,
                 f"{n_inter} spot-removal pieces" + (f" and {len(free_sac)} free sacrifice outlets" if free_sac else "") + " to deal with one big threat.",
-                f"Only {n_inter} spot-removal piece{'s' if n_inter != 1 else ''}, so a lone huge threat is hard to stop.",
+                f"{only(n_inter, 'spot-removal piece')}, so a lone huge threat is hard to stop.",
                 f"{n_inter} spot-removal pieces: workable but not a sure answer.", spot_removal),
         verdict("Graveyard and reanimator", len(gy_hate_in_deck) >= 2, len(gy_hate_in_deck) == 0,
                 f"{len(gy_hate_in_deck)} graveyard-hate pieces ({names_of(gy_hate_in_deck)}).",
                 "No graveyard hate, so a reanimator deck gets to do its thing.", f"One graveyard-hate piece ({names_of(gy_hate_in_deck)}).", gy_hate_in_deck),
         verdict("Combo", len(instant_interaction) >= 6, len(instant_interaction) <= 2,
                 f"{len(instant_interaction)} instant-speed answers to interrupt a combo.",
-                f"Only {len(instant_interaction)} instant-speed answer{'s' if len(instant_interaction) != 1 else ''}, so a combo can go off uncontested.",
+                f"{only(len(instant_interaction), 'instant-speed answer')}, so a combo can go off uncontested.",
                 f"{len(instant_interaction)} instant-speed answers: some chance to interrupt.", instant_interaction),
         verdict("Artifact and enchantment stax", len(art_ench_removal) >= 4, len(art_ench_removal) <= 1 and (len(members["artifacts"]) + len(members["enchantments"])) >= 8,
                 f"{len(art_ench_removal)} artifact or enchantment removal pieces to break a lock.",
-                f"Only {len(art_ench_removal)} artifact or enchantment removal piece{'s' if len(art_ench_removal) != 1 else ''} while the deck leans on both.",
+                f"{only(len(art_ench_removal), 'artifact or enchantment removal piece')} while the deck leans on both.",
                 f"{len(art_ench_removal)} artifact or enchantment removal pieces.", art_ench_removal),
         verdict("Control and board wipes", n_protect >= 5, n_protect <= 1 and len(members["tokens"]) + len([r for r in nonland if "Creature" in tl(r)]) >= 20,
                 f"{len(protection)} protection and {len(recursion)} recursion spells to recover from wipes.",
                 "A creature-heavy board with almost no protection or recursion, so one wipe sets it far back.",
                 f"{len(protection)} protection and {len(recursion)} recursion spells.", protection + recursion),
     ]
+
+    # under each verdict that isn't "even", real popular commanders of that kind (what this build tends to beat, or lose to)
+    for st in strengths:
+        if st["verdict"] != "even" and st["archetype"] in _ARCH_COMMANDERS:
+            st["commanders"] = _popular_commanders(pool, st["archetype"], _front(cmd_row["name"]) if cmd_row else "")
 
     cmd_note = None
     if cmd_row:

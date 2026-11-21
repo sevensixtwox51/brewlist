@@ -19,6 +19,10 @@ MATCHUPS_CSS = r"""
 .mu-card { font-size:0.76rem; padding:2px 8px; border-radius:999px; border:1px solid var(--card-border); background:var(--card-bg); cursor:default; }
 .mu-card[data-full]:hover { border-color:var(--accent); color:var(--accent); }
 .mu-card.own { border-color:color-mix(in srgb, var(--owned) 55%, var(--card-border)); background:color-mix(in srgb, var(--owned) 12%, var(--card-bg)); }
+.mu-item { display:flex; flex-direction:column; gap:0; }
+.mu-item .mu-row { border-bottom-left-radius:0; border-bottom-right-radius:0; }
+.mu-row-cmdrs { display:flex; flex-wrap:wrap; gap:6px 10px; align-items:center; padding:6px 8px 7px; border:1px solid var(--card-border); border-top:0; border-radius:0 0 8px 8px; background:var(--bg-elevated); }
+.mu-lead { font-size:0.74rem; color:var(--text-dim); }
 .mu-card.cmdr { border-color:color-mix(in srgb, var(--gold) 55%, var(--card-border)); color:var(--gold); text-decoration:none; cursor:pointer; }
 .mu-card.cmdr:hover { background:color-mix(in srgb, var(--gold) 14%, var(--card-bg)); }
 .mu-cmdr { border-top:1px dashed var(--card-border); padding-top:8px; margin-top:4px; }
@@ -77,9 +81,12 @@ function muRender(res, opts) {
     parts.push(`<div class="mu-weak ${w.level}"><div class="mu-head"><span class="mu-level">${w.level === 'heavy' ? 'Big exposure' : 'Some exposure'}</span><b>${escapeHtml(w.title)}</b><span class="mu-because">${escapeHtml(w.because)}</span></div>${groups}${mit}${cmd}</div>`);
   });
   parts.push('<h5 class="mu-sub">Strong or weak against, by deck type</h5>');
-  parts.push('<div class="mu-arch">' + (res.strengths || []).map(s =>
-    `<div class="mu-row ${s.verdict}"><span class="mu-verdict">${MU_VERDICT[s.verdict]}</span><span class="mu-name">${escapeHtml(s.archetype)}</span><span class="mu-text">${escapeHtml(s.why)}</span></div>`
-  ).join('') + '</div>');
+  parts.push('<div class="mu-arch">' + (res.strengths || []).map(s => {
+    const row = `<div class="mu-row ${s.verdict}"><span class="mu-verdict">${MU_VERDICT[s.verdict]}</span><span class="mu-name">${escapeHtml(s.archetype)}</span><span class="mu-text">${escapeHtml(s.why)}</span></div>`;
+    if (!s.commanders || !s.commanders.length) return row;
+    const lead = s.verdict === 'strong' ? 'Popular commanders like this that this build should handle:' : 'Popular commanders like this that tend to give this build trouble:';
+    return `<div class="mu-item ${s.verdict}">${row}<div class="mu-row-cmdrs"><span class="mu-lead">${lead}</span><span class="mu-cards">${muCommanderChips(s.commanders)}</span></div></div>`;
+  }).join('') + '</div>');
   parts.push(`<p class="hint" style="margin:10px 0 0;">${escapeHtml(res.disclaimer || '')}</p>`);
   return parts.join('');
 }

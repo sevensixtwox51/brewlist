@@ -12,12 +12,9 @@ real decklist.
 """
 from __future__ import annotations
 
-import os
-
 from brewlist_core import gameplay_data_in_index, normalize_name
-import edhrec_data
 from edhrec_data import commander_data_problem, commander_profile, commander_theme_page
-from matchups import _front, _lookup, _use_best_printings, analyze_matchups
+from matchups import _front, _lookup, _use_best_printings, analyze_matchups, commander_ranks
 
 _cache: dict = {}
 
@@ -49,25 +46,7 @@ WINDOWS = ("2years", "month", "week")  # the same three time windows the builder
 _UNRANKED = 10**9
 
 
-def _ranks() -> dict[str, dict[str, int]]:
-    """{window: {front-face normalized name: EDHREC's rank among commanders actually played that way in that window}}.
-    This is how popular a card is AS A COMMANDER (the builder's "popular commander" ranking), not the card's overall
-    popularity. Read from the saved EDHREC rankings and rebuilt only when that file changes."""
-    path = os.path.join(os.path.dirname(os.path.abspath(edhrec_data.__file__)), "data", "edhrec_cache.json")
-    try:
-        stamp = os.path.getmtime(path)
-    except OSError:
-        stamp = None
-    cached = _cache.get("ranks")
-    if cached and cached[0] == stamp:
-        return cached[1]
-    out: dict[str, dict[str, int]] = {w: {} for w in WINDOWS}
-    for window, entry in (edhrec_data._load_cache().get("top") or {}).items():
-        for c in entry.get("cards", []):
-            if window in out and c.get("name") and isinstance(c.get("rank"), int):
-                out[window].setdefault(_front(c["name"]), c["rank"])
-    _cache["ranks"] = (stamp, out)
-    return out
+_ranks = commander_ranks
 
 
 def _rank_of(row: dict, window: str) -> int | None:

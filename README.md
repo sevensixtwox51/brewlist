@@ -116,8 +116,10 @@ tile). A saved brew can be run through the same report a compared deck gets.
   punish each one and whether you already hold an answer, and lists commanders
   that go after it. A deck whose commander needs creatures to die, for
   example, is flagged for exile and bounce removal. It also rates the deck
-  against common deck types. These are rules of thumb from the deck's own
-  cards, not a simulation, and it all works offline
+  against common deck types, naming popular commanders of each kind (ones the
+  build should handle, and ones that tend to give it trouble; click one to
+  research it). These are rules of thumb from the deck's own cards, not a
+  simulation, and it all works offline
 
 ![Analyze Deck: mana simulation, curve, sample hand](screenshots/analyze.png)
 
