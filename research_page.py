@@ -161,7 +161,7 @@ function showBuildable(el, s) {
   if (!s || s.status === 'no-data' || s.pct == null) { el.innerHTML = '<div class="stat-value">&mdash;</div><div class="stat-label">Could be built from what you own</div><div class="stat-sub">Not enough EDHREC data to work it out.</div>'; return; }
   el.className = 'stat-tile ' + (s.pct >= 80 ? 'good' : s.pct >= 50 ? 'ok' : 'bad');
   el.innerHTML = '<div class="stat-value">' + s.pct + '%</div><div class="stat-label">Could be built from what you own</div>'
-    + '<div class="stat-sub">' + s.backed + ' of ' + s.nonland + ' non-land slots filled with cards EDHREC backs for this build, using only cards you own' + (s.filler ? ' (plus ' + s.filler + ' generic filler)' : '') + '.</div>';
+    + '<div class="stat-sub">Even if some popular cards are missing, you own good stand-ins. You could fill ' + s.backed + ' of the ' + s.nonland + ' non-land spots today.</div>';
 }
 function loadBuildable(name, slug) {
   const el = document.getElementById('rs-buildable-tile'), key = name + '|' + slug;
@@ -204,11 +204,11 @@ function renderDeck(d) {
   deckEl.innerHTML =
     '<div class="rs-section"><h2>What you own of it</h2><p class="rs-sub">' + esc(d.note) + '</p>'
     + '<div class="stat-tiles">'
-    + '<div class="stat-tile ' + pctCls + '"><div class="stat-value">' + d.owned_pct + '%</div><div class="stat-label">of the typical list you own</div><div class="stat-sub">' + d.owned_count + ' of ' + d.total_count + ' non-basic cards</div></div>'
+    + '<div class="stat-tile ' + pctCls + '"><div class="stat-value">' + d.owned_pct + '%</div><div class="stat-label">of the popular cards you own</div><div class="stat-sub">You have ' + d.owned_count + ' of the ' + d.total_count + ' cards most people play in this deck.</div></div>'
     + '<div class="stat-tile"><div class="stat-value">' + money(d.missing_cost) + '</div><div class="stat-label">to complete it</div><div class="stat-sub">' + miss.length + ' cards, cheapest copies' + (d.missing_unpriced ? ' (' + d.missing_unpriced + ' have no price)' : '') + '</div></div>'
     + '<div class="stat-tile" id="rs-buildable-tile"><div class="stat-value">&hellip;</div><div class="stat-label">Could be built from what you own</div><div class="stat-sub">Working it out&hellip;</div></div>'
     + cmdTile + '</div>'
-    + '<p class="rs-sub" style="margin:-6px 0 14px;"><b>Why two percentages?</b> “Of the typical list you own” counts how many of the most-played cards you have. “Could be built” asks whether your own cards could fill a whole deck, where good substitutes count, so it is usually higher.</p>'
+    + '<p class="rs-sub" style="margin:-6px 0 14px;"><b>Why two percentages?</b> The first is &ldquo;do I own the famous recipe?&rdquo; The last is &ldquo;can I still make a good deck with what I own?&rdquo; You can miss a lot of the famous cards and still build a good version, so the last one is usually higher.</p>'
     + '<div class="rs-tabs"><button type="button" class="on" data-tab="miss">Missing (' + miss.length + ')</button><button type="button" data-tab="have">You own (' + have.length + ')</button></div>'
     + '<div class="rs-cards" id="rs-cardlist">' + (miss.length ? miss.map((x) => cardTile(x, true)).join('') : '<p class="rs-sub">You own every card in the typical list.</p>') + '</div></div>'
     + '<div class="rs-section"><h2>Weaknesses and strengths of this build</h2><p class="rs-sub">Worked out from the typical list above. Handy if someone keeps beating you with this commander: the pills marked &#10003; are cards you already own that you could add to a deck of yours. Hover any pill to see the card.</p>'
