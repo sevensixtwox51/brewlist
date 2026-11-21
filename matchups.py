@@ -14,9 +14,13 @@ How it works, in three steps:
 """
 from __future__ import annotations
 
+import json
+import os
 import re
+import urllib.error
+import urllib.request
 
-from brewlist_core import gameplay_data_in_index, normalize_name
+from brewlist_core import PRICE_INDEX_PATH, gameplay_data_in_index, normalize_name
 from tag_synergy import _index as _tag_index
 from turn_clock import _PROTECT_RE, _REANIMATE_RE
 
@@ -130,6 +134,77 @@ _WATCH = {
 
 _cache: dict = {}
 
+# ---- which printing's image to show ----
+# The card database keeps one arbitrary printing per card (the first one it saw, often decades old). A card pill
+# shows, in order: the printing you own, else Scryfall's current default printing for the card (looked up once for
+# the whole batch, then kept in data/matchup_prints.json so it works offline afterwards), else the database's own.
+_PRINTS_PATH = os.path.join(os.path.dirname(PRICE_INDEX_PATH), "matchup_prints.json")
+_prints_missed: set[str] = set()  # asked for this session and not found / unreachable: don't ask again
+
+
+def _load_prints() -> dict:
+    try:
+        with open(_PRINTS_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _fetch_default_prints(names: list[str]) -> dict[str, str]:
+    """{normalized front-face name: scryfall id} for Scryfall's default printing of each name. Best effort: any
+    failure (offline, rate limit, bad reply) returns what it has so far."""
+    found: dict[str, str] = {}
+    for i in range(0, len(names), 70):
+        batch = names[i:i + 70]
+        body = json.dumps({"identifiers": [{"name": n} for n in batch]}).encode("utf-8")
+        req = urllib.request.Request("https://api.scryfall.com/cards/collection", data=body, method="POST", headers={
+            "Content-Type": "application/json", "Accept": "application/json", "User-Agent": "brewlist/1.0 (personal use)"})
+        try:
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+            break
+        for card in data.get("data") or []:
+            if card.get("id") and card.get("name"):
+                found[_front(card["name"])] = card["id"]
+    return found
+
+
+def _use_best_printings(result: dict, owned_ids: dict[str, str]) -> None:
+    """Rewrites every {"name", "id"} card reference in the result in place to the best printing."""
+    refs: list[dict] = []
+
+    def walk(x):
+        if isinstance(x, dict):
+            if "name" in x and "id" in x and isinstance(x.get("name"), str):
+                refs.append(x)
+            for v in x.values():
+                walk(v)
+        elif isinstance(x, list):
+            for v in x:
+                walk(v)
+
+    walk(result)
+    prints = _load_prints()
+    wanted = sorted({_front(r["name"]) for r in refs if normalize_name(r["name"]) not in owned_ids and _front(r["name"]) not in owned_ids}
+                    - set(prints) - _prints_missed)
+    if wanted:
+        fetched = _fetch_default_prints(wanted)
+        _prints_missed.update(set(wanted) - set(fetched))
+        if fetched:
+            prints.update(fetched)
+            try:
+                tmp = _PRINTS_PATH + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as f:
+                    json.dump(prints, f)
+                os.replace(tmp, _PRINTS_PATH)
+            except OSError:
+                pass
+    for r in refs:
+        r["id"] = (owned_ids.get(normalize_name(r["name"])) or owned_ids.get(_front(r["name"]))
+                   or prints.get(_front(r["name"])) or r.get("id"))
+
 
 def _pool() -> dict:
     return gameplay_data_in_index()
@@ -186,7 +261,7 @@ def _watch_commanders(pool: dict, key: str, limit: int = 5) -> list[dict]:
     return refs
 
 
-def analyze_matchups(cards: list[dict], commander: dict | None) -> dict:
+def analyze_matchups(cards: list[dict], commander: dict | None, owned_ids: dict[str, str] | None = None) -> dict:
     pool = _pool()
     names = []
     seen = set()
@@ -340,6 +415,8 @@ def analyze_matchups(cards: list[dict], commander: dict | None) -> dict:
         deps = [_CMDR_PHRASE[k] for k, v in cmd_relies.items() if v]
         if deps:
             cmd_note = f"{cmd_row['name']} depends on " + (", ".join(deps[:-1]) + " and " + deps[-1] if len(deps) > 1 else deps[0]) + "."
-    return {"profile": profile, "commander_note": cmd_note, "weaknesses": weaknesses, "strengths": strengths,
-            "cards_checked": len(rows), "cards_in_deck": len(names),
-            "disclaimer": "These are rules of thumb from your deck's own cards, not a simulation and not a prediction about any real table."}
+    result = {"profile": profile, "commander_note": cmd_note, "weaknesses": weaknesses, "strengths": strengths,
+              "cards_checked": len(rows), "cards_in_deck": len(names),
+              "disclaimer": "These are rules of thumb from your deck's own cards, not a simulation and not a prediction about any real table."}
+    _use_best_printings(result, owned_ids or {})
+    return result

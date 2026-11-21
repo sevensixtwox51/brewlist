@@ -6945,7 +6945,14 @@ def builder_matchups():
     if not cards:
         return jsonify(error="Add some cards first.")
     try:
-        return jsonify(analyze_matchups(cards, body.get("commander")))
+        owned_ids: dict[str, str] = {}
+        try:  # the printing of each card you own, so a pill shows your copy and not some old printing
+            for c in owned_collection_gameplay_view(load_collection(COLLECTION_PATH), gameplay_data_in_index()):
+                if c.get("scryfall_id"):
+                    owned_ids.setdefault(normalize_name(c["name"]).split(" // ")[0], c["scryfall_id"])
+        except (OSError, ValueError):
+            owned_ids = {}
+        return jsonify(analyze_matchups(cards, body.get("commander"), owned_ids))
     except Exception:  # noqa: BLE001 -- a nicety panel; never break Analyze over it
         return jsonify(error="Could not work out matchups for this deck.")
 
