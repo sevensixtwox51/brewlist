@@ -25,6 +25,11 @@ MATCHUPS_CSS = r"""
 
 details.mu-weak { border:1px solid var(--card-border); border-left:3px solid var(--gold); border-radius:10px; margin:0 0 8px; background:var(--bg); }
 details.mu-weak.heavy { border-left-color:var(--missing); }
+details.mu-weak.light { border-left-color:var(--card-border); }
+details.mu-weak.light .mu-level { color:var(--text-dim); }
+details.mu-minor { margin:2px 0 10px; }
+details.mu-minor > summary { font-size:0.82rem; }
+details.mu-minor > details.mu-weak { margin-top:6px; }
 details.mu-weak > summary { list-style:none; cursor:pointer; display:flex; flex-wrap:wrap; align-items:baseline; gap:3px 10px; padding:9px 12px 9px 28px; position:relative; }
 details.mu-weak > summary::-webkit-details-marker { display:none; }
 details.mu-weak > summary::before { content:"\25B8"; position:absolute; left:11px; top:9px; color:var(--text-dim); transition:transform .12s; }
@@ -101,7 +106,7 @@ function muExposure(w, deckWord) {
     mit = `<div class="mu-have ${m.count ? 'ok' : 'none'}"><b>${escapeHtml(m.label)} in ${deckWord}: ${m.count}</b>${m.count ? ' &mdash; ' + m.cards.map(c => escapeHtml(c.name)).join(', ') : ''}${m.note ? '<div class="mu-why">' + escapeHtml(m.note) + '</div>' : ''}</div>`;
   }
   const cmd = w.commanders ? `<details class="mu-more"><summary>Opposing commanders that already do this (${w.commanders.cards.length})</summary><div class="mu-why">If someone leads with one of these, this exposure comes built into their deck. They're decks to watch out for, not cards to add. A check means you own that commander; a price is the cheapest copy if you don\u2019t. Click one to research it.</div><div class="mu-cards">${muCommanderChips(w.commanders.cards)}</div></details>` : '';
-  return `<details class="mu-weak ${w.level}"${w.level === 'heavy' ? ' open' : ''}><summary><span class="mu-level">${w.level === 'heavy' ? 'Big exposure' : 'Some exposure'}</span><span class="mu-title">${escapeHtml(w.title)}</span><span class="mu-because">${escapeHtml(w.because)}</span></summary><div class="mu-body">${groups}${mit}${cmd}</div></details>`;
+  return `<details class="mu-weak ${w.level}"${w.level === 'heavy' ? ' open' : ''}><summary><span class="mu-level">${w.level === 'heavy' ? 'Big exposure' : w.level === 'light' ? 'Minor' : 'Some exposure'}</span><span class="mu-title">${escapeHtml(w.title)}</span><span class="mu-because">${escapeHtml(w.because)}</span></summary><div class="mu-body">${groups}${mit}${cmd}</div></details>`;
 }
 // A deck type this build beats, or loses to, with the popular commanders of that kind tucked behind a toggle.
 function muType(s) {
@@ -124,7 +129,9 @@ function muRender(res, opts) {
   let weak = '';
   if (exposures.length) {
     weak += `<p class="mu-key"><span class="mu-card own" style="cursor:default">&#10003; Name</span> you own a copy &nbsp;&middot;&nbsp; <span class="mu-card buy" style="cursor:default">Name <i>$1.00</i></span> you don’t (cheapest copy found) &nbsp;&middot;&nbsp; the cards below are ones an opponent could use against this deck, or that you could add to answer them. Click a heading to open it.</p>`;
-    weak += exposures.map(w => muExposure(w, deckWord)).join('');
+    const main = exposures.filter(w => w.level !== 'light'), minor = exposures.filter(w => w.level === 'light');
+    weak += main.map(w => muExposure(w, deckWord)).join('');
+    if (minor.length) weak += `<details class="mu-more mu-minor"><summary>Smaller exposures (${minor.length}): ${minor.map(w => escapeHtml(w.title)).join(', ')}</summary><div class="mu-why">The deck leans on these a little, not a lot. Open one to see what would hurt it.</div>${minor.map(w => muExposure(w, deckWord)).join('')}</details>`;
   } else {
     weak += '<p class="mu-empty">Nothing in this deck leans hard enough on one thing for a specific hate card to stand out.</p>';
   }

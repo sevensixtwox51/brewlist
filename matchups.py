@@ -419,8 +419,15 @@ def analyze_matchups(cards: list[dict], commander: dict | None, owned_ids: dict[
     weaknesses = []
     for dep in profile:
         key = dep["key"]
-        if dep["level"] == "light" or key not in _HATE:
+        if key not in _HATE:
             continue
+        if dep["level"] == "light":
+            # Not a big exposure, but don't hide it: a deck with 8 enter-trigger cards still loses real value to Torpor
+            # Orb or Elesh Norn. Shown under "smaller exposures", only when it's close to the moderate cutoff.
+            # (Spells and lands are left out: nearly every deck has both, so they'd always appear.)
+            floor = max(3, round(0.6 * _DEPS[key][2]))
+            if key in ("spells", "lands") or dep["count"] < floor:
+                continue
         mit = mitigation.get(key)
         mit_out = None
         if mit and mit[0] != "Recursion that avoids the graveyard":
@@ -448,7 +455,7 @@ def analyze_matchups(cards: list[dict], commander: dict | None, owned_ids: dict[
             if watch:
                 entry["commanders"] = {"title": _WATCH[key][0], "cards": watch}
         weaknesses.append(entry)
-    weaknesses.sort(key=lambda w: (w["level"] != "heavy", -next(p["count"] for p in profile if p["key"] == w["key"])))
+    weaknesses.sort(key=lambda w: ({"heavy": 0, "moderate": 1, "light": 2}[w["level"]], -next(p["count"] for p in profile if p["key"] == w["key"])))
 
     # ---- strong against / weak against: archetype rules of thumb from the deck's own counts ----
     def verdict(label, good, bad, good_why, bad_why, even_why):
