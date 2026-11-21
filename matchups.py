@@ -425,7 +425,7 @@ def analyze_matchups(cards: list[dict], commander: dict | None, owned_ids: dict[
             # Not a big exposure, but don't hide it: a deck with 8 enter-trigger cards still loses real value to Torpor
             # Orb or Elesh Norn. Shown under "smaller exposures", only when it's close to the moderate cutoff.
             # (Spells and lands are left out: nearly every deck has both, so they'd always appear.)
-            floor = max(3, round(0.6 * _DEPS[key][2]))
+            floor = max(4, round(0.5 * _DEPS[key][2]))
             if key in ("spells", "lands") or dep["count"] < floor:
                 continue
         mit = mitigation.get(key)
