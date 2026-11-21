@@ -149,22 +149,27 @@ function renderCommander(d) {
     '<div class="rs-banner"><img class="big" data-full="' + esc(imgUrl(c.id, 'normal')) + '" alt="' + esc(c.name) + '" src="' + imgUrl(c.id, 'normal') + '">'
     + '<div class="info"><h1>' + esc(c.name) + '</h1>'
     + '<div class="meta">' + icons(c.color_identity) + '<span>' + esc(c.type_line || '') + '</span>' + (c.rank ? '<span>#' + fmt(c.rank) + ' commander on EDHREC (' + WINDOW_LABEL[windowEl.value] + ')</span>' : '<span>Not ranked as a commander in this period</span>') + own + '</div>'
-    + '<div id="rs-buildable"></div>'
     + '<div class="rs-section" style="margin:6px 0 0;"><h2>How people build it</h2><p class="rs-sub">EDHREC’s deck types for this commander, most played first. Pick one.</p>' + archs + '</div></div></div>'
     + '<div id="rs-deck"></div>';
   detailEl.querySelectorAll('.rs-arch').forEach((b) => b.addEventListener('click', () => chooseArchetype(b.dataset.slug)));
-  loadBuildable(c.name, d.score);
 }
-function loadBuildable(name, cached) {
-  const el = document.getElementById('rs-buildable');
-  const show = (s) => {
-    if (!el || !s || s.status === 'no-data' || s.pct == null) { if (el) el.innerHTML = ''; return; }
-    el.innerHTML = '<div class="stat-tiles" style="margin:0 0 6px;"><div class="stat-tile ' + (s.pct >= 80 ? 'good' : s.pct >= 50 ? 'ok' : 'bad') + '"><div class="stat-value">' + s.pct + '%</div>'
-      + '<div class="stat-label">Buildable from your collection</div><div class="stat-sub">How much of the ' + esc(s.deck_type || 'standard') + ' build your own cards could fill with EDHREC-backed picks, not necessarily the same cards as the typical list below (the percentage on the commander tiles in the builder).</div></div></div>';
-  };
-  if (cached) { show(cached); return; }
-  if (el) el.innerHTML = '<p class="rs-sub">Working out what your collection could build&hellip;</p>';
-  fetch('/research/buildable?name=' + encodeURIComponent(name)).then((r) => r.json()).then((d) => { if (selected && selected.commander.name === name) show(d.score); }).catch(() => { if (el) el.innerHTML = ''; });
+// "Could you build a version from what you own?" for the chosen deck type: the builder's commander score. Different
+// from the owned-% of the typical list: this fills a whole deck, so good substitutes count.
+const buildCache = {};
+function showBuildable(el, s) {
+  if (!el) return;
+  if (!s || s.status === 'no-data' || s.pct == null) { el.innerHTML = '<div class="stat-value">&mdash;</div><div class="stat-label">Could be built from what you own</div><div class="stat-sub">Not enough EDHREC data to work it out.</div>'; return; }
+  el.className = 'stat-tile ' + (s.pct >= 80 ? 'good' : s.pct >= 50 ? 'ok' : 'bad');
+  el.innerHTML = '<div class="stat-value">' + s.pct + '%</div><div class="stat-label">Could be built from what you own</div>'
+    + '<div class="stat-sub">' + s.backed + ' of ' + s.nonland + ' non-land slots filled with cards EDHREC backs for this build, using only cards you own' + (s.filler ? ' (plus ' + s.filler + ' generic filler)' : '') + '.</div>';
+}
+function loadBuildable(name, slug) {
+  const el = document.getElementById('rs-buildable-tile'), key = name + '|' + slug;
+  if (buildCache[key]) { showBuildable(el, buildCache[key]); return; }
+  fetch('/research/buildable?name=' + encodeURIComponent(name) + '&theme=' + encodeURIComponent(slug)).then((r) => r.json()).then((d) => {
+    buildCache[key] = d.score;
+    if (archetype === slug && selected && selected.commander.name === name) showBuildable(document.getElementById('rs-buildable-tile'), d.score);
+  }).catch(() => { const e = document.getElementById('rs-buildable-tile'); if (e) e.innerHTML = '<div class="stat-value">&mdash;</div><div class="stat-label">Could be built from what you own</div>'; });
 }
 
 // ---------- one archetype ----------
@@ -201,11 +206,14 @@ function renderDeck(d) {
     + '<div class="stat-tiles">'
     + '<div class="stat-tile ' + pctCls + '"><div class="stat-value">' + d.owned_pct + '%</div><div class="stat-label">of the typical list you own</div><div class="stat-sub">' + d.owned_count + ' of ' + d.total_count + ' non-basic cards</div></div>'
     + '<div class="stat-tile"><div class="stat-value">' + money(d.missing_cost) + '</div><div class="stat-label">to complete it</div><div class="stat-sub">' + miss.length + ' cards, cheapest copies' + (d.missing_unpriced ? ' (' + d.missing_unpriced + ' have no price)' : '') + '</div></div>'
+    + '<div class="stat-tile" id="rs-buildable-tile"><div class="stat-value">&hellip;</div><div class="stat-label">Could be built from what you own</div><div class="stat-sub">Working it out&hellip;</div></div>'
     + cmdTile + '</div>'
+    + '<p class="rs-sub" style="margin:-6px 0 14px;"><b>Why two percentages?</b> “Of the typical list you own” counts how many of the most-played cards you have. “Could be built” asks whether your own cards could fill a whole deck, where good substitutes count, so it is usually higher.</p>'
     + '<div class="rs-tabs"><button type="button" class="on" data-tab="miss">Missing (' + miss.length + ')</button><button type="button" data-tab="have">You own (' + have.length + ')</button></div>'
     + '<div class="rs-cards" id="rs-cardlist">' + (miss.length ? miss.map((x) => cardTile(x, true)).join('') : '<p class="rs-sub">You own every card in the typical list.</p>') + '</div></div>'
     + '<div class="rs-section"><h2>Weaknesses and strengths of this build</h2><p class="rs-sub">Worked out from the typical list above. Handy if someone keeps beating you with this commander: the pills marked &#10003; are cards you already own that you could add to a deck of yours. Hover any pill to see the card.</p>'
     + '<div id="rs-matchups">' + muRender(d.matchups, { deckWord: 'this build', intro: 'Cards that punish this build.' }) + '</div></div>';
+  loadBuildable(selected.commander.name, archetype);
   deckEl.querySelectorAll('.rs-tabs button').forEach((b) => b.addEventListener('click', () => {
     deckEl.querySelectorAll('.rs-tabs button').forEach((x) => x.classList.toggle('on', x === b));
     const showMiss = b.dataset.tab === 'miss';

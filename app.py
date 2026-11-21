@@ -6006,13 +6006,19 @@ def commander_research_deck():
     return jsonify(result)
 
 
+_RESEARCH_SCORES: dict = {}
+
+
 @app.route("/research/buildable", methods=["GET"])
 def commander_research_buildable():
-    """The same percentage the builder shows on commander tiles, for any commander (cached for ones already scored)."""
+    """How much of a deck of the chosen type your own collection could fill with EDHREC-backed picks: the builder's
+    commander score, worked out for that deck type (kept in memory per commander, type and collection)."""
     name = request.args.get("name", "")
-    cached = _cached_commander_score(name)
-    if cached:
-        return jsonify(score=cached)
+    theme = request.args.get("theme") or None
+    stamp = os.path.getmtime(COLLECTION_PATH) if os.path.isfile(COLLECTION_PATH) else None
+    key = (normalize_name(name), theme, stamp)
+    if key in _RESEARCH_SCORES:
+        return jsonify(score=_RESEARCH_SCORES[key])
     gameplay = gameplay_data_in_index()
     row = gameplay.get(normalize_name(name)) or gameplay.get(normalize_name(name).split(" // ")[0])
     if not row or not os.path.isfile(COLLECTION_PATH):
@@ -6020,7 +6026,9 @@ def commander_research_buildable():
     try:
         owned_view = owned_collection_gameplay_view(load_collection(COLLECTION_PATH), gameplay)
         cmd_row = {**row, "category": "Creatures"}
-        return jsonify(score=_score_commander(cmd_row, owned_view, gameplay))
+        score = _score_commander(cmd_row, owned_view, gameplay, theme)
+        _RESEARCH_SCORES[key] = score
+        return jsonify(score=score)
     except Exception:  # noqa: BLE001 -- a nicety tile; never break the page over it
         return jsonify(score={"status": "no-data"})
 
@@ -6256,17 +6264,17 @@ def _pending_commanders(rows: list[dict], owned_view: list[dict], gameplay: dict
     return pending, names
 
 
-def _score_commander(row: dict, owned_view: list[dict], gameplay: dict) -> dict:
+def _score_commander(row: dict, owned_view: list[dict], gameplay: dict, theme: str | None = None) -> dict:
     """Builds the commander's deck from your collection and reports how much of it is real: {pct, backed, filler, empty,
     nonland, deck_type} -- or {"status": "no-data"} when EDHREC has nothing on the commander."""
     cmd = {k: row.get(k) for k in ("name", "scryfall_id", "type_line", "color_identity", "cmc", "mana_cost", "category", "set_code", "collector_number")}
     cmd["quantity"] = 1
     wip = brew_to_card_entries({"commander": cmd, "cards": []})
-    mix = auto_deck_mix(row["name"], gameplay.get(normalize_name(row["name"])))["mix"]
+    mix = auto_deck_mix(row["name"], gameplay.get(normalize_name(row["name"])), theme)["mix"]
     meta: dict = {}
     sug = suggest_builder_cards(
         wip, owned_view, "commander", None, target_size=100, commander_color_identity=row.get("color_identity"),
-        max_suggestions=100, mix_targets=mix, gameplay=gameplay, meta_out=meta,
+        max_suggestions=100, mix_targets=mix, gameplay=gameplay, meta_out=meta, edhrec_theme=theme,
     )
     nonland_slots = max(1, 99 - mix["Lands"])
     owned_nonland = [s for s in sug if s["role"] != "Lands" and s.get("owned", True)]
