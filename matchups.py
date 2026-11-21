@@ -120,7 +120,7 @@ _HATE = {
     ],
     "lands": [
         ("Nonbasic land punishers", "Blank or destroy nonbasic lands, which hurts the colors they provide.",
-         ["Blood Moon", "Back to Basics", "Wasteland", "Strip Mine", "Ruination", "Price of Progress"]),
+         ["Blood Moon", "Magus of the Moon", "Back to Basics", "Wasteland", "Tectonic Edge", "Field of Ruin", "Ruination", "Price of Progress"]),
     ],
 }
 
@@ -138,6 +138,9 @@ _WATCH = {
 # them (Beast Within and Generous Gift were, wrongly, until caught). Enforced from the card's own Oracle text.
 _MUST_NOT_DESTROY = {"Removal that doesn't kill"}
 _DESTROY_RE = re.compile(r"\bdestroy\b", re.I)
+# Groups that claim to hit one kind of thing: every card listed must say so in its own text. (Strip Mine, which destroys
+# ANY land, was listed as a "nonbasic land punisher" until caught.)
+_MUST_MENTION = {"Nonbasic land punishers": re.compile(r"nonbasic", re.I)}
 
 _cache: dict = {}
 
@@ -426,6 +429,8 @@ def analyze_matchups(cards: list[dict], commander: dict | None, owned_ids: dict[
         for title, why, hate_names in _HATE[key]:
             if title in _MUST_NOT_DESTROY:
                 hate_names = [n for n in hate_names if not _DESTROY_RE.search((_lookup(pool, n) or {}).get("oracle_text") or "")]
+            if title in _MUST_MENTION:
+                hate_names = [n for n in hate_names if _MUST_MENTION[title].search((_lookup(pool, n) or {}).get("oracle_text") or "")]
             ex = _named(pool, hate_names)
             if ex:
                 groups.append({"title": title, "why": why, "examples": ex[:8]})
