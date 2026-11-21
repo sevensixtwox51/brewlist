@@ -59,7 +59,8 @@ _DEPS = {
 _CMDR_DEPS = {
     "dies": re.compile(r"\bdies\b|dying|put into a graveyard from the battlefield", re.I),
     "etb": re.compile(r"(?:whenever|when)[^.\n]*\benters\b", re.I),
-    "tokens": re.compile(r"\btokens?\b", re.I),
+    # creature tokens only: a commander that makes Treasure or Clue doesn't depend on a wide board
+    "tokens": re.compile(r"\bcreature tokens?\b|\b\d+/\d+\b[^.\n]*\btokens?\b|\btokens? you control\b", re.I),
     "graveyard": re.compile(r"graveyard", re.I),
     "artifacts": re.compile(r"\bartifacts?\b", re.I),
     "enchantments": re.compile(r"\benchantments?\b", re.I),

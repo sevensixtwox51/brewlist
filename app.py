@@ -90,6 +90,9 @@ from edhrec_data import bulk_commander_popularity, commander_data_problem, comma
 from edhrec_data import refresh_all as edhrec_refresh_all
 from collection_insights import get_insights, cards_for, missing_for
 from matchups import analyze_matchups
+from matchups_ui import MATCHUPS_CSS, MATCHUPS_JS
+from research import archetypes as research_archetypes, commander_summary, search_commanders, typical_deck
+from research_page import render_research_page
 from collection_page import render_collection_page
 from edhrec_data import top_list_status as edhrec_top_list_status
 
@@ -979,6 +982,7 @@ def render_decks_page(error: str | None = None, prefill_url: str = "") -> str:
   <div style="margin-bottom:16px;">
     <a href="/" class="btn ghost small">&#9881; Collection &amp; Settings</a>
     <a href="/collection" class="btn ghost small" title="Where your collection is deep and where it is thin">&#128202; Collection insights</a>
+    <a href="/research" class="btn ghost small" title="Pick any commander: how it's built, what you own of it, and what it's weak to">&#128269; Commander research</a>
   </div>
   <form class="compare-panel" id="compare-form">
     <div class="compare-title">
@@ -1800,30 +1804,6 @@ body.gallery .builder-tile.in-deck::after { content:"\2713"; position:absolute; 
 .color-pip img { width:24px; height:24px; display:block; }
 .color-pip:hover { opacity:0.85; transform:translateY(-1px); }
 .color-pip.on { opacity:1; border-color:var(--accent); box-shadow:0 0 10px -2px var(--accent); }
-.mu-sub { margin:14px 0 8px; font-size:0.74rem; text-transform:uppercase; letter-spacing:0.07em; color:var(--text-dim); }
-.mu-weak { border:1px solid var(--card-border); border-left:3px solid var(--gold); border-radius:10px; padding:10px 12px 8px; margin-bottom:10px; background:var(--bg-elevated); }
-.mu-weak.heavy { border-left-color:var(--missing); }
-.mu-head { display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 10px; margin-bottom:6px; }
-.mu-level { font-size:0.66rem; text-transform:uppercase; letter-spacing:0.07em; padding:1px 7px; border-radius:999px; border:1px solid currentColor; color:var(--gold); }
-.mu-weak.heavy .mu-level { color:var(--missing); }
-.mu-because { font-size:0.78rem; color:var(--text-dim); }
-.mu-group { margin:0 0 8px; }
-.mu-group-title { font-size:0.82rem; font-weight:600; }
-.mu-why { font-size:0.76rem; color:var(--text-dim); line-height:1.35; margin:1px 0 4px; }
-.mu-cards { display:flex; flex-wrap:wrap; gap:5px; }
-.mu-card { font-size:0.76rem; padding:2px 8px; border-radius:999px; border:1px solid var(--card-border); background:var(--card-bg); cursor:default; }
-.mu-card[data-full]:hover { border-color:var(--accent); color:var(--accent); }
-.mu-card.own { border-color:color-mix(in srgb, var(--owned) 55%, var(--card-border)); background:color-mix(in srgb, var(--owned) 12%, var(--card-bg)); }
-.mu-card.buy { border-style:dashed; color:var(--text-dim); }
-.mu-card.buy i { font-style:normal; color:var(--gold); margin-left:3px; }
-.mu-have { font-size:0.8rem; margin:2px 0 8px; padding:6px 9px; border-radius:8px; background:color-mix(in srgb, var(--owned) 10%, transparent); }
-.mu-have.none { background:color-mix(in srgb, var(--missing) 12%, transparent); }
-.mu-arch { display:flex; flex-direction:column; gap:5px; }
-.mu-row { display:grid; grid-template-columns:104px minmax(130px, 190px) 1fr; gap:4px 10px; align-items:baseline; font-size:0.8rem; padding:5px 8px; border-radius:8px; border:1px solid var(--card-border); }
-.mu-verdict { font-size:0.66rem; text-transform:uppercase; letter-spacing:0.06em; font-weight:700; }
-.mu-row.strong .mu-verdict { color:var(--owned); } .mu-row.weak .mu-verdict { color:var(--missing); } .mu-row.even .mu-verdict { color:var(--gold); }
-.mu-name { font-weight:600; } .mu-text { color:var(--text-dim); }
-@media (max-width: 700px) { .mu-row { grid-template-columns:1fr; } }
 .btn.busy { pointer-events:none; opacity:.85; }
 .btn.busy::before { content:''; display:inline-block; width:0.8em; height:0.8em; margin-right:7px; vertical-align:-1px; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; animation:btn-spin .7s linear infinite; }
 @keyframes btn-spin { to { transform:rotate(360deg); } }
@@ -2040,7 +2020,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" type="image/svg+xml" href="https://svgs.scryfall.io/card-symbols/PW.svg">
 <title>Brewlist -- Deck Builder</title>
-<style>{PAGE_STYLE}{BUILDER_STYLE}</style>
+<style>{PAGE_STYLE}{BUILDER_STYLE}{MATCHUPS_CSS}</style>
 </head>
 <body>
 <img id="hover-preview" alt="">
@@ -5632,44 +5612,12 @@ function loadMatchups(requestSeq) {{
     }})
     .catch(() => analyzeStage(requestSeq, 'matchups', false));
 }}
-const MU_VERDICT = {{ strong: 'Strong against', weak: 'Weak against', even: 'Even' }};
-// marks: show whether you own each card (a check) or what the cheapest copy costs. Off for opposing commanders,
-// where owning a copy isn't the point.
-function muChips(cards, marks) {{
-  return (cards || []).map(c => {{
-    const full = c.id ? scryfallImg(c.id, 'normal') : '';
-    let cls = 'mu-card', label = escapeHtml(c.name);
-    if (marks) {{
-      if (c.owned) {{ cls += ' own'; label = '&#10003; ' + label; }}
-      else {{ cls += ' buy'; if (c.price != null) label += ' <i>$' + Number(c.price).toFixed(2) + '</i>'; }}
-    }}
-    return `<span class="${{cls}}"${{full ? ` data-full="${{full}}"` : ''}}>${{label}}</span>`;
-  }}).join('');
-}}
+function muImg(id) {{ return scryfallImg(id, 'normal'); }}
+{MATCHUPS_JS}
+// The builder's own wrapper: draw the panel into the Analyze modal.
 function renderMatchups(res) {{
-  const weak = res.weaknesses || [];
-  const parts = [];
-  if (res.commander_note) parts.push(`<p class="hint" style="margin:0 0 10px;"><b>${{escapeHtml(res.commander_note)}}</b> Anything that stops that stops the commander too.</p>`);
-  parts.push('<h5 class="mu-sub">Weak to</h5>');
-  if (weak.length) parts.push('<p class="hint" style="margin:0 0 8px;">Cards an opponent could use against this deck. <span class="mu-card own" style="cursor:default">&#10003; Name</span> means you own a copy; a dashed pill with a price is one you don\u2019t own (cheapest copy found), useful if you want to run it yourself.</p>');
-  if (!weak.length) parts.push('<p class="hint" style="margin:0 0 10px;">Nothing in this deck leans hard enough on one thing for a specific hate card to stand out.</p>');
-  weak.forEach(w => {{
-    const groups = w.groups.map(g => `<div class="mu-group"><div class="mu-group-title">${{escapeHtml(g.title)}}</div><div class="mu-why">${{escapeHtml(g.why)}}</div><div class="mu-cards">${{muChips(g.examples, true)}}</div></div>`).join('');
-    let mit = '';
-    if (w.mitigation) {{
-      const m = w.mitigation;
-      mit = `<div class="mu-have ${{m.count ? 'ok' : 'none'}}"><b>${{escapeHtml(m.label)}} in your deck: ${{m.count}}</b>${{m.count ? ' &mdash; ' + m.cards.map(c => escapeHtml(c.name)).join(', ') : ''}}${{m.note ? '<div class="mu-why">' + escapeHtml(m.note) + '</div>' : ''}}</div>`;
-    }}
-    const cmd = w.commanders ? `<div class="mu-group"><div class="mu-group-title">${{escapeHtml(w.commanders.title)}}</div><div class="mu-cards">${{muChips(w.commanders.cards)}}</div></div>` : '';
-    parts.push(`<div class="mu-weak ${{w.level}}"><div class="mu-head"><span class="mu-level">${{w.level === 'heavy' ? 'Big exposure' : 'Some exposure'}}</span><b>${{escapeHtml(w.title)}}</b><span class="mu-because">${{escapeHtml(w.because)}}</span></div>${{groups}}${{mit}}${{cmd}}</div>`);
-  }});
-  parts.push('<h5 class="mu-sub">Strong or weak against, by deck type</h5>');
-  parts.push('<div class="mu-arch">' + (res.strengths || []).map(s =>
-    `<div class="mu-row ${{s.verdict}}"><span class="mu-verdict">${{MU_VERDICT[s.verdict]}}</span><span class="mu-name">${{escapeHtml(s.archetype)}}</span><span class="mu-text">${{escapeHtml(s.why)}}</span></div>`
-  ).join('') + '</div>');
-  parts.push(`<p class="hint" style="margin:10px 0 0;">${{escapeHtml(res.disclaimer || '')}}</p>`);
   document.getElementById('matchups-heading').style.display = '';
-  document.getElementById('matchups').innerHTML = parts.join('');
+  document.getElementById('matchups').innerHTML = muRender(res, {{ intro: 'Cards an opponent could use against this deck.' }});
   prefetchMatchupImages();
 }}
 // The first hover of a card that isn't saved locally yet has to wait for it to download, and moving off in the
@@ -6005,6 +5953,69 @@ def collection_insights_page():
     """Where the collection is deep and where it's thin -- its own page, separate from the builder and compare."""
     header_html, footer_html = _page_chrome("Where your collection is deep, and where it's thin.", None)
     return render_collection_page(PAGE_STYLE, header_html, footer_html, SHUTDOWN_BTN_SCRIPT + SERVER_WATCH_SCRIPT)
+
+
+@app.route("/research", methods=["GET"])
+def commander_research_page():
+    """Research any commander: how people build it, how much of that you own, and what that build is weak to."""
+    header_html, footer_html = _page_chrome("Research any commander: how it's built, what you own of it, and what it's weak to.", None)
+    return render_research_page(PAGE_STYLE, header_html, footer_html, SHUTDOWN_BTN_SCRIPT + SERVER_WATCH_SCRIPT)
+
+
+@app.route("/research/search", methods=["GET"])
+def commander_research_search():
+    owned_ids = _owned_print_ids()
+    scope = request.args.get("scope", "all")
+    results = search_commanders(request.args.get("q", ""), owned_ids, limit=400 if scope != "all" else 24)
+    if scope == "owned":
+        results = [r for r in results if r["owned"]]
+    elif scope == "unowned":
+        results = [r for r in results if not r["owned"]]
+    return jsonify(results=results[:24], has_collection=bool(owned_ids))
+
+
+def _cached_commander_score(name: str) -> dict | None:
+    try:
+        with open(COMMANDER_SCORES_PATH, encoding="utf-8") as f:
+            return ((json.load(f) or {}).get("scores") or {}).get(normalize_name(name))
+    except (OSError, ValueError):
+        return None
+
+
+@app.route("/research/commander", methods=["GET"])
+def commander_research_commander():
+    name = request.args.get("name", "")
+    summary = commander_summary(name, _owned_print_ids())
+    if not summary:
+        return jsonify(error="That commander isn't in the card database."), 404
+    info = research_archetypes(summary["name"])
+    return jsonify(commander=summary, archetypes=info["archetypes"], total=info["total"], problem=info["problem"],
+                   score=_cached_commander_score(summary["name"]))
+
+
+@app.route("/research/deck", methods=["GET"])
+def commander_research_deck():
+    result = typical_deck(request.args.get("name", ""), request.args.get("theme", ""), _owned_print_ids())
+    return jsonify(result)
+
+
+@app.route("/research/buildable", methods=["GET"])
+def commander_research_buildable():
+    """The same percentage the builder shows on commander tiles, for any commander (cached for ones already scored)."""
+    name = request.args.get("name", "")
+    cached = _cached_commander_score(name)
+    if cached:
+        return jsonify(score=cached)
+    gameplay = gameplay_data_in_index()
+    row = gameplay.get(normalize_name(name)) or gameplay.get(normalize_name(name).split(" // ")[0])
+    if not row or not os.path.isfile(COLLECTION_PATH):
+        return jsonify(score={"status": "no-data"})
+    try:
+        owned_view = owned_collection_gameplay_view(load_collection(COLLECTION_PATH), gameplay)
+        cmd_row = {**row, "category": "Creatures"}
+        return jsonify(score=_score_commander(cmd_row, owned_view, gameplay))
+    except Exception:  # noqa: BLE001 -- a nicety tile; never break the page over it
+        return jsonify(score={"status": "no-data"})
 
 
 @app.route("/collection/data", methods=["GET"])
@@ -6948,6 +6959,21 @@ def builder_resilience():
     return jsonify(result or {"error": "Not enough cards to simulate yet."})
 
 
+def _owned_print_ids() -> dict[str, str]:
+    """{front-face normalized name: the Scryfall id of the printing you own} for every card in the collection; {} when
+    there is no collection yet. Also tells the Matchups and Commander research pages which cards you own."""
+    out: dict[str, str] = {}
+    if not os.path.isfile(COLLECTION_PATH):
+        return out
+    try:
+        for c in owned_collection_gameplay_view(load_collection(COLLECTION_PATH), gameplay_data_in_index()):
+            if c.get("scryfall_id"):
+                out.setdefault(normalize_name(c["name"]).split(" // ")[0], c["scryfall_id"])
+    except (OSError, ValueError):
+        return {}
+    return out
+
+
 @app.route("/builder/matchups", methods=["POST"])
 def builder_matchups():
     """What the deck is weak to and strong against, for the Analyze modal (see matchups.py). Local data only."""
@@ -6956,14 +6982,7 @@ def builder_matchups():
     if not cards:
         return jsonify(error="Add some cards first.")
     try:
-        owned_ids: dict[str, str] = {}
-        try:  # the printing of each card you own, so a pill shows your copy and not some old printing
-            for c in owned_collection_gameplay_view(load_collection(COLLECTION_PATH), gameplay_data_in_index()):
-                if c.get("scryfall_id"):
-                    owned_ids.setdefault(normalize_name(c["name"]).split(" // ")[0], c["scryfall_id"])
-        except (OSError, ValueError):
-            owned_ids = {}
-        return jsonify(analyze_matchups(cards, body.get("commander"), owned_ids))
+        return jsonify(analyze_matchups(cards, body.get("commander"), _owned_print_ids()))
     except Exception:  # noqa: BLE001 -- a nicety panel; never break Analyze over it
         return jsonify(error="Could not work out matchups for this deck.")
 

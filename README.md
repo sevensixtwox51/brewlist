@@ -200,6 +200,27 @@ card database and Scryfall's Oracle Tags.
 - **Types, curve and tribes:** card types, the mana curve, and your deepest
   creature types
 
+## Commander research
+
+The **Commander research** link on the Decks page opens `/research`. Pick any
+Commander-legal commander, one you own or one you're thinking of buying, and it
+shows:
+
+- **How people build it:** EDHREC's deck types for that commander, most played
+  first.
+- **What you own of the typical build:** for the deck type you pick, the cards
+  most often included (a consensus of what people play, not one real decklist),
+  how many you own, the cheapest price of each one you're missing and the total
+  to complete it, whether you own the commander, and the same "buildable from
+  your collection" percentage the builder shows on commander tiles.
+- **What that build is weak to:** the Matchups analysis from Analyze, run on
+  the typical list, with a check mark on the answers you already own. Handy
+  when someone keeps beating you with a commander and you want to know what to
+  add to one of your decks, or when you're deciding what to build.
+
+A commander's EDHREC data is fetched the first time you look at it and saved,
+so only the first look at one that isn't saved yet needs the internet.
+
 ## Requirements
 
 - Python 3.9+ (developed and tested on 3.14)
@@ -429,6 +450,8 @@ appreciated!
 | `index_worker.py` | Runs Refresh Database in its own process so the web app stays responsive while it downloads and rebuilds. |
 | `collection_insights.py`, `collection_page.py` | The Collection insights page: the calculations (read-only, nothing from the builder or compare code) and its page. |
 | `matchups.py` | The Matchups section of Analyze: what a deck is weak to and strong against (read-only, local data). |
+| `research.py`, `research_page.py` | The Commander research page: the calculations (read-only, built on EDHREC's saved data and the Matchups analysis) and its page. |
+| `matchups_ui.py` | The Matchups panel's look and HTML, shared by Analyze and Commander research. |
 | `app.py` | Flask web app, including the Deck Builder (`/builder`). Its `static/` folder holds the mana-symbol SVGs. |
 | `brewlist_cli.py` | Terminal CLI (interactive menu or scriptable flags). |
 | `Brewlist.command` | macOS double-click launcher for the web app. |
