@@ -5659,6 +5659,22 @@ function renderMatchups(res) {{
   parts.push(`<p class="hint" style="margin:10px 0 0;">${{escapeHtml(res.disclaimer || '')}}</p>`);
   document.getElementById('matchups-heading').style.display = '';
   document.getElementById('matchups').innerHTML = parts.join('');
+  prefetchMatchupImages();
+}}
+// The first hover of a card that isn't saved locally yet has to wait for it to download, and moving off in the
+// meantime shows nothing. So fetch the panel's card images quietly in the background (a few at a time) as soon as
+// it opens; after that every pill previews instantly, and they stay cached for next time.
+function prefetchMatchupImages() {{
+  const urls = [...new Set([...document.querySelectorAll('#matchups .mu-card[data-full]')].map(c => c.dataset.full))].filter(u => !hoverSeen.has(u));
+  let next = 0;
+  const worker = () => {{
+    if (next >= urls.length || !document.getElementById('analyze-modal').classList.contains('show')) return;
+    const u = urls[next++], img = new Image();
+    img.onload = () => {{ hoverSeen.add(u); worker(); }};
+    img.onerror = worker;
+    img.src = u;
+  }};
+  for (let i = 0; i < 3; i++) worker();
 }}
 // Hover any named card in the Matchups panel to see it (same preview as the deck list).
 (() => {{
