@@ -20,7 +20,7 @@ import re
 import urllib.error
 import urllib.request
 
-from brewlist_core import PRICE_INDEX_PATH, gameplay_data_in_index, normalize_name
+from brewlist_core import PRICE_INDEX_PATH, gameplay_data_in_index, normalize_name, prices_data_in_index
 from tag_synergy import _index as _tag_index
 from turn_clock import _PROTECT_RE, _REANIMATE_RE
 
@@ -206,9 +206,20 @@ def _use_best_printings(result: dict, owned_ids: dict[str, str]) -> None:
                 os.replace(tmp, _PRINTS_PATH)
             except OSError:
                 pass
+    price_data = prices_data_in_index() if any(_front(r["name"]) not in owned_ids for r in refs) else {}
     for r in refs:
-        r["id"] = (owned_ids.get(normalize_name(r["name"])) or owned_ids.get(_front(r["name"]))
-                   or prints.get(_front(r["name"])) or r.get("id"))
+        owned_id = owned_ids.get(normalize_name(r["name"])) or owned_ids.get(_front(r["name"]))
+        r["id"] = owned_id or prints.get(_front(r["name"])) or r.get("id")
+        r["owned"] = bool(owned_id)
+        if not owned_id:
+            r["price"] = _cheapest(price_data, r["name"])
+
+
+def _cheapest(price_data: dict, name: str) -> float | None:
+    """Cheapest nonfoil USD price found (Cardmarket is EUR and never mixed in), or None."""
+    entry = price_data.get(normalize_name(name)) or price_data.get(_front(name)) or {}
+    prices = [o[1] for o in (entry.get("nonfoil") or []) if o and o[0] != "CM" and o[1] is not None]
+    return min(prices) if prices else None
 
 
 def _pool() -> dict:

@@ -1813,6 +1813,9 @@ body.gallery .builder-tile.in-deck::after { content:"\2713"; position:absolute; 
 .mu-cards { display:flex; flex-wrap:wrap; gap:5px; }
 .mu-card { font-size:0.76rem; padding:2px 8px; border-radius:999px; border:1px solid var(--card-border); background:var(--card-bg); cursor:default; }
 .mu-card[data-full]:hover { border-color:var(--accent); color:var(--accent); }
+.mu-card.own { border-color:color-mix(in srgb, var(--owned) 55%, var(--card-border)); background:color-mix(in srgb, var(--owned) 12%, var(--card-bg)); }
+.mu-card.buy { border-style:dashed; color:var(--text-dim); }
+.mu-card.buy i { font-style:normal; color:var(--gold); margin-left:3px; }
 .mu-have { font-size:0.8rem; margin:2px 0 8px; padding:6px 9px; border-radius:8px; background:color-mix(in srgb, var(--owned) 10%, transparent); }
 .mu-have.none { background:color-mix(in srgb, var(--missing) 12%, transparent); }
 .mu-arch { display:flex; flex-direction:column; gap:5px; }
@@ -5630,10 +5633,17 @@ function loadMatchups(requestSeq) {{
     .catch(() => analyzeStage(requestSeq, 'matchups', false));
 }}
 const MU_VERDICT = {{ strong: 'Strong against', weak: 'Weak against', even: 'Even' }};
-function muChips(cards) {{
+// marks: show whether you own each card (a check) or what the cheapest copy costs. Off for opposing commanders,
+// where owning a copy isn't the point.
+function muChips(cards, marks) {{
   return (cards || []).map(c => {{
     const full = c.id ? scryfallImg(c.id, 'normal') : '';
-    return `<span class="mu-card"${{full ? ` data-full="${{full}}"` : ''}}>${{escapeHtml(c.name)}}</span>`;
+    let cls = 'mu-card', label = escapeHtml(c.name);
+    if (marks) {{
+      if (c.owned) {{ cls += ' own'; label = '&#10003; ' + label; }}
+      else {{ cls += ' buy'; if (c.price != null) label += ' <i>$' + Number(c.price).toFixed(2) + '</i>'; }}
+    }}
+    return `<span class="${{cls}}"${{full ? ` data-full="${{full}}"` : ''}}>${{label}}</span>`;
   }}).join('');
 }}
 function renderMatchups(res) {{
@@ -5641,9 +5651,10 @@ function renderMatchups(res) {{
   const parts = [];
   if (res.commander_note) parts.push(`<p class="hint" style="margin:0 0 10px;"><b>${{escapeHtml(res.commander_note)}}</b> Anything that stops that stops the commander too.</p>`);
   parts.push('<h5 class="mu-sub">Weak to</h5>');
+  if (weak.length) parts.push('<p class="hint" style="margin:0 0 8px;">Cards an opponent could use against this deck. <span class="mu-card own" style="cursor:default">&#10003; Name</span> means you own a copy; a dashed pill with a price is one you don\u2019t own (cheapest copy found), useful if you want to run it yourself.</p>');
   if (!weak.length) parts.push('<p class="hint" style="margin:0 0 10px;">Nothing in this deck leans hard enough on one thing for a specific hate card to stand out.</p>');
   weak.forEach(w => {{
-    const groups = w.groups.map(g => `<div class="mu-group"><div class="mu-group-title">${{escapeHtml(g.title)}}</div><div class="mu-why">${{escapeHtml(g.why)}}</div><div class="mu-cards">${{muChips(g.examples)}}</div></div>`).join('');
+    const groups = w.groups.map(g => `<div class="mu-group"><div class="mu-group-title">${{escapeHtml(g.title)}}</div><div class="mu-why">${{escapeHtml(g.why)}}</div><div class="mu-cards">${{muChips(g.examples, true)}}</div></div>`).join('');
     let mit = '';
     if (w.mitigation) {{
       const m = w.mitigation;
