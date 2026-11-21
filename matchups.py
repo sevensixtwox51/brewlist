@@ -1,0 +1,345 @@
+"""What a finished deck is weak to and strong against -- Analyze's "Matchups" section.
+
+Read-only and local: it uses the deck's own cards, the card database (Oracle text, types, EDHREC rank) and Oracle Tags,
+and makes no network calls, so it works offline. Nothing imports this module except the one route in app.py.
+
+How it works, in three steps:
+  1. Profile: what the deck depends on, counted from its own cards (death triggers, enter triggers, tokens, the
+     graveyard, artifacts, enchantments, equipment/auras, instants and sorceries, nonbasic lands), plus what the
+     COMMANDER itself depends on, read from its Oracle text (Teysa Karlov only works while creatures die).
+  2. Weak to: for each dependency that matters, the kinds of cards that punish it, with named examples (a curated
+     list of well-known cards, each checked against the card database) and what the deck already holds in answer.
+  3. Strong against: rule-of-thumb reads per archetype from the deck's own counts. Not a simulation and not a
+     prediction about any real table; the page says so.
+"""
+from __future__ import annotations
+
+import re
+
+from brewlist_core import gameplay_data_in_index, normalize_name
+from tag_synergy import _index as _tag_index
+from turn_clock import _PROTECT_RE, _REANIMATE_RE
+
+# ---- what each dependency looks like in a card's Oracle text ------------------------------------------------
+_DIES_RE = re.compile(r"(?:whenever|when)[^.\n]*\bdies\b|\bdies,|is put into a graveyard from the battlefield", re.I)
+_ETB_RE = re.compile(r"(?:whenever|when)[^.\n]*\benters\b", re.I)
+_SAC_RE = re.compile(r"\bsacrifice\b", re.I)
+_TOKEN_RE = re.compile(r"\bcreates?\b[^.\n]*\btokens?\b", re.I)
+_UTILITY_TOKEN_RE = re.compile(r"\b(?:treasure|clue|food|blood|map|gold|powerstone|junk|shard|lander|incubator)\b", re.I)
+
+
+def _makes_creature_tokens(text: str) -> bool:
+    """Creature tokens (the thing a sweeper punishes), not Treasure, Clue, Food and the like, which nearly every deck makes."""
+    for sentence in re.split(r"(?<=[.\n])", text):
+        if _TOKEN_RE.search(sentence) and (not _UTILITY_TOKEN_RE.search(sentence) or re.search(r"creature token|\d+/\d+", sentence, re.I)):
+            return True
+    return False
+_GRAVE_RE = re.compile(r"from your graveyard|in your graveyard|from a graveyard|your graveyard|\b(?:flashback|escape|unearth|embalm|eternalize|disturb|dredge|delve|jump-start)\b", re.I)
+_CAST_RE = re.compile(r"whenever you cast", re.I)
+_FREE_SAC_RE = re.compile(r"(?:^|\n)sacrifice (?:a|an|another|two|three|x)\b[^:\n{]*:", re.I)
+
+# Dependencies: key -> (label, heavy at this many cards, moderate at this many). Counted over the deck's unique nonland cards.
+_DEPS = {
+    "dies": ("Death triggers", 9, 5),
+    "etb": ("Enter-the-battlefield triggers", 15, 10),
+    "tokens": ("Tokens and a wide board", 9, 6),
+    "graveyard": ("The graveyard", 10, 7),
+    "artifacts": ("Artifacts", 18, 13),
+    "enchantments": ("Enchantments", 12, 8),
+    "voltron": ("Equipment and Auras", 8, 5),
+    "spells": ("Instants and sorceries", 0, 0),  # share-based, below
+    "lands": ("Nonbasic lands", 24, 99),  # never above "moderate" (see below): nearly every deck runs many
+}
+
+# What the commander's own text says it depends on.
+_CMDR_DEPS = {
+    "dies": re.compile(r"\bdies\b|dying|put into a graveyard from the battlefield", re.I),
+    "etb": re.compile(r"(?:whenever|when)[^.\n]*\benters\b", re.I),
+    "tokens": re.compile(r"\btokens?\b", re.I),
+    "graveyard": re.compile(r"graveyard", re.I),
+    "artifacts": re.compile(r"\bartifacts?\b", re.I),
+    "enchantments": re.compile(r"\benchantments?\b", re.I),
+    "voltron": re.compile(r"\b(?:equipped|enchanted|equipment|auras?)\b", re.I),
+    "spells": re.compile(r"whenever you cast|instant or sorcery", re.I),
+    "lands": re.compile(r"\blandfall\b|land enters|play(?:ed)? a land|lands? you control", re.I),
+}
+_CMDR_PHRASE = {
+    "dies": "creatures dying", "etb": "things entering the battlefield", "tokens": "tokens", "graveyard": "the graveyard",
+    "artifacts": "artifacts", "enchantments": "enchantments", "voltron": "equipment and Auras",
+    "spells": "casting spells", "lands": "lands",
+}
+
+# ---- curated disruption: weakness id -> list of (title, why, [card names]) -----------------------------------
+# Only well-known cards; names are checked against the card database at load time and dropped if missing.
+_HATE = {
+    "dies": [
+        ("Removal that doesn't kill", "Exile, bounce and tuck all take a creature away without it dying, so no death trigger fires.",
+         ["Swords to Plowshares", "Path to Exile", "Generous Gift", "Chaos Warp", "Cyclonic Rift", "Settle the Wreckage",
+          "Beast Within", "Oblivion Ring", "Banishing Light", "Anguished Unmaking", "Vanishing Verse", "Unexpectedly Absent"]),
+        ("Dies-becomes-exile effects", "These exile a creature instead of letting it die, which shuts off death triggers even though it never reaches the graveyard.",
+         ["Rest in Peace", "Leyline of the Void", "Kalitas, Traitor of Ghet", "Dauthi Voidwalker"]),
+    ],
+    "etb": [
+        ("Trigger shutoffs", "Creatures entering no longer trigger abilities, which blanks enter-the-battlefield value.",
+         ["Torpor Orb", "Hushbringer", "Elesh Norn, Mother of Machines", "Doorkeeper Thrull", "Tocatli Honor Guard", "Strict Proctor"]),
+    ],
+    "tokens": [
+        ("Board wipes", "A single sweeper clears a wide board of tokens and small creatures.",
+         ["Wrath of God", "Damnation", "Toxic Deluge", "Blasphemous Act", "Austere Command", "Farewell", "Crux of Fate", "Massacre Girl"]),
+    ],
+    "graveyard": [
+        ("Graveyard hate", "Exiles or locks the graveyard, which cuts off recursion, flashback and graveyard payoffs.",
+         ["Rest in Peace", "Bojuka Bog", "Tormod's Crypt", "Relic of Progenitus", "Scavenger Grounds", "Leyline of the Void",
+          "Dauthi Voidwalker", "Soul-Guide Lantern", "Cremate", "Deathrite Shaman"]),
+    ],
+    "artifacts": [
+        ("Artifact hate", "Turns off or destroys artifacts, including their activated abilities.",
+         ["Collector Ouphe", "Stony Silence", "Null Rod", "Bane of Progress", "Vandalblast", "Farewell", "Kataki, War's Wage",
+          "Reclamation Sage", "Thrashing Brontodon", "Manglehorn"]),
+    ],
+    "enchantments": [
+        ("Enchantment removal", "Destroys or exiles enchantments, and some of it hits artifacts as well.",
+         ["Bane of Progress", "Reclamation Sage", "Aura Shards", "Disenchant", "Return to Nature", "Farewell", "Thrashing Brontodon"]),
+    ],
+    "voltron": [
+        ("Single-target removal", "A voltron plan puts everything on one creature, so one removal spell undoes the investment.",
+         ["Swords to Plowshares", "Path to Exile", "Chaos Warp", "Generous Gift", "Beast Within", "Pongify", "Rapid Hybridization"]),
+        ("Attack deterrents", "Taxes or ambushes that make attacking with the one big creature costly.",
+         ["Settle the Wreckage", "Propaganda", "Ghostly Prison", "Maze of Ith", "Archangel of Tithes"]),
+    ],
+    "spells": [
+        ("Spell taxes and counters", "Makes each instant and sorcery cost more or stops it outright.",
+         ["Rule of Law", "Eidolon of the Great Revel", "Drannith Magistrate", "Grand Abolisher", "Deafening Silence", "Trinisphere",
+          "Counterspell", "Swan Song", "Force of Will", "Mana Drain"]),
+    ],
+    "lands": [
+        ("Nonbasic land punishers", "Blank or destroy nonbasic lands, which hurts the colors they provide.",
+         ["Blood Moon", "Back to Basics", "Wasteland", "Strip Mine", "Ruination", "Price of Progress"]),
+    ],
+}
+
+# Commanders that go after a dependency, found by scanning legal commanders' Oracle text (tight patterns only).
+_WATCH = {
+    "dies": ("Commanders that stop creatures dying",
+             re.compile(r"(?:if|whenever) (?:a|an|another|any) (?:nontoken )?(?:creature|card)[^.]{0,50}would (?:die|be put into [^.]{0,30}graveyard)[^.]*\bexile\b[^.]*instead", re.I)),
+    "etb": ("Commanders that stop enter triggers", re.compile(r"entering(?: the battlefield)? (?:doesn't|don't) cause", re.I)),
+    "tokens": ("Commanders that sweep the board", re.compile(r"(?:destroy|exile) all (?:other )?creatures|each creature gets -\d+/-\d+|damage to each creature", re.I)),
+    "graveyard": ("Commanders that exile graveyards", re.compile(r"exile (?:all|each|target) cards? from (?:all |each |a |target |your opponents' )?graveyards?|cards in graveyards? can't|can't (?:cast|play|activate)[^.]*graveyard", re.I)),
+    "spells": ("Commanders that tax or stop spells", re.compile(r"(?:opponents|players) (?:can't cast|spells cost)|spells (?:your opponents cast |opponents cast )?cost \{\d\} more|counter target spell", re.I)),
+}
+
+_cache: dict = {}
+
+
+def _pool() -> dict:
+    return gameplay_data_in_index()
+
+
+def _front(name: str) -> str:
+    return normalize_name(name).split(" // ")[0]
+
+
+def _lookup(pool: dict, name: str) -> dict | None:
+    return pool.get(normalize_name(name)) or pool.get(_front(name))
+
+
+def _tag_labels_for(name: str) -> set[str]:
+    ix = _tag_index()
+    ids = ix["cards"].get(normalize_name(name)) or ix["cards"].get(_front(name)) or ()
+    return {ix["tags"].get(t, "") for t in ids}
+
+
+def _card_ref(row: dict) -> dict:
+    return {"name": row["name"], "id": row.get("scryfall_id")}
+
+
+def _named(pool: dict, names: list[str]) -> list[dict]:
+    """The curated names that actually exist in the card database, most played first."""
+    rows = [r for r in (_lookup(pool, n) for n in names) if r]
+    rows.sort(key=lambda r: int(r.get("edhrec_rank") or 10**9))
+    return [_card_ref(r) for r in rows]
+
+
+def _watch_commanders(pool: dict, key: str, limit: int = 5) -> list[dict]:
+    cached = _cache.get(("watch", key, id(pool)))
+    if cached is not None:
+        return cached
+    label_rx = _WATCH[key][1]
+    out = []
+    for r in pool.values():
+        tl = r.get("type_line") or ""
+        if not ((("Legendary" in tl and "Creature" in tl)) or "can be your commander" in (r.get("oracle_text") or "")):
+            continue
+        if str((r.get("legalities") or {}).get("commander")).lower() != "legal":
+            continue
+        if label_rx.search(r.get("oracle_text") or ""):
+            out.append(r)
+    out.sort(key=lambda r: int(r.get("edhrec_rank") or 10**9))
+    uniq, seen_front = [], set()
+    for r in out:  # a double-faced commander is in the database under "A // B" and as "A"
+        f = _front(r["name"])
+        if f not in seen_front:
+            seen_front.add(f)
+            uniq.append(r)
+    refs = [_card_ref(r) for r in uniq[:limit]]
+    _cache[("watch", key, id(pool))] = refs
+    return refs
+
+
+def analyze_matchups(cards: list[dict], commander: dict | None) -> dict:
+    pool = _pool()
+    names = []
+    seen = set()
+    for c in cards or []:
+        n = (c.get("name") or "").strip()
+        if n and normalize_name(n) not in seen:
+            seen.add(normalize_name(n))
+            names.append(n)
+    rows = [r for r in (_lookup(pool, n) for n in names) if r]
+    cmd_row = _lookup(pool, (commander or {}).get("name") or "") if commander else None
+    nonland = [r for r in rows if "Land" not in (r.get("type_line") or "")]
+    lands = [r for r in rows if "Land" in (r.get("type_line") or "")]
+    n_nonland = max(1, len(nonland))
+
+    def text(r): return r.get("oracle_text") or ""
+    def tl(r): return r.get("type_line") or ""
+
+    members = {
+        "dies": [r for r in nonland if _DIES_RE.search(text(r))],
+        "etb": [r for r in nonland if _ETB_RE.search(text(r))],
+        "tokens": [r for r in nonland if _makes_creature_tokens(text(r))],
+        "graveyard": [r for r in nonland if _GRAVE_RE.search(text(r))],
+        "artifacts": [r for r in nonland if "Artifact" in tl(r) and "Equipment" not in tl(r)],
+        "enchantments": [r for r in nonland if "Enchantment" in tl(r) and "Aura" not in tl(r)],
+        "voltron": [r for r in nonland if "Equipment" in tl(r) or "Aura" in tl(r)],
+        "spells": [r for r in nonland if re.search(r"Instant|Sorcery", tl(r))],
+        "lands": [r for r in lands if "Basic" not in tl(r)],
+    }
+    sacrifice = [r for r in nonland if _SAC_RE.search(text(r))]
+
+    cmd_text = text(cmd_row) if cmd_row else ""
+    cmd_relies = {k: bool(cmd_text and rx.search(cmd_text)) for k, rx in _CMDR_DEPS.items()}
+
+    profile = []
+    for key, (label, heavy, moderate) in _DEPS.items():
+        count = len(members[key])
+        if key == "spells":
+            payoffs = len([r for r in nonland if _CAST_RE.search(text(r)) or re.search(r"instant or sorcery", text(r), re.I)])
+            share = count / n_nonland
+            count = max(count, payoffs)
+            level = "heavy" if (payoffs >= 6 or share >= 0.5) else ("moderate" if (payoffs >= 3 or share >= 0.4) else "light")
+        else:
+            level = "heavy" if count >= heavy else ("moderate" if count >= moderate else "light")
+        if key == "lands" and level == "heavy":
+            level = "moderate"
+        if cmd_relies.get(key) and level != "heavy":
+            level = "heavy" if key in ("dies", "etb", "tokens", "graveyard") else "moderate"
+        profile.append({"key": key, "label": label, "count": count, "level": level, "commander": cmd_relies.get(key, False)})
+
+    # ---- what the deck already holds in answer ----
+    free_sac = [r for r in nonland if _FREE_SAC_RE.search(text(r))] + [r for r in nonland if "free sacrifice outlet" in _tag_labels_for(r["name"])]
+    free_sac = list({r["name"]: r for r in free_sac}.values())
+    protection = [r for r in nonland if "Instant" in tl(r) and _PROTECT_RE.search(text(r).lower()) and "you control" in text(r).lower()]
+    recursion = [r for r in nonland if "Creature" not in tl(r) and _REANIMATE_RE.search(text(r).lower())]
+    counters = [r for r in nonland if "counterspell" in _tag_labels_for(r["name"])]
+    gy_hate_in_deck = [r for r in nonland if re.search(r"exile (?:all|target|each) cards? from (?:a |target |all |each )?graveyards?|cards in graveyards? can't|exile [^.]*graveyard", text(r), re.I) and "Creature" not in tl(r)]
+    sweepers = [r for r in nonland if "sweeper" in _tag_labels_for(r["name"]) or "sweeper-one-sided" in _tag_labels_for(r["name"])]
+    exile_removal = [r for r in nonland if "removal-exile" in _tag_labels_for(r["name"])]
+    art_ench_removal = [r for r in nonland if _tag_labels_for(r["name"]) & {"removal-artifact", "removal-enchantment"}]
+    spot_removal = [r for r in nonland if _tag_labels_for(r["name"]) & {"removal-exile", "removal-creature", "removal-toughness", "removal-sacrifice", "removal-bounce", "removal-tuck", "removal-nonland", "removal-permanent"}]
+    instant_interaction = [r for r in spot_removal + counters if "Instant" in tl(r) or "Flash" in text(r)]
+    token_makers = members["tokens"]
+
+    def refs(rs, limit=6): return [_card_ref(r) for r in rs[:limit]]
+
+    mitigation = {
+        "dies": ("Free sacrifice outlets", free_sac,
+                 "A free outlet lets you sacrifice in response to exile or bounce, turning it back into a death."),
+        "tokens": ("Protection and recursion", protection + recursion,
+                   "Protection spells save the board from a wipe and reanimation brings it back."),
+        "artifacts": ("Protection spells", protection, ""),
+        "enchantments": ("Protection spells", protection, ""),
+        "voltron": ("Protection spells", protection, "Hexproof or indestructible in response beats single-target removal."),
+        "spells": ("Counterspells", counters, "Counters can answer a tax piece or the spell that stops you."),
+        "graveyard": ("Recursion that avoids the graveyard", [], ""),
+    }
+
+    weaknesses = []
+    for dep in profile:
+        key = dep["key"]
+        if dep["level"] == "light" or key not in _HATE:
+            continue
+        mit = mitigation.get(key)
+        mit_out = None
+        if mit and mit[0] != "Recursion that avoids the graveyard":
+            mit_out = {"label": mit[0], "count": len(mit[1]), "cards": refs(mit[1]), "note": mit[2]}
+        groups = []
+        for title, why, hate_names in _HATE[key]:
+            ex = _named(pool, hate_names)
+            if ex:
+                groups.append({"title": title, "why": why, "examples": ex[:8]})
+        if not groups:
+            continue
+        reason_bits = []
+        if dep["count"]:
+            reason_bits.append(f"{dep['count']} card{'s' if dep['count'] != 1 else ''} in the deck")
+        if dep["commander"]:
+            reason_bits.append(f"your commander ({cmd_row['name']}) relies on {_CMDR_PHRASE[key]}")
+        entry = {"key": key, "title": dep["label"], "level": dep["level"], "because": "; ".join(reason_bits),
+                 "groups": groups, "mitigation": mit_out}
+        if key in _WATCH:
+            watch = _watch_commanders(pool, key)
+            if watch:
+                entry["commanders"] = {"title": _WATCH[key][0], "cards": watch}
+        weaknesses.append(entry)
+    weaknesses.sort(key=lambda w: (w["level"] != "heavy", -next(p["count"] for p in profile if p["key"] == w["key"])))
+
+    # ---- strong against / weak against: archetype rules of thumb from the deck's own counts ----
+    def verdict(label, good, bad, good_why, bad_why, even_why):
+        if good: return {"archetype": label, "verdict": "strong", "why": good_why}
+        if bad: return {"archetype": label, "verdict": "weak", "why": bad_why}
+        return {"archetype": label, "verdict": "even", "why": even_why}
+
+    def names_of(rs, limit=3):
+        return ", ".join(r["name"] for r in rs[:limit])
+
+    def verdict(label, strong, weak, strong_why, weak_why, even_why, cards=()):
+        v = "strong" if strong else ("weak" if weak else "even")
+        return {"archetype": label, "verdict": v, "why": strong_why if strong else (weak_why if weak else even_why), "cards": refs(list(cards), 4)}
+
+    n_inter = len(spot_removal)
+    n_protect = len(protection) + len(recursion)
+    strengths = [
+        verdict("Go-wide tokens and aggro", len(sweepers) >= 3 or (len(sweepers) >= 2 and len(token_makers) >= 8), len(sweepers) == 0 and len(token_makers) < 3,
+                f"{len(sweepers)} sweepers ({names_of(sweepers)}) and {len(token_makers)} token makers to blunt a wide board.",
+                "No sweepers and few token makers, so a wide board can overrun it.",
+                f"{len(sweepers)} sweeper{'s' if len(sweepers) != 1 else ''} and {len(token_makers)} token makers: some answers, nothing decisive.", sweepers),
+        verdict("Voltron and one big threat", n_inter >= 8 or (n_inter >= 6 and len(free_sac) >= 2), n_inter <= 3,
+                f"{n_inter} spot-removal pieces" + (f" and {len(free_sac)} free sacrifice outlets" if free_sac else "") + " to deal with one big threat.",
+                f"Only {n_inter} spot-removal piece{'s' if n_inter != 1 else ''}, so a lone huge threat is hard to stop.",
+                f"{n_inter} spot-removal pieces: workable but not a sure answer.", spot_removal),
+        verdict("Graveyard and reanimator", len(gy_hate_in_deck) >= 2, len(gy_hate_in_deck) == 0,
+                f"{len(gy_hate_in_deck)} graveyard-hate pieces ({names_of(gy_hate_in_deck)}).",
+                "No graveyard hate, so a reanimator deck gets to do its thing.", f"One graveyard-hate piece ({names_of(gy_hate_in_deck)}).", gy_hate_in_deck),
+        verdict("Combo", len(instant_interaction) >= 6, len(instant_interaction) <= 2,
+                f"{len(instant_interaction)} instant-speed answers to interrupt a combo.",
+                f"Only {len(instant_interaction)} instant-speed answer{'s' if len(instant_interaction) != 1 else ''}, so a combo can go off uncontested.",
+                f"{len(instant_interaction)} instant-speed answers: some chance to interrupt.", instant_interaction),
+        verdict("Artifact and enchantment stax", len(art_ench_removal) >= 4, len(art_ench_removal) <= 1 and (len(members["artifacts"]) + len(members["enchantments"])) >= 8,
+                f"{len(art_ench_removal)} artifact or enchantment removal pieces to break a lock.",
+                f"Only {len(art_ench_removal)} artifact or enchantment removal piece{'s' if len(art_ench_removal) != 1 else ''} while the deck leans on both.",
+                f"{len(art_ench_removal)} artifact or enchantment removal pieces.", art_ench_removal),
+        verdict("Control and board wipes", n_protect >= 5, n_protect <= 1 and len(members["tokens"]) + len([r for r in nonland if "Creature" in tl(r)]) >= 20,
+                f"{len(protection)} protection and {len(recursion)} recursion spells to recover from wipes.",
+                "A creature-heavy board with almost no protection or recursion, so one wipe sets it far back.",
+                f"{len(protection)} protection and {len(recursion)} recursion spells.", protection + recursion),
+    ]
+
+    cmd_note = None
+    if cmd_row:
+        deps = [_CMDR_PHRASE[k] for k, v in cmd_relies.items() if v]
+        if deps:
+            cmd_note = f"{cmd_row['name']} depends on " + (", ".join(deps[:-1]) + " and " + deps[-1] if len(deps) > 1 else deps[0]) + "."
+    return {"profile": profile, "commander_note": cmd_note, "weaknesses": weaknesses, "strengths": strengths,
+            "cards_checked": len(rows), "cards_in_deck": len(names),
+            "disclaimer": "These are rules of thumb from your deck's own cards, not a simulation and not a prediction about any real table."}

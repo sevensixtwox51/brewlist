@@ -89,6 +89,7 @@ import tag_synergy
 from edhrec_data import bulk_commander_popularity, commander_data_problem, commander_profile, commander_theme_page
 from edhrec_data import refresh_all as edhrec_refresh_all
 from collection_insights import get_insights, cards_for, missing_for
+from matchups import analyze_matchups
 from collection_page import render_collection_page
 from edhrec_data import top_list_status as edhrec_top_list_status
 
@@ -1799,6 +1800,27 @@ body.gallery .builder-tile.in-deck::after { content:"\2713"; position:absolute; 
 .color-pip img { width:24px; height:24px; display:block; }
 .color-pip:hover { opacity:0.85; transform:translateY(-1px); }
 .color-pip.on { opacity:1; border-color:var(--accent); box-shadow:0 0 10px -2px var(--accent); }
+.mu-sub { margin:14px 0 8px; font-size:0.74rem; text-transform:uppercase; letter-spacing:0.07em; color:var(--text-dim); }
+.mu-weak { border:1px solid var(--card-border); border-left:3px solid var(--gold); border-radius:10px; padding:10px 12px 8px; margin-bottom:10px; background:var(--bg-elevated); }
+.mu-weak.heavy { border-left-color:var(--missing); }
+.mu-head { display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 10px; margin-bottom:6px; }
+.mu-level { font-size:0.66rem; text-transform:uppercase; letter-spacing:0.07em; padding:1px 7px; border-radius:999px; border:1px solid currentColor; color:var(--gold); }
+.mu-weak.heavy .mu-level { color:var(--missing); }
+.mu-because { font-size:0.78rem; color:var(--text-dim); }
+.mu-group { margin:0 0 8px; }
+.mu-group-title { font-size:0.82rem; font-weight:600; }
+.mu-why { font-size:0.76rem; color:var(--text-dim); line-height:1.35; margin:1px 0 4px; }
+.mu-cards { display:flex; flex-wrap:wrap; gap:5px; }
+.mu-card { font-size:0.76rem; padding:2px 8px; border-radius:999px; border:1px solid var(--card-border); background:var(--card-bg); cursor:default; }
+.mu-card[data-full]:hover { border-color:var(--accent); color:var(--accent); }
+.mu-have { font-size:0.8rem; margin:2px 0 8px; padding:6px 9px; border-radius:8px; background:color-mix(in srgb, var(--owned) 10%, transparent); }
+.mu-have.none { background:color-mix(in srgb, var(--missing) 12%, transparent); }
+.mu-arch { display:flex; flex-direction:column; gap:5px; }
+.mu-row { display:grid; grid-template-columns:104px minmax(130px, 190px) 1fr; gap:4px 10px; align-items:baseline; font-size:0.8rem; padding:5px 8px; border-radius:8px; border:1px solid var(--card-border); }
+.mu-verdict { font-size:0.66rem; text-transform:uppercase; letter-spacing:0.06em; font-weight:700; }
+.mu-row.strong .mu-verdict { color:var(--owned); } .mu-row.weak .mu-verdict { color:var(--missing); } .mu-row.even .mu-verdict { color:var(--gold); }
+.mu-name { font-weight:600; } .mu-text { color:var(--text-dim); }
+@media (max-width: 700px) { .mu-row { grid-template-columns:1fr; } }
 .btn.busy { pointer-events:none; opacity:.85; }
 .btn.busy::before { content:''; display:inline-block; width:0.8em; height:0.8em; margin-right:7px; vertical-align:-1px; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; animation:btn-spin .7s linear infinite; }
 @keyframes btn-spin { to { transform:rotate(360deg); } }
@@ -2244,6 +2266,10 @@ def render_builder_page(deck_id: str | None = None) -> str:
       <h4 class="analysis-heading" id="resilience-heading" style="display:none;">&#128737;&#65039; Resilience</h4>
       <div id="resilience"></div>
 
+      </section>
+      <section class="an-panel">
+      <h4 class="analysis-heading" id="matchups-heading" style="display:none;">&#9876;&#65039; Matchups</h4>
+      <div id="matchups"></div>
       </section>
       <section class="an-panel">
       <h4 class="analysis-heading">&#128202; Mana Curve &amp; Colors</h4>
@@ -5322,7 +5348,7 @@ let lastAnalyzeData = null;
 let analyzeRequestSeq = 0;
 // Which of Analyze's loading stages are still running. Every stage is registered up front so the status line can
 // say "2 of 5 done"; a stage that won't run (constructed decks) or fails is simply marked finished.
-const ANALYZE_STAGES = {{ stats: 'deck stats and combos', mana: 'mana simulation', land: 'land-count table', clock: 'Turn Clock', resilience: 'resilience' }};
+const ANALYZE_STAGES = {{ stats: 'deck stats and combos', mana: 'mana simulation', land: 'land-count table', clock: 'Turn Clock', resilience: 'resilience', matchups: 'matchups' }};
 const analyzeBusy = {{ pending: new Set() }};
 function renderAnalyzeBusy() {{
   const body = document.querySelector('#analyze-modal .modal-body');
@@ -5399,6 +5425,8 @@ analyzeBtn.addEventListener('click', () => {{
   document.getElementById('turn-clock').innerHTML = '';
   document.getElementById('resilience').innerHTML = '';
   document.getElementById('resilience-heading').style.display = 'none';
+  document.getElementById('matchups').innerHTML = '';
+  document.getElementById('matchups-heading').style.display = 'none';
   document.getElementById('turn-clock-heading').style.display = 'none';
   document.getElementById('mana-sim-heading').style.display = 'none';
   printBattleCardBtn.disabled = true;
@@ -5412,7 +5440,7 @@ analyzeBtn.addEventListener('click', () => {{
     .then(data => {{
       if (requestSeq !== analyzeRequestSeq) return; // a newer analyze request has since started -- discard this stale response
       analyzeStage(requestSeq, 'stats', false);
-      if (data.error) {{ showError(data.error); ['mana', 'land', 'clock', 'resilience'].forEach(k => analyzeStage(requestSeq, k, false)); return; }}
+      if (data.error) {{ showError(data.error); ['mana', 'land', 'clock', 'resilience', 'matchups'].forEach(k => analyzeStage(requestSeq, k, false)); return; }}
       lastAnalyzeData = data;
       document.getElementById('analyze-badges').innerHTML = statBadges(data).map(b =>
         `<span class="bv-badge ${{b.cls || ''}}">${{b.label}}<span class="tooltip-popup">${{b.tip}}</span></span>`
@@ -5424,6 +5452,7 @@ analyzeBtn.addEventListener('click', () => {{
       renderComboReference(data);
       runManaSim(requestSeq);
       runTurnClock(requestSeq);
+      loadMatchups(requestSeq);
       printBattleCardBtn.disabled = false;
     }})
     .catch(() => {{
@@ -5586,6 +5615,66 @@ function runTurnClock(requestSeq) {{
     }})
     .catch(() => {{ analyzeStage(requestSeq, 'clock', false); analyzeStage(requestSeq, 'resilience', false); }});
 }}
+function loadMatchups(requestSeq) {{
+  fetch('/builder/matchups', {{
+    method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
+    body: JSON.stringify({{ cards: brew.cards, commander: brew.commander }}),
+  }})
+    .then(r => r.json())
+    .then(res => {{
+      if (requestSeq !== analyzeRequestSeq) return;
+      analyzeStage(requestSeq, 'matchups', false);
+      if (!res || res.error) return;
+      renderMatchups(res);
+    }})
+    .catch(() => analyzeStage(requestSeq, 'matchups', false));
+}}
+const MU_VERDICT = {{ strong: 'Strong against', weak: 'Weak against', even: 'Even' }};
+function muChips(cards) {{
+  return (cards || []).map(c => {{
+    const full = c.id ? scryfallImg(c.id, 'normal') : '';
+    return `<span class="mu-card"${{full ? ` data-full="${{full}}"` : ''}}>${{escapeHtml(c.name)}}</span>`;
+  }}).join('');
+}}
+function renderMatchups(res) {{
+  const weak = res.weaknesses || [];
+  const parts = [];
+  if (res.commander_note) parts.push(`<p class="hint" style="margin:0 0 10px;"><b>${{escapeHtml(res.commander_note)}}</b> Anything that stops that stops the commander too.</p>`);
+  parts.push('<h5 class="mu-sub">Weak to</h5>');
+  if (!weak.length) parts.push('<p class="hint" style="margin:0 0 10px;">Nothing in this deck leans hard enough on one thing for a specific hate card to stand out.</p>');
+  weak.forEach(w => {{
+    const groups = w.groups.map(g => `<div class="mu-group"><div class="mu-group-title">${{escapeHtml(g.title)}}</div><div class="mu-why">${{escapeHtml(g.why)}}</div><div class="mu-cards">${{muChips(g.examples)}}</div></div>`).join('');
+    let mit = '';
+    if (w.mitigation) {{
+      const m = w.mitigation;
+      mit = `<div class="mu-have ${{m.count ? 'ok' : 'none'}}"><b>${{escapeHtml(m.label)}} in your deck: ${{m.count}}</b>${{m.count ? ' &mdash; ' + m.cards.map(c => escapeHtml(c.name)).join(', ') : ''}}${{m.note ? '<div class="mu-why">' + escapeHtml(m.note) + '</div>' : ''}}</div>`;
+    }}
+    const cmd = w.commanders ? `<div class="mu-group"><div class="mu-group-title">${{escapeHtml(w.commanders.title)}}</div><div class="mu-cards">${{muChips(w.commanders.cards)}}</div></div>` : '';
+    parts.push(`<div class="mu-weak ${{w.level}}"><div class="mu-head"><span class="mu-level">${{w.level === 'heavy' ? 'Big exposure' : 'Some exposure'}}</span><b>${{escapeHtml(w.title)}}</b><span class="mu-because">${{escapeHtml(w.because)}}</span></div>${{groups}}${{mit}}${{cmd}}</div>`);
+  }});
+  parts.push('<h5 class="mu-sub">Strong or weak against, by deck type</h5>');
+  parts.push('<div class="mu-arch">' + (res.strengths || []).map(s =>
+    `<div class="mu-row ${{s.verdict}}"><span class="mu-verdict">${{MU_VERDICT[s.verdict]}}</span><span class="mu-name">${{escapeHtml(s.archetype)}}</span><span class="mu-text">${{escapeHtml(s.why)}}</span></div>`
+  ).join('') + '</div>');
+  parts.push(`<p class="hint" style="margin:10px 0 0;">${{escapeHtml(res.disclaimer || '')}}</p>`);
+  document.getElementById('matchups-heading').style.display = '';
+  document.getElementById('matchups').innerHTML = parts.join('');
+}}
+// Hover any named card in the Matchups panel to see it (same preview as the deck list).
+(() => {{
+  const box = document.getElementById('matchups');
+  box.addEventListener('mousemove', (e) => {{
+    const c = e.target.closest('.mu-card[data-full]');
+    if (!c) {{ cancelHoverLoad(); hoverPreview.classList.remove('show'); return; }}
+    wantHoverImage(c.dataset.full, null);
+    const pad = 18, w = 240, h = Math.round(w * 1.4);
+    let x = e.clientX + pad, y = e.clientY + pad;
+    if (x + w > window.innerWidth) x = e.clientX - w - pad;
+    if (y + h > window.innerHeight) y = window.innerHeight - h - pad;
+    hoverPreview.style.left = x + 'px'; hoverPreview.style.top = Math.max(0, y) + 'px';
+  }});
+  box.addEventListener('mouseleave', () => {{ cancelHoverLoad(); hoverPreview.classList.remove('show'); }});
+}})();
 function loadResilience(requestSeq) {{
   fetch('/builder/resilience', {{
     method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
@@ -6830,6 +6919,19 @@ def builder_resilience():
     except Exception:  # noqa: BLE001 -- a nicety panel; never break Analyze over it
         result = None
     return jsonify(result or {"error": "Not enough cards to simulate yet."})
+
+
+@app.route("/builder/matchups", methods=["POST"])
+def builder_matchups():
+    """What the deck is weak to and strong against, for the Analyze modal (see matchups.py). Local data only."""
+    body = request.get_json(silent=True) or {}
+    cards = body.get("cards") or []
+    if not cards:
+        return jsonify(error="Add some cards first.")
+    try:
+        return jsonify(analyze_matchups(cards, body.get("commander")))
+    except Exception:  # noqa: BLE001 -- a nicety panel; never break Analyze over it
+        return jsonify(error="Could not work out matchups for this deck.")
 
 
 @app.route("/builder/turn-clock", methods=["POST"])

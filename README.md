@@ -110,6 +110,14 @@ tile). A saved brew can be run through the same report a compared deck gets.
   Clock** (how fast the deck kills an opponent who does nothing), a
   **Resilience** check, and **Synergy Packages**. **Print Battle Card** makes a
   one-page summary for the table
+- **Matchups** (in Analyze) says what the deck is weak to and strong against.
+  It reads what the deck and its commander depend on (death triggers, enter
+  triggers, tokens, the graveyard, artifacts and so on), names the cards that
+  punish each one and whether you already hold an answer, and lists commanders
+  that go after it. A deck whose commander needs creatures to die, for
+  example, is flagged for exile and bounce removal. It also rates the deck
+  against common deck types. These are rules of thumb from the deck's own
+  cards, not a simulation, and it all works offline
 
 ![Analyze Deck: mana simulation, curve, sample hand](screenshots/analyze.png)
 
@@ -420,6 +428,7 @@ appreciated!
 | `mana_sim.py`, `turn_clock.py` | Goldfish simulations behind the Analyze panel's Mana Sim and Turn Clock. |
 | `index_worker.py` | Runs Refresh Database in its own process so the web app stays responsive while it downloads and rebuilds. |
 | `collection_insights.py`, `collection_page.py` | The Collection insights page: the calculations (read-only, nothing from the builder or compare code) and its page. |
+| `matchups.py` | The Matchups section of Analyze: what a deck is weak to and strong against (read-only, local data). |
 | `app.py` | Flask web app, including the Deck Builder (`/builder`). Its `static/` folder holds the mana-symbol SVGs. |
 | `brewlist_cli.py` | Terminal CLI (interactive menu or scriptable flags). |
 | `Brewlist.command` | macOS double-click launcher for the web app. |
