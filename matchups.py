@@ -82,7 +82,7 @@ _HATE = {
         ("Removal that doesn't kill", "Exile, bounce and tuck all take a creature away without it dying, so no death trigger fires.",
          ["Swords to Plowshares", "Path to Exile", "Chaos Warp", "Cyclonic Rift", "Settle the Wreckage",
           "Oblivion Ring", "Banishing Light", "Anguished Unmaking", "Vanishing Verse", "Unexpectedly Absent"]),
-        ("Dies-becomes-exile effects", "These exile a creature instead of letting it die, which shuts off death triggers even though it never reaches the graveyard. (Kalitas only exiles nontoken creatures. Stone of Erech is colorless, so any deck can run it, and it only affects creatures an opponent controls.)",
+        ("Dies-becomes-exile effects", "These exile a creature instead of letting it die, which shuts off death triggers even though it never reaches the graveyard. Tokens matter here: Stone of Erech and Rest in Peace catch them, but Leyline of the Void and Dauthi Voidwalker only exile cards and Kalitas only nontoken creatures, so a token that is sacrificed still dies and still triggers. Stone of Erech is colorless and only affects an opponent's creatures.",
          ["Rest in Peace", "Leyline of the Void", "Kalitas, Traitor of Ghet", "Dauthi Voidwalker", "Stone of Erech"]),
         ("Cards that stop the trigger itself", "Hushbringer is the one card that says dying doesn't cause abilities to trigger (it blanks enter triggers too). Stifle-style spells counter one triggered ability at a time, which is weaker against a commander that doubles triggers.",
          ["Hushbringer", "Stifle", "Trickbind", "Repudiate", "Consign to Memory", "Sublime Epiphany"]),
