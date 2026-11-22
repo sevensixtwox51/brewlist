@@ -84,6 +84,8 @@ _HATE = {
           "Oblivion Ring", "Banishing Light", "Anguished Unmaking", "Vanishing Verse", "Unexpectedly Absent"]),
         ("Dies-becomes-exile effects", "These exile a creature instead of letting it die, which shuts off death triggers even though it never reaches the graveyard. (Kalitas only exiles nontoken creatures.)",
          ["Rest in Peace", "Leyline of the Void", "Kalitas, Traitor of Ghet", "Dauthi Voidwalker"]),
+        ("Cards that stop the trigger itself", "Hushbringer is the one card that says dying doesn't cause abilities to trigger (it blanks enter triggers too). Stifle-style spells counter one triggered ability at a time, which is weaker against a commander that doubles triggers.",
+         ["Hushbringer", "Stifle", "Trickbind", "Repudiate", "Consign to Memory", "Sublime Epiphany"]),
     ],
     "etb": [
         ("Trigger shutoffs", "Creatures entering no longer trigger abilities, which blanks enter-the-battlefield value.",
@@ -140,7 +142,8 @@ _MUST_NOT_DESTROY = {"Removal that doesn't kill"}
 _DESTROY_RE = re.compile(r"\bdestroy\b", re.I)
 # Groups that claim to hit one kind of thing: every card listed must say so in its own text. (Strip Mine, which destroys
 # ANY land, was listed as a "nonbasic land punisher" until caught.)
-_MUST_MENTION = {"Nonbasic land punishers": re.compile(r"nonbasic", re.I)}
+_MUST_MENTION = {"Nonbasic land punishers": re.compile(r"nonbasic", re.I),
+                 "Cards that stop the trigger itself": re.compile(r"triggered ability|abilities to trigger", re.I)}
 
 _cache: dict = {}
 
