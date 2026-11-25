@@ -1708,18 +1708,24 @@ def land_search_only(oracle_text: str) -> bool:
     return bool(clauses) and all(_LAND_WORD_RE.search(c) and not _NONLAND_WORD_RE.search(c) for c in clauses)
 
 
-def land_searcher_names() -> set[str]:
-    """Normalized names (front face too) of every card whose only library search is for lands."""
+def land_searcher_names(yours_only: bool = False) -> set[str]:
+    """Normalized names (front face too) of every card whose only library search is for lands. With yours_only, drop the
+    ones that hand the land to someone else (Path to Exile, Settle the Wreckage: "its controller may search their library")."""
     pool = gameplay_data_in_index()
     if _land_searchers_cache.get("id") != id(pool):
+        _land_searchers_cache.clear()
+        _land_searchers_cache["id"] = id(pool)
+    key = "yours" if yours_only else "all"
+    if key not in _land_searchers_cache:
         names: set[str] = set()
         for r in pool.values():
-            if land_search_only(r.get("oracle_text")):
+            text = r.get("oracle_text") or ""
+            if land_search_only(text) and (not yours_only or re.search(r"search your library", text, re.I)):
                 n = normalize_name(r["name"])
                 names.add(n)
                 names.add(n.split(" // ")[0])
-        _land_searchers_cache.update({"id": id(pool), "names": names})
-    return _land_searchers_cache["names"]
+        _land_searchers_cache[key] = names
+    return _land_searchers_cache[key]
 
 
 def real_tutor_labels(labels, tutor_labels, name: str | None = None) -> set:

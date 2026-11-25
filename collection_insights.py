@@ -53,6 +53,7 @@ _ROLES: list[tuple[str, dict]] = [
     ("Board wipes", {"within": "Interaction", "labels": {l for l in _INTERACTION if l.startswith("sweeper")}}),
     ("Counterspells", {"within": "Interaction", "labels": {l for l in _INTERACTION if l.startswith("counterspell")}}),
     ("Tutors", {"regex": r"^tutor-(?!land)", "tutors": True}),
+    ("Land search", {"landsearch": True}),  # landcycling, Pilgrim's Eye, Cultivate...: fixing and land drops, not tutors
     ("Recursion", {"regex": r"^reanimate|castable from graveyard|^regrowth|activate from graveyard"}),
     ("Sacrifice outlets", {"regex": r"sacrifice outlet"}),
     ("Token makers", {"oracle": r"\bcreates? [^.]*\btokens?\b"}),
@@ -134,6 +135,8 @@ def _pool_members(defn: dict, pool: list[dict], groups: dict, labels: dict, clea
         return _expand(cleaned.get(defn["clean"]) or ())
     if defn.get("labels") or defn.get("regex"):
         members |= _tag_members(_definition_filter(defn), groups, labels)
+    if defn.get("landsearch"):
+        return _expand(land_searcher_names(yours_only=True))
     if defn.get("tutors"):  # land-only searchers (landcycling, Cultivate...) carry the generic tutor tags too: not tutors
         lands = _tag_members(lambda l: l.startswith("tutor-land"), groups, labels)
         specific = _tag_members(lambda l: l.startswith("tutor-") and not l.startswith("tutor-land")
