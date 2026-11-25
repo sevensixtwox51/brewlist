@@ -32,7 +32,7 @@ from brewlist_core import (
     scryfall_prices_in_index,
     sets_data_in_index,
 )
-from deck_builder import _NON_LIBRARY_TYPE_RE, _ROLE_TAG_LABELS, _role_member_names
+from deck_builder import _NON_LIBRARY_TYPE_RE, _ROLE_TAG_LABELS, _role_member_names, land_searcher_names
 
 COLOR_ORDER = ["W", "U", "B", "R", "G"]
 COLOR_NAMES = {"W": "White", "U": "Blue", "B": "Black", "R": "Red", "G": "Green", "M": "Multicolor", "C": "Colorless"}
@@ -52,7 +52,7 @@ _ROLES: list[tuple[str, dict]] = [
     ("Spot removal", {"within": "Interaction", "labels": {l for l in _INTERACTION if not l.startswith(("sweeper", "counterspell"))}}),
     ("Board wipes", {"within": "Interaction", "labels": {l for l in _INTERACTION if l.startswith("sweeper")}}),
     ("Counterspells", {"within": "Interaction", "labels": {l for l in _INTERACTION if l.startswith("counterspell")}}),
-    ("Tutors", {"regex": r"^tutor-(?!land)"}),
+    ("Tutors", {"regex": r"^tutor-(?!land)", "tutors": True}),
     ("Recursion", {"regex": r"^reanimate|castable from graveyard|^regrowth|activate from graveyard"}),
     ("Sacrifice outlets", {"regex": r"sacrifice outlet"}),
     ("Token makers", {"oracle": r"\bcreates? [^.]*\btokens?\b"}),
@@ -134,6 +134,11 @@ def _pool_members(defn: dict, pool: list[dict], groups: dict, labels: dict, clea
         return _expand(cleaned.get(defn["clean"]) or ())
     if defn.get("labels") or defn.get("regex"):
         members |= _tag_members(_definition_filter(defn), groups, labels)
+    if defn.get("tutors"):  # land-only searchers (landcycling, Cultivate...) carry the generic tutor tags too: not tutors
+        lands = _tag_members(lambda l: l.startswith("tutor-land"), groups, labels)
+        specific = _tag_members(lambda l: l.startswith("tutor-") and not l.startswith("tutor-land")
+                                and l not in ("tutor-to-hand", "tutor-card", "tutor-to-top"), groups, labels)
+        members -= (lands | _expand(land_searcher_names())) - specific
     if defn.get("within") and cleaned:
         members &= _expand(cleaned.get(defn["within"]) or ())
     if defn.get("oracle"):

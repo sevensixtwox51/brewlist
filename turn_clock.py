@@ -44,7 +44,7 @@ import urllib.error
 import urllib.request
 
 from brewlist_core import CardEntry, categorize, gameplay_data_in_index, normalize_name
-from deck_builder import _card_tag_index, _color_pips
+from deck_builder import _card_tag_index, _color_pips, real_tutor_labels
 from brewlist_core import budget_alt_data_in_index
 from mana_sim import SEED, Table, _classify, _opening_hand  # noqa: F401 -- _opening_hand re-exported for tests
 
@@ -901,7 +901,7 @@ def _prepare(entries: list[CardEntry], combos_included: list[dict] | None):
         card["protect"] = bool("Instant" in type_line and card["mv"] <= 3 and "you control" in text and _PROTECT_RE.search(text))
         reanimates = _REANIMATE_RE.search(text) if card["kind"] == "spell" and "Creature" not in type_line else None
         card["reanimate"] = (("mass" if re.search(r"\b(?:all|each) (?:other )?creature cards?", text) else "single") if reanimates else None)
-        labels_here = {labels.get(t, t) for t in tags_by_name.get(normalize_name(e.name), ())} & _TUTOR_LABELS
+        labels_here = real_tutor_labels({labels.get(t, t) for t in tags_by_name.get(normalize_name(e.name), ())}, _TUTOR_LABELS, e.name)
         card["tutor"] = None
         if labels_here and card["kind"] == "spell" and "Creature" not in type_line:
             types = {"Creature"} if labels_here == {"tutor-creature"} else {"Artifact"} if labels_here == {"tutor-artifact"} else None

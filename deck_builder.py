@@ -742,7 +742,7 @@ def deck_pitch_draft(
     for e in spells:
         nm = normalize_name(e.name)
         tag_labels_here = {labels.get(t, t) for t in tags_by_name.get(nm, ())}
-        if tag_labels_here & tutor_labels:
+        if real_tutor_labels(tag_labels_here, tutor_labels, e.name):
             tutors += e.quantity
         if (e.cmc or 0) <= 1 and "Creature" not in e.type_line and (
             tag_labels_here & {"mana rock", "utility mana rock", "ritual", "mana rock with set's mechanic"}
@@ -1689,6 +1689,46 @@ def _tribe_members(candidates: list[dict], tribe: str, changelings: bool = False
 # how many Oracle Tags they share with what the deck is already playing.
 _ROLE_DEFINING_TAGS = frozenset(label for labels in _ROLE_TAG_LABELS.values() for label in labels)
 _card_tag_cache: dict = {"groups_id": None, "tags": {}, "size": {}}
+
+
+# Scryfall's "tutor-to-hand" / "tutor-card" / "tutor-to-top" tags are generic: they also sit on every card that only
+# fetches a LAND (landcycling like Oliphaunt's mountaincycling, Cultivate, Rampant Growth, Pilgrim's Eye...). Those are
+# ramp or fixing, not tutors, so the generic tags don't count for a card that only searches for lands -- known from a
+# land-search tag next to them, or (when Tagger only gave the generic tag) from the card's own search text.
+_GENERIC_TUTOR_LABELS = {"tutor-to-hand", "tutor-card", "tutor-to-top"}
+_SEARCH_RE = re.compile(r"search (?:your|their|that player's|target player's) library for ([^.;:]*?)(?:,| and (?:put|reveal|exile)|\.|$)", re.I)
+_LAND_WORD_RE = re.compile(r"\b(?:land|plains|islands?|swamps?|mountains?|forests?|gates?|deserts?|towns?|caves?|lairs?|spheres?|locus)\b", re.I)
+_NONLAND_WORD_RE = re.compile(r"\b(?:creature|artifact|instant|sorcery|enchantment|planeswalker|legendary)\b|nonland", re.I)
+_land_searchers_cache: dict = {}
+
+
+def land_search_only(oracle_text: str) -> bool:
+    """True when every "search your library for ..." in the text asks for a land (and nothing else)."""
+    clauses = [re.sub(r"\(.*", "", c) for c in _SEARCH_RE.findall(oracle_text or "")]
+    return bool(clauses) and all(_LAND_WORD_RE.search(c) and not _NONLAND_WORD_RE.search(c) for c in clauses)
+
+
+def land_searcher_names() -> set[str]:
+    """Normalized names (front face too) of every card whose only library search is for lands."""
+    pool = gameplay_data_in_index()
+    if _land_searchers_cache.get("id") != id(pool):
+        names: set[str] = set()
+        for r in pool.values():
+            if land_search_only(r.get("oracle_text")):
+                n = normalize_name(r["name"])
+                names.add(n)
+                names.add(n.split(" // ")[0])
+        _land_searchers_cache.update({"id": id(pool), "names": names})
+    return _land_searchers_cache["names"]
+
+
+def real_tutor_labels(labels, tutor_labels, name: str | None = None) -> set:
+    """The tutor labels in `labels` that make a card a real tutor (see _GENERIC_TUTOR_LABELS)."""
+    labels = set(labels)
+    found = labels & set(tutor_labels)
+    if any(l.startswith("tutor-land") for l in labels) or (name and normalize_name(name) in land_searcher_names()):
+        found -= _GENERIC_TUTOR_LABELS
+    return found
 
 
 def _card_tag_index(groups: dict) -> tuple[dict[str, tuple[str, ...]], dict[str, int]]:
