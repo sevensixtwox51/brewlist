@@ -2058,7 +2058,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
             <option value="">No preference (build freely)</option>
             <option value="1-2">1-2 (Exhibition / Core)</option>
             <option value="3">3 (Upgraded)</option>
-            <option value="4+">4+ (Optimized / cEDH)</option>
+            <option value="4+" title="WotC's Brackets 4 and 5 have the same deck-building rules (no limits); they differ in mindset, so this one choice covers both.">4-5 (Optimized / cEDH)</option>
           </select>
         </div>
       </div>
