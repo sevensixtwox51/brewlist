@@ -182,6 +182,12 @@ table.br-list { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
 .br-lb-nav:hover { color: var(--accent); border-color: var(--accent); }
 .br-lb-nav.prev { left: 14px; } .br-lb-nav.next { right: 14px; }
 #br-results .ins-card[data-i], #br-results tr[data-i] { cursor: pointer; }
+/* Foil printings get the same hover shimmer as the compare report's tiles: a soft rainbow glow that follows the pointer. */
+.pic.foil, .br-lb-art.foil { --mx: 50%; --my: 50%; isolation: isolate; }
+.pic.foil::before, .br-lb-art.foil::before { content: ""; position: absolute; inset: 0; z-index: 1; pointer-events: none; border-radius: 6.5%; background: radial-gradient(circle at var(--mx) var(--my), rgba(255,255,255,0.22) 0%, rgba(120,200,255,0.14) 25%, rgba(255,80,220,0.12) 45%, transparent 70%); mix-blend-mode: soft-light; opacity: 0; transition: opacity 0.7s ease; }
+.br-lb-art.foil::before { border-radius: 4.8%; }
+.pic.foil:hover::before, .br-lb-art.foil:hover::before { opacity: 1; }
+.pic.foil .qty, .pic.foil .rank, .pic.foil .flip { z-index: 2; }
 @media (max-width: 800px) { .ins-two { grid-template-columns: 1fr; } .ins-theme { grid-template-columns: 1fr; gap: 4px; } .ins-pill { justify-self: start; } }
 """
 
@@ -386,7 +392,7 @@ function renderModalCards() {
   const tile = (c) => {
     const img = c.scryfall_id ? '<img loading="lazy" alt="' + esc(c.name) + '" src="' + cardImg(c.scryfall_id) + '">' : '<div style="aspect-ratio:5/7;border-radius:6%;background:var(--bg);"></div>';
     if (!missing) {
-      return '<div class="ins-card" data-id="' + esc(c.scryfall_id || '') + '"><div class="pic">' + img + flipBtn(c) + ((c.quantity || 1) > 1 ? '<span class="qty">×' + c.quantity + '</span>' : '') + '</div>'
+      return '<div class="ins-card" data-id="' + esc(c.scryfall_id || '') + '"><div class="pic' + (c.foil ? ' foil' : '') + '">' + img + flipBtn(c) + ((c.quantity || 1) > 1 ? '<span class="qty">×' + c.quantity + '</span>' : '') + '</div>'
         + '<div class="nm">' + esc(c.name) + (c.foil ? ' ✦' : '') + '</div><div class="ty">' + esc(c.type_line || '') + '</div></div>';
     }
     const price = c.price != null ? '<a class="price" target="_blank" rel="noopener noreferrer" href="' + esc(c.url || scryUrl(c.name)) + '" title="Cheapest nonfoil listing">$' + Number(c.price).toFixed(2) + ' · ' + esc(STORES[c.store] || c.store || '') + '</a>' : '';
@@ -474,6 +480,17 @@ function attachZoom(box) {
   box.addEventListener('scroll', hideZoom, true);
 }
 attachZoom(modalBody);
+// the foil shimmer follows the pointer across a foil card's picture
+function attachFoil(box) {
+  box.addEventListener('mousemove', (e) => {
+    const t = e.target.closest ? e.target.closest('.pic.foil, .br-lb-art.foil') : null;
+    if (!t) return;
+    const r = t.getBoundingClientRect();
+    t.style.setProperty('--mx', ((e.clientX - r.left) / r.width * 100) + '%');
+    t.style.setProperty('--my', ((e.clientY - r.top) / r.height * 100) + '%');
+  });
+}
+attachFoil(modalBody);
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideZoom(); });
 document.getElementById('ins-modal-close').addEventListener('click', hideZoom);
 
@@ -504,6 +521,8 @@ const PAGE = 96;
 
 // what one copy is worth: a single figure, or the range when the printings you hold differ (a foil and a regular copy)
 const eachTxt = (c) => c.top == null ? '—' : (c.top === c.low ? money(c.top) : money(c.low) + '–' + money(c.top));
+// the tile shows one printing (the best one you own); it shimmers when that printing is a foil
+const shownIsFoil = (c) => { const x = (c.pr || []).find((p) => p.id === c.id); return x ? x.f > 0 : c.foil > 0; };
 function brMatchesColor(ci) {
   const must = 'WUBRG'.split('').filter((c) => BR.pips[c] === 2), allowed = 'WUBRG'.split('').filter((c) => BR.pips[c] >= 1);
   if (must.length) return must.every((c) => ci.includes(c)) && ci.every((c) => allowed.includes(c));
@@ -574,7 +593,7 @@ function brRender() {
     html = '<div class="ins-cards" style="padding:0;">' + shownRows.map((c, i) => {
       const img = c.id ? '<img loading="lazy" alt="' + esc(c.name) + '" src="' + cardImg(c.id) + '">' : '<div style="aspect-ratio:5/7;border-radius:6%;background:var(--bg);"></div>';
       const worthTxt = c.value != null ? '<span class="worth">' + money(c.value) + (c.qty > 1 ? ' <small>(' + eachTxt(c) + (c.top === c.low ? ' each' : '') + ')</small>' : '') + '</span>' : '<span class="worth"><small>no price</small></span>';
-      return '<div class="ins-card" data-i="' + i + '" data-id="' + esc(c.id || '') + '"><div class="pic">' + img + flipBtn({ scryfall_id: c.id, layout: c.layout }) + (c.qty > 1 ? '<span class="qty">×' + c.qty + '</span>' : '') + '</div>'
+      return '<div class="ins-card" data-i="' + i + '" data-id="' + esc(c.id || '') + '"><div class="pic' + (shownIsFoil(c) ? ' foil' : '') + '">' + img + flipBtn({ scryfall_id: c.id, layout: c.layout }) + (c.qty > 1 ? '<span class="qty">×' + c.qty + '</span>' : '') + '</div>'
         + '<div class="nm">' + esc(c.name) + (c.foil ? ' ✦' : '') + '</div><div class="ty">' + esc(c.type_line || '') + '</div>' + worthTxt + '</div>';
     }).join('') + '</div>';
   }
@@ -675,6 +694,8 @@ brEl('br-reset').addEventListener('click', (e) => {
 });
 brEl('br-results').addEventListener('click', (e) => { if (e.target.closest('#br-more')) { BR.shown += PAGE; brRender(); } });
 attachZoom(brEl('br-results'));
+attachFoil(brEl('br-results'));
+attachFoil(brEl('br-lb'));
 
 // ---- click a card: a lightbox with every printing of it you own ----
 const LB = { i: -1, p: 0, face: 'front' };
@@ -686,6 +707,7 @@ function lbRender() {
   const cur = pr[LB.p];
   const img = brEl('br-lb-img');
   img.src = cardImg(cur.id, LB.face); img.alt = c.name;
+  brEl('br-lb').querySelector('.br-lb-art').classList.toggle('foil', cur.f > 0);
   const canFlip = FLIPS.includes(c.layout);
   brEl('br-lb-flip').hidden = !canFlip;
   const names = (BR.data && BR.data.set_names) || {};
