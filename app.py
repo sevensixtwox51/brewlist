@@ -90,7 +90,7 @@ from deck_builder import (
 import tag_synergy
 from edhrec_data import bulk_commander_popularity, commander_data_problem, commander_profile, commander_theme_page
 from edhrec_data import refresh_all as edhrec_refresh_all
-from collection_insights import get_insights, cards_for, missing_for
+from collection_insights import browse_cards, get_insights, cards_for, missing_for
 from matchups import analyze_matchups
 from matchups_ui import MATCHUPS_CSS, MATCHUPS_JS
 from research import archetypes as research_archetypes, commander_summary, search_commanders, typical_deck
@@ -6063,6 +6063,18 @@ def collection_insights_data():
         return jsonify(data)
     except ValueError as e:
         return jsonify(error=str(e))
+
+
+@app.route("/collection/browse", methods=["GET"])
+def collection_browse_data():
+    """Every card you own with the facts the Browse cards view filters, sorts and adds up on the page."""
+    if not os.path.isfile(COLLECTION_PATH):
+        return jsonify(error="No ManaBox collection on file yet -- upload your export on the Setup page first.")
+    try:
+        get_insights(COLLECTION_PATH, os.path.getmtime(COLLECTION_PATH), load_collection, owned_collection_gameplay_view)
+    except ValueError as e:
+        return jsonify(error=str(e))
+    return jsonify(browse_cards() or {"error": "Nothing to browse yet."})
 
 
 @app.route("/collection/cards", methods=["GET"])

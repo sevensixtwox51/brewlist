@@ -20,6 +20,7 @@ Oracle Tags are crowd-made and uneven, so treat the counts as "roughly how deep"
 from __future__ import annotations
 
 import re
+import threading
 import time
 
 from brewlist_core import (
@@ -84,6 +85,7 @@ _THEMES: list[tuple[str, dict]] = [
 ]
 
 _cache: dict = {"key": None, "data": None}
+_cache_lock = threading.Lock()  # the page asks for the insights and the card browser at once; compute them once
 
 
 def _aliases(name: str) -> set[str]:
@@ -385,22 +387,74 @@ def build_insights(owned: dict, owned_rows: list[dict]) -> dict:
             if t in wanted_tribes:
                 add(f"tribe:{t}", g)
 
+    browse = _browse_payload(owned, owned_rows, prices, sets, role_members, theme_members, [r["role"] for r in role_rows], [t["name"] for t in themes], snapshot["value"])
     return {"snapshot": snapshot, "colors": colors, "roles": roles, "themes": themes, "types": types,
-            "baseline_pct": round(baseline * 100, 1), "pool_size": len(pool), "_lists": lists, "_missing": missing}
+            "baseline_pct": round(baseline * 100, 1), "pool_size": len(pool), "_lists": lists, "_missing": missing, "_browse": browse}
+
+
+def _browse_payload(owned: dict, owned_rows: list[dict], prices: dict, sets: dict, role_members: dict, theme_members: dict,
+                    role_names: list[str], theme_names: list[str], total_value: float) -> dict:
+    """Every card you own (lands too) with what the card browser filters and totals on: type, color, mana value, the sets
+    of the printings you own, which roles and themes it fills (as indexes into the two name lists), and what it is worth.
+    Worth is the market price of the exact printings you hold (the same price the Rough value tile adds up), per copy."""
+    role_idx = {n: i for i, n in enumerate(role_names)}
+    theme_idx = {n: i for i, n in enumerate(theme_names)}
+    cards = []
+    set_counts: dict[str, int] = {}
+    for r in owned_rows:
+        key = normalize_name(r["name"])
+        oc = owned.get(key) or owned.get(key.split(" // ")[0])
+        value = 0.0
+        copies_priced = 0
+        codes: list[str] = []
+        if oc:
+            for p in oc.printings:
+                sp = prices.get(p.scryfall_id)
+                price = price_for_printing(sp, p) if sp else None
+                if price is not None:
+                    value += price * p.quantity
+                    copies_priced += p.quantity
+                code = (p.set_code or "").upper()
+                if code and code not in codes:
+                    codes.append(code)
+        for c in codes:
+            set_counts[c] = set_counts.get(c, 0) + 1
+        al = _aliases(r["name"])
+        cards.append({
+            "name": r["name"], "id": r.get("scryfall_id"), "layout": r.get("layout"), "type_line": r.get("type_line"),
+            "category": r.get("category"), "mana_cost": r.get("mana_cost"), "cmc": r.get("cmc") or 0,
+            "ci": r.get("color_identity") or [], "qty": r.get("quantity") or 1, "foil": (oc.foil if oc else 0),
+            "value": round(value, 2) if copies_priced else None,
+            "each": round(value / copies_priced, 2) if copies_priced else None,
+            "unpriced": (r.get("quantity") or 1) - copies_priced if copies_priced else (r.get("quantity") or 1),
+            "sets": codes, "rank": r.get("edhrec_rank"),
+            "roles": [role_idx[n] for n, m in role_members.items() if n in role_idx and al & m],
+            "themes": [theme_idx[n] for n, m in theme_members.items() if n in theme_idx and al & m],
+        })
+    set_list = sorted(({"code": c, "name": (sets.get(c) or {}).get("name") or c, "release": (sets.get(c) or {}).get("release_date") or "", "n": n}
+                       for c, n in set_counts.items()), key=lambda s: s["release"], reverse=True)
+    cats = sorted({c["category"] for c in cards if c["category"]})
+    return {"cards": cards, "roles": role_names, "themes": theme_names, "sets": set_list, "categories": cats, "total_value": total_value}
 
 
 def get_insights(collection_path: str, collection_mtime: float, load_owned, owned_view) -> dict:
     """build_insights with an in-memory cache keyed on the collection file and the card database's build time."""
     gp = gameplay_data_in_index()
     key = (collection_mtime, len(gp), id(gp), tuple(active_price_stores()))  # prices follow the picked stores
-    if _cache["key"] == key and _cache["data"] is not None:
-        return _cache["data"]
-    t = time.time()
-    owned = load_owned(collection_path)
-    data = build_insights(owned, owned_view(owned, gp))
-    data["seconds"] = round(time.time() - t, 1)
-    _cache.update(key=key, lists=data.pop("_lists"), missing=data.pop("_missing"), data=data)
-    return data
+    with _cache_lock:
+        if _cache["key"] == key and _cache["data"] is not None:
+            return _cache["data"]
+        t = time.time()
+        owned = load_owned(collection_path)
+        data = build_insights(owned, owned_view(owned, gp))
+        data["seconds"] = round(time.time() - t, 1)
+        _cache.update(key=key, lists=data.pop("_lists"), missing=data.pop("_missing"), browse=data.pop("_browse"), data=data)
+        return data
+
+
+def browse_cards() -> dict | None:
+    """Every owned card with its filterable facts (see _browse_payload). Only valid after get_insights has run."""
+    return _cache.get("browse")
 
 
 def missing_for(key: str) -> list[dict] | None:

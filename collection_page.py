@@ -115,12 +115,83 @@ table.ins-grid { border-collapse: separate; border-spacing: 4px; width: 100%; mi
 .ins-card .rank { position: absolute; bottom: 6px; left: 6px; background: rgba(0,0,0,0.78); color: var(--text); font-weight: 600; font-size: 0.7rem; padding: 1px 7px; border-radius: 999px; }
 .ins-card .price { display: inline-block; margin-top: 4px; font-size: 0.74rem; font-weight: 600; color: var(--owned); text-decoration: none; border: 1px solid color-mix(in srgb, var(--owned) 50%, var(--card-border)); border-radius: 999px; padding: 1px 8px; }
 .ins-card .price:hover { background: color-mix(in srgb, var(--owned) 16%, transparent); }
+.ins-view-tabs { display: inline-flex; margin: 0 0 16px 12px; vertical-align: middle; }
+.ins-view-tabs button { background: var(--bg); color: var(--text-dim); border: 1px solid var(--card-border); padding: 7px 16px; cursor: pointer; font: inherit; font-size: 0.9rem; }
+.ins-view-tabs button:first-child { border-radius: 9px 0 0 9px; }
+.ins-view-tabs button:last-child { border-radius: 0 9px 9px 0; border-left: none; }
+.ins-view-tabs button.on { color: var(--accent); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--bg)); }
+.br-filters { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; margin: 0 0 10px; }
+.br-filters input[type=text], .br-filters input[type=number], .br-filters select { margin: 0; padding: 7px 10px; width: auto; }
+.br-filters input[type=text] { width: 220px; }
+.br-filters input[type=number] { width: 86px; }
+.br-filters .br-sep { color: var(--text-dim); font-size: 0.82rem; }
+.br-pips { display: inline-flex; align-items: center; gap: 3px; }
+.br-pip { width: 30px; height: 30px; padding: 0; border-radius: 50%; border: 2px solid transparent; background: none; cursor: pointer; opacity: 0.45; transition: opacity .12s ease, border-color .12s ease; display: flex; align-items: center; justify-content: center; position: relative; }
+.br-pip img { width: 24px; height: 24px; display: block; }
+.br-pip:hover { opacity: 0.85; }
+.br-pip.on { opacity: 1; border-color: var(--accent); border-style: dashed; }
+.br-pip.must { opacity: 1; border-style: solid; border-width: 3px; box-shadow: 0 0 12px 0 var(--accent); }
+.br-pip.must::after { content: "\u2713"; position: absolute; top: -6px; right: -6px; width: 15px; height: 15px; border-radius: 50%; background: var(--accent); color: var(--bg); font-size: 0.62rem; font-weight: 700; line-height: 15px; text-align: center; }
+.br-check { display: inline-flex; align-items: center; gap: 6px; font-size: 0.85rem; color: var(--text-dim); cursor: pointer; }
+.br-check input { margin: 0; }
+.br-setwrap { position: relative; }
+.br-setpop { display: none; position: absolute; z-index: 60; top: calc(100% + 6px); left: 0; width: 330px; max-height: 380px; background: var(--bg-elevated); border: 1px solid var(--card-border); border-radius: 10px; box-shadow: var(--shadow); padding: 10px; }
+.br-setpop.show { display: block; }
+.br-setpop input[type=text] { width: 100%; margin: 0 0 8px; box-sizing: border-box; }
+.br-setlist { overflow-y: auto; max-height: 280px; }
+.br-setlist label { display: flex; align-items: center; gap: 8px; padding: 3px 2px; font-size: 0.84rem; cursor: pointer; }
+.br-setlist label small { margin-left: auto; color: var(--text-dim); white-space: nowrap; }
+.br-setlist input { margin: 0; }
+.br-setactions { display: flex; justify-content: space-between; margin-top: 8px; font-size: 0.82rem; }
+.br-summary { margin: 4px 0 14px; }
+.br-note { color: var(--text-dim); font-size: 0.78rem; margin: 0 0 14px; max-width: 90ch; }
+.br-more { text-align: center; padding: 6px 0 24px; }
+table.br-list { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
+.br-list th { text-align: left; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); padding: 6px 8px; border-bottom: 1px solid var(--card-border); }
+.br-list td { padding: 6px 8px; border-bottom: 1px solid var(--card-border); vertical-align: top; }
+.br-list .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.br-list tr:hover td { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.br-list .ty { color: var(--text-dim); }
+.ins-card .worth { display: block; margin-top: 3px; font-size: 0.74rem; color: var(--owned); font-weight: 600; font-variant-numeric: tabular-nums; }
+.ins-card .worth small { color: var(--text-dim); font-weight: 400; }
 @media (max-width: 800px) { .ins-two { grid-template-columns: 1fr; } .ins-theme { grid-template-columns: 1fr; gap: 4px; } .ins-pill { justify-self: start; } }
 """
 
 COLLECTION_BODY = """
   <div class="ins-back"><a href="/decks" class="btn ghost small">&larr; Decks</a></div>
+  <div class="ins-view-tabs" id="ins-view-tabs" role="tablist"><button type="button" data-view="insights" class="on">Insights</button><button type="button" data-view="browse" title="See, filter and add up the cards you own">Browse cards</button></div>
   <div id="insights"><div class="ins-loading">Reading your collection&hellip;</div></div>
+  <div id="browse" hidden>
+    <div class="card ins-section">
+      <h2>Browse your cards</h2>
+      <p class="ins-sub">Every card you own. Filter it any way you like and the totals follow.</p>
+      <div class="br-filters">
+        <input type="text" id="br-q" placeholder="Search name or type&hellip;" autocomplete="off">
+        <select id="br-cat"><option value="">All types</option></select>
+        <span class="br-pips" id="br-pips" title="Click a color to allow it, click again to require it (every card shown has it), a third time to clear"></span>
+        <label class="br-check" title="Only cards whose color identity is exactly the selected colors, not also smaller ones that fit inside them"><input type="checkbox" id="br-exact" checked> Exact colors</label>
+        <div class="br-setwrap"><button type="button" class="btn ghost small" id="br-setbtn">Sets</button>
+          <div class="br-setpop" id="br-setpop"><input type="text" id="br-setq" placeholder="Find a set&hellip;" autocomplete="off"><div class="br-setlist" id="br-setlist"></div>
+            <div class="br-setactions"><a href="#" id="br-setclear">Clear</a><a href="#" id="br-setdone">Done</a></div></div></div>
+      </div>
+      <div class="br-filters">
+        <select id="br-role"><option value="">Any role</option></select>
+        <select id="br-theme"><option value="">Any theme</option></select>
+        <span class="br-sep">Price each $</span><input type="number" id="br-pmin" min="0" step="0.01" placeholder="min"><span class="br-sep">to</span><input type="number" id="br-pmax" min="0" step="0.01" placeholder="max">
+        <label class="br-check"><input type="checkbox" id="br-foil"> Has a foil</label>
+        <select id="br-sort" title="How to order the cards">
+          <option value="name">Sort: name</option><option value="each">Sort: price each</option><option value="value">Sort: total value</option>
+          <option value="cmc">Sort: mana value</option><option value="rank">Sort: popularity</option><option value="qty">Sort: copies owned</option>
+        </select>
+        <button type="button" class="btn ghost small" id="br-dir" title="Reverse the order">&#8593;</button>
+        <div class="ins-tabs" id="br-viewmode"><button type="button" data-v="cards" class="on">Cards</button><button type="button" data-v="list">List</button></div>
+        <a href="#" id="br-reset" style="font-size:0.85rem;">Reset filters</a>
+      </div>
+      <div class="stat-tiles br-summary" id="br-summary"></div>
+      <p class="br-note" id="br-note"></p>
+      <div id="br-results"><div class="ins-loading">Loading your cards&hellip;</div></div>
+    </div>
+  </div>
   <div id="ins-tip" role="tooltip"></div>
   <div id="ins-zoom"><img alt=""></div>
   <div class="ins-modal" id="ins-modal" role="dialog" aria-modal="true" aria-label="Cards">
@@ -290,7 +361,7 @@ function renderModalCards() {
 }
 function loadModalMode() {
   const mine = ++modalSeq;
-  document.querySelectorAll('.ins-tabs button').forEach((b) => b.classList.toggle('on', b.dataset.mode === modalMode));
+  document.querySelectorAll('.ins-modal-head .ins-tabs button').forEach((b) => b.classList.toggle('on', b.dataset.mode === modalMode));
   modalFilter.value = '';
   if (modalCache[modalMode]) { modalCards = modalCache[modalMode]; renderModalCards(); return; }
   document.getElementById('ins-modal-count').textContent = '';
@@ -316,7 +387,7 @@ document.getElementById('ins-modal-close').addEventListener('click', closeList);
 modal.addEventListener('click', (e) => { if (e.target === modal) closeList(); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && modal.classList.contains('show')) closeList(); });
 modalFilter.addEventListener('input', renderModalCards);
-document.querySelector('.ins-tabs').addEventListener('click', (e) => {
+document.querySelector('.ins-modal-head .ins-tabs').addEventListener('click', (e) => {
   const b = e.target.closest('button');
   if (b && b.dataset.mode !== modalMode) { modalMode = b.dataset.mode; loadModalMode(); }
 });
@@ -333,35 +404,39 @@ const zoomImg = zoomEl.querySelector('img');
 let zoomId = null;
 const faceOf = (card) => card.dataset.face === 'back' ? 'back' : 'front';
 const hideZoom = () => { zoomId = null; zoomEl.classList.remove('show'); };
-modalBody.addEventListener('mousemove', (e) => {
-  const card = e.target.closest ? e.target.closest('.ins-card[data-id]') : null;
-  const id = card && card.dataset.id;
-  if (!id) { if (zoomId) hideZoom(); return; }
-  const key = id + faceOf(card);
-  if (key !== zoomId) {
-    zoomId = key;
-    zoomImg.src = cardImg(id, faceOf(card));
-    zoomEl.classList.add('show');
-  }
-  const pad = 22, w = zoomEl.offsetWidth, h = zoomEl.offsetHeight || 420;
-  let x = e.clientX + pad, y = e.clientY - h / 2;
-  if (x + w > window.innerWidth - 8) x = e.clientX - w - pad;
-  y = Math.max(8, Math.min(y, window.innerHeight - h - 8));
-  zoomEl.style.left = Math.max(8, x) + 'px'; zoomEl.style.top = y + 'px';
-});
-// the flip button turns a double-faced card (tile and zoom) to its other face
-modalBody.addEventListener('click', (e) => {
-  const btn = e.target.closest ? e.target.closest('.flip') : null;
-  if (!btn) return;
-  e.preventDefault(); e.stopPropagation();
-  const card = btn.closest('.ins-card');
-  const face = faceOf(card) === 'back' ? 'front' : 'back';
-  card.dataset.face = face;
-  card.querySelector('img').src = cardImg(card.dataset.id, face);
-  if (zoomId) { zoomId = card.dataset.id + face; zoomImg.src = cardImg(card.dataset.id, face); }
-}, true);
-modalBody.addEventListener('mouseleave', hideZoom);
-modalBody.addEventListener('scroll', hideZoom, true);
+// hover-enlarge and the flip button, for any grid of .ins-card tiles (the modal and the Browse view)
+function attachZoom(box) {
+  box.addEventListener('mousemove', (e) => {
+    const card = e.target.closest ? e.target.closest('.ins-card[data-id]') : null;
+    const id = card && card.dataset.id;
+    if (!id) { if (zoomId) hideZoom(); return; }
+    const key = id + faceOf(card);
+    if (key !== zoomId) {
+      zoomId = key;
+      zoomImg.src = cardImg(id, faceOf(card));
+      zoomEl.classList.add('show');
+    }
+    const pad = 22, w = zoomEl.offsetWidth, h = zoomEl.offsetHeight || 420;
+    let x = e.clientX + pad, y = e.clientY - h / 2;
+    if (x + w > window.innerWidth - 8) x = e.clientX - w - pad;
+    y = Math.max(8, Math.min(y, window.innerHeight - h - 8));
+    zoomEl.style.left = Math.max(8, x) + 'px'; zoomEl.style.top = y + 'px';
+  });
+  // the flip button turns a double-faced card (tile and zoom) to its other face
+  box.addEventListener('click', (e) => {
+    const btn = e.target.closest ? e.target.closest('.flip') : null;
+    if (!btn) return;
+    e.preventDefault(); e.stopPropagation();
+    const card = btn.closest('.ins-card');
+    const face = faceOf(card) === 'back' ? 'front' : 'back';
+    card.dataset.face = face;
+    card.querySelector('img').src = cardImg(card.dataset.id, face);
+    if (zoomId) { zoomId = card.dataset.id + face; zoomImg.src = cardImg(card.dataset.id, face); }
+  }, true);
+  box.addEventListener('mouseleave', hideZoom);
+  box.addEventListener('scroll', hideZoom, true);
+}
+attachZoom(modalBody);
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideZoom(); });
 document.getElementById('ins-modal-close').addEventListener('click', hideZoom);
 
@@ -382,6 +457,185 @@ document.addEventListener('mousemove', (e) => {
 document.addEventListener('mouseleave', hideTip);
 document.addEventListener('scroll', hideTip, true);
 document.addEventListener('click', hideTip, true);
+
+// ---- Browse cards: every card you own, filtered and added up ----
+const brEl = (id) => document.getElementById(id);
+const BR = { data: null, loaded: false, loading: false, q: '', cat: '', role: '', theme: '', pips: { W: 0, U: 0, B: 0, R: 0, G: 0 }, colorless: false, exact: true,
+  sets: new Set(), pmin: null, pmax: null, foil: false, sort: 'name', desc: false, view: 'cards', shown: 96 };
+const money = (n) => '$' + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const PAGE = 96;
+
+function brMatchesColor(ci) {
+  const must = 'WUBRG'.split('').filter((c) => BR.pips[c] === 2), allowed = 'WUBRG'.split('').filter((c) => BR.pips[c] >= 1);
+  if (must.length) return must.every((c) => ci.includes(c)) && ci.every((c) => allowed.includes(c));
+  if (allowed.length) {
+    if (BR.exact) return (ci.length === allowed.length && allowed.every((c) => ci.includes(c))) || (BR.colorless && ci.length === 0);
+    if (allowed.length === 1) return ci.includes(allowed[0]) || (BR.colorless && ci.length === 0);
+    return (ci.length > 0 && ci.every((c) => allowed.includes(c))) || (BR.colorless && ci.length === 0);
+  }
+  return BR.colorless ? ci.length === 0 : true;
+}
+function brFiltered() {
+  const q = BR.q.trim().toLowerCase();
+  const role = BR.role === '' ? -1 : Number(BR.role), theme = BR.theme === '' ? -1 : Number(BR.theme);
+  const priceOn = BR.pmin != null || BR.pmax != null;
+  const rows = BR.data.cards.filter((c) => {
+    if (q && !(c.name + ' ' + (c.type_line || '')).toLowerCase().includes(q)) return false;
+    if (BR.cat && c.category !== BR.cat) return false;
+    if (!brMatchesColor(c.ci || [])) return false;
+    if (role >= 0 && !c.roles.includes(role)) return false;
+    if (theme >= 0 && !c.themes.includes(theme)) return false;
+    if (BR.sets.size && !c.sets.some((s) => BR.sets.has(s))) return false;
+    if (BR.foil && !(c.foil > 0)) return false;
+    if (priceOn) {
+      if (c.each == null) return false;
+      if (BR.pmin != null && c.each < BR.pmin) return false;
+      if (BR.pmax != null && c.each > BR.pmax) return false;
+    }
+    return true;
+  });
+  // Ascending is the natural order of what is sorted; cards with nothing to sort on (no price, unranked) always go last.
+  const dir = BR.desc ? -1 : 1, key = BR.sort;
+  const val = { name: (c) => c.name.toLowerCase(), each: (c) => c.each, value: (c) => c.value, cmc: (c) => c.cmc, rank: (c) => c.rank, qty: (c) => c.qty }[key];
+  rows.sort((a, b) => {
+    const x = val(a), y = val(b);
+    if (x == null && y == null) return a.name.localeCompare(b.name);
+    if (x == null) return 1;
+    if (y == null) return -1;
+    return (x < y ? -1 : x > y ? 1 : 0) * dir || a.name.localeCompare(b.name);
+  });
+  return rows;
+}
+function brRender() {
+  if (!BR.data) return;
+  const rows = brFiltered();
+  const copies = rows.reduce((n, c) => n + c.qty, 0);
+  const worth = rows.reduce((n, c) => n + (c.value || 0), 0);
+  const unpriced = rows.reduce((n, c) => n + c.unpriced, 0);
+  const best = rows.reduce((m, c) => (c.each != null && (!m || c.each > m.each) ? c : m), null);
+  const tile = (value, label, sub) => '<div class="stat-tile"><div class="stat-value">' + value + '</div><div class="stat-label">' + label + '</div>' + (sub ? '<div class="stat-sub">' + sub + '</div>' : '') + '</div>';
+  const filtering = rows.length !== BR.data.cards.length;
+  brEl('br-summary').innerHTML = tile(fmt(rows.length), 'Unique cards', filtering ? 'of ' + fmt(BR.data.cards.length) + ' you own' : 'you own')
+    + tile(fmt(copies), 'Copies', '')
+    + tile(money(worth), 'Total value', filtering ? 'of ' + money(BR.data.total_value) + ' overall' : 'at today’s market price')
+    + tile(rows.length ? money(worth / rows.length) : '—', 'Average per card', rows.length ? 'per unique card' : '')
+    + tile(best ? money(best.each) : '—', 'Priciest card', best ? esc(best.name) : '');
+  brEl('br-note').textContent = 'Value is today’s market price of the exact printing you own (the same prices as the Rough value tile; not your store setting, which only applies to cards you’d buy).'
+    + (unpriced ? ' ' + fmt(unpriced) + ' ' + (unpriced === 1 ? 'copy has' : 'copies have') + ' no price on file and count as $0.' : '')
+    + ((BR.pmin != null || BR.pmax != null) ? ' With a price filter on, cards with no price are left out.' : '');
+  const shownRows = rows.slice(0, BR.shown);
+  let html;
+  if (!rows.length) html = '<div class="ins-empty">No cards match these filters.</div>';
+  else if (BR.view === 'list') {
+    html = '<table class="br-list"><thead><tr><th>Card</th><th>Type</th><th>Sets</th><th class="num">Copies</th><th class="num">Each</th><th class="num">Value</th></tr></thead><tbody>'
+      + shownRows.map((c) => '<tr class="ins-card" data-id="' + esc(c.id || '') + '"><td>' + esc(c.name) + (c.foil ? ' ✦' : '') + '</td><td class="ty">' + esc(c.type_line || '') + '</td><td>' + esc(c.sets.join(', ')) + '</td><td class="num">' + c.qty + '</td><td class="num">' + (c.each != null ? money(c.each) : '—') + '</td><td class="num">' + (c.value != null ? money(c.value) : '—') + '</td></tr>').join('')
+      + '</tbody></table>';
+  } else {
+    html = '<div class="ins-cards" style="padding:0;">' + shownRows.map((c) => {
+      const img = c.id ? '<img loading="lazy" alt="' + esc(c.name) + '" src="' + cardImg(c.id) + '">' : '<div style="aspect-ratio:5/7;border-radius:6%;background:var(--bg);"></div>';
+      const worthTxt = c.value != null ? '<span class="worth">' + money(c.value) + (c.qty > 1 ? ' <small>(' + money(c.each) + ' each)</small>' : '') + '</span>' : '<span class="worth"><small>no price</small></span>';
+      return '<div class="ins-card" data-id="' + esc(c.id || '') + '"><div class="pic">' + img + flipBtn({ scryfall_id: c.id, layout: c.layout }) + (c.qty > 1 ? '<span class="qty">×' + c.qty + '</span>' : '') + '</div>'
+        + '<div class="nm">' + esc(c.name) + (c.foil ? ' ✦' : '') + '</div><div class="ty">' + esc(c.type_line || '') + '</div>' + worthTxt + '</div>';
+    }).join('') + '</div>';
+  }
+  const left = rows.length - shownRows.length;
+  if (left > 0) html += '<div class="br-more"><button type="button" class="btn ghost" id="br-more">Show ' + Math.min(PAGE, left) + ' more (' + fmt(left) + ' not shown)</button></div>';
+  brEl('br-results').innerHTML = html;
+  hideZoom();
+}
+function brChanged() { BR.shown = PAGE; brRender(); }
+
+function brSyncPips() {
+  brEl('br-pips').querySelectorAll('.br-pip').forEach((b) => {
+    const c = b.dataset.c;
+    const st = c === 'C' ? (BR.colorless ? 1 : 0) : BR.pips[c];
+    b.classList.toggle('on', st === 1); b.classList.toggle('must', st === 2);
+  });
+  const anyMust = 'WUBRG'.split('').some((c) => BR.pips[c] === 2);
+  brEl('br-exact').disabled = anyMust;
+  brEl('br-exact').closest('label').style.opacity = anyMust ? '0.45' : '';
+}
+function brRenderSets() {
+  const q = brEl('br-setq').value.trim().toLowerCase();
+  brEl('br-setlist').innerHTML = BR.data.sets.filter((s) => !q || (s.name + ' ' + s.code).toLowerCase().includes(q)).map((s) =>
+    '<label><input type="checkbox" value="' + esc(s.code) + '"' + (BR.sets.has(s.code) ? ' checked' : '') + '>' + esc(s.name) + '<small>' + esc(s.code) + ' · ' + s.n + '</small></label>').join('')
+    || '<div class="ins-empty" style="padding:10px;">No sets match.</div>';
+  brEl('br-setbtn').textContent = BR.sets.size ? 'Sets (' + BR.sets.size + ')' : 'Sets';
+}
+function brInit(d) {
+  BR.data = d; BR.loaded = true;
+  brEl('br-cat').innerHTML += d.categories.map((c) => '<option value="' + esc(c) + '">' + esc(c) + '</option>').join('');
+  brEl('br-role').innerHTML += d.roles.map((r, i) => '<option value="' + i + '">' + esc(r) + '</option>').join('');
+  brEl('br-theme').innerHTML += d.themes.map((t, i) => '<option value="' + i + '">' + esc(t) + '</option>').join('');
+  const names = { W: 'White', U: 'Blue', B: 'Black', R: 'Red', G: 'Green', C: 'Colorless' };
+  brEl('br-pips').innerHTML = 'WUBRGC'.split('').map((c) => '<button type="button" class="br-pip" data-c="' + c + '" aria-label="' + names[c] + '"><img src="/static/mana/' + c + '.svg" alt=""></button>').join('');
+  brSyncPips(); brRenderSets(); brRender();
+}
+function brLoad() {
+  if (BR.loaded || BR.loading) return;
+  BR.loading = true;
+  fetch('/collection/browse').then((r) => r.json()).then((d) => {
+    BR.loading = false;
+    if (d.error) { brEl('br-results').innerHTML = '<div class="ins-empty">' + esc(d.error) + '</div>'; return; }
+    brInit(d);
+  }).catch(() => { BR.loading = false; brEl('br-results').innerHTML = '<div class="ins-empty">Could not reach the server.</div>'; });
+}
+function setView(v) {
+  document.querySelectorAll('#ins-view-tabs button').forEach((b) => b.classList.toggle('on', b.dataset.view === v));
+  brEl('insights').hidden = v !== 'insights'; brEl('browse').hidden = v !== 'browse';
+  try { history.replaceState(null, '', v === 'browse' ? '#browse' : location.pathname); } catch (e) {}
+  if (v === 'browse') brLoad();
+}
+brEl('ins-view-tabs').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) setView(b.dataset.view); });
+brEl('br-q').addEventListener('input', (e) => { BR.q = e.target.value; brChanged(); });
+brEl('br-cat').addEventListener('change', (e) => { BR.cat = e.target.value; brChanged(); });
+brEl('br-role').addEventListener('change', (e) => { BR.role = e.target.value; brChanged(); });
+brEl('br-theme').addEventListener('change', (e) => { BR.theme = e.target.value; brChanged(); });
+brEl('br-exact').addEventListener('change', (e) => { BR.exact = e.target.checked; brChanged(); });
+brEl('br-foil').addEventListener('change', (e) => { BR.foil = e.target.checked; brChanged(); });
+const numOrNull = (v) => (v === '' || isNaN(Number(v))) ? null : Number(v);
+brEl('br-pmin').addEventListener('input', (e) => { BR.pmin = numOrNull(e.target.value); brChanged(); });
+brEl('br-pmax').addEventListener('input', (e) => { BR.pmax = numOrNull(e.target.value); brChanged(); });
+brEl('br-sort').addEventListener('change', (e) => {
+  BR.sort = e.target.value;
+  BR.desc = ['each', 'value', 'qty'].includes(BR.sort);  // money and copies read best biggest first; the rest start at the small end
+  brEl('br-dir').innerHTML = BR.desc ? '&#8595;' : '&#8593;'; brChanged();
+});
+brEl('br-dir').addEventListener('click', () => { BR.desc = !BR.desc; brEl('br-dir').innerHTML = BR.desc ? '&#8595;' : '&#8593;'; brChanged(); });
+brEl('br-viewmode').addEventListener('click', (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  BR.view = b.dataset.v; brEl('br-viewmode').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b)); brChanged();
+});
+brEl('br-pips').addEventListener('click', (e) => {
+  const b = e.target.closest('.br-pip'); if (!b) return;
+  const c = b.dataset.c;
+  if (c === 'C') { if ('WUBRG'.split('').some((x) => BR.pips[x] === 2)) return; BR.colorless = !BR.colorless; }
+  else { BR.pips[c] = (BR.pips[c] + 1) % 3; if (BR.pips[c] === 2) BR.colorless = false; }
+  brSyncPips(); brChanged();
+});
+brEl('br-setbtn').addEventListener('click', (e) => { e.stopPropagation(); brEl('br-setpop').classList.toggle('show'); if (brEl('br-setpop').classList.contains('show')) brEl('br-setq').focus(); });
+brEl('br-setpop').addEventListener('click', (e) => e.stopPropagation());
+document.addEventListener('click', () => brEl('br-setpop').classList.remove('show'));
+brEl('br-setq').addEventListener('input', brRenderSets);
+brEl('br-setlist').addEventListener('change', (e) => {
+  const cb = e.target; if (!cb.value) return;
+  if (cb.checked) BR.sets.add(cb.value); else BR.sets.delete(cb.value);
+  brEl('br-setbtn').textContent = BR.sets.size ? 'Sets (' + BR.sets.size + ')' : 'Sets'; brChanged();
+});
+brEl('br-setclear').addEventListener('click', (e) => { e.preventDefault(); BR.sets.clear(); brRenderSets(); brChanged(); });
+brEl('br-setdone').addEventListener('click', (e) => { e.preventDefault(); brEl('br-setpop').classList.remove('show'); });
+brEl('br-reset').addEventListener('click', (e) => {
+  e.preventDefault();
+  Object.assign(BR, { q: '', cat: '', role: '', theme: '', colorless: false, exact: true, pmin: null, pmax: null, foil: false, sort: 'name', desc: false });
+  BR.sets.clear(); 'WUBRG'.split('').forEach((c) => { BR.pips[c] = 0; });
+  ['br-q', 'br-pmin', 'br-pmax'].forEach((id) => { brEl(id).value = ''; });
+  ['br-cat', 'br-role', 'br-theme'].forEach((id) => { brEl(id).value = ''; });
+  brEl('br-sort').value = 'name'; brEl('br-exact').checked = true; brEl('br-foil').checked = false; brEl('br-dir').innerHTML = '&#8593;';
+  brSyncPips(); brRenderSets(); brChanged();
+});
+brEl('br-results').addEventListener('click', (e) => { if (e.target.closest('#br-more')) { BR.shown += PAGE; brRender(); } });
+attachZoom(brEl('br-results'));
+if (location.hash === '#browse') setView('browse');
 
 fetch('/collection/data').then((r) => r.json()).then((d) => {
   const el = document.getElementById('insights');
