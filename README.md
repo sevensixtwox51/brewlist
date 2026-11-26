@@ -219,8 +219,9 @@ card database and Scryfall's Oracle Tags.
   get the same hover shimmer as the compare report's foil tiles, and in the
   lightbox the card tilts toward your pointer as if you were holding it, with a
   glare that sweeps across it (and a rainbow band for a foil). Surge foils,
-  found from Scryfall's promo types, get their own rippling, color-cycling
-  look and a Surge foil tag. Your foil printings are looked up once, the first
+  found from Scryfall's promo types, get their own look (fine diagonal foil
+  stripes, rippled, with a rainbow that slides as the card tilts) and a Surge
+  foil tag. Your foil printings are looked up once, the first
   time you open Browse (a few seconds, needs the internet), and saved Value is the
   market price of the exact printing you own, the same prices the Market
   value tile adds up

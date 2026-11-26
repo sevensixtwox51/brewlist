@@ -171,15 +171,19 @@ table.br-list { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
   background: linear-gradient(115deg, transparent 18%, rgba(255,0,150,0.55) 32%, rgba(255,220,0,0.5) 42%, rgba(0,255,190,0.5) 52%, rgba(0,150,255,0.55) 62%, transparent 78%);
   background-size: 280% 280%; background-position: var(--gx, 50%) var(--gy, 50%); }
 .br-tilt.holo .br-glare::after { opacity: 0.55; }
-/* Surge foil: a rippling pattern radiating from the light, with an iridescent rainbow that slowly cycles. */
-.br-tilt.surge .br-glare::after { opacity: 0.7; animation: surge-hue 7s linear infinite;
-  background: repeating-radial-gradient(circle at var(--gx, 50%) var(--gy, 50%), rgba(255,255,255,0) 0 7px, rgba(255,255,255,0.5) 11px, rgba(255,255,255,0) 17px),
-    linear-gradient(115deg, transparent 10%, rgba(255,0,150,0.6) 28%, rgba(255,220,0,0.55) 40%, rgba(0,255,190,0.55) 52%, rgba(0,150,255,0.6) 64%, rgba(170,0,255,0.5) 74%, transparent 90%);
+/* Surge foil (per Draftsim and MTG Rocks): parallel diagonal stripes of foil running bottom-left to top-right across the whole
+   card, a rippling, streaked wave rather than concentric rings, with a rainbow finish that slides across as the angle changes.
+   The stripes are warped by an SVG turbulence filter so the lines ripple instead of ruling straight. */
+.br-tilt.surge .br-glare::after { opacity: 0.55; filter: url(#surge-wave);
+  background:
+    repeating-linear-gradient(135deg, rgba(255,255,255,0) 0 2px, rgba(255,255,255,0.7) 4px, rgba(255,255,255,0) 6px),
+    repeating-linear-gradient(135deg, rgba(255,0,150,0.5) 0, rgba(255,220,0,0.45) 50px, rgba(0,255,190,0.45) 100px, rgba(0,150,255,0.5) 150px, rgba(170,0,255,0.45) 200px, rgba(255,0,150,0.5) 250px);
   background-size: auto, 300% 300%; background-position: 0 0, var(--gx, 50%) var(--gy, 50%); }
-@keyframes surge-hue { from { filter: hue-rotate(0deg); } to { filter: hue-rotate(360deg); } }
-.pic.foil.surge::before { background: repeating-radial-gradient(circle at var(--mx) var(--my), rgba(255,255,255,0) 0 6px, rgba(255,255,255,0.4) 10px, rgba(255,255,255,0) 15px),
-    radial-gradient(circle at var(--mx) var(--my), rgba(255,255,255,0.3) 0%, rgba(120,200,255,0.24) 25%, rgba(255,80,220,0.24) 45%, transparent 72%); mix-blend-mode: overlay; }
-@media (prefers-reduced-motion: reduce) { .br-tilt, .br-tilt.live { transition: none; } .br-tilt.surge .br-glare::after { animation: none; } }
+.pic.foil.surge::before { background:
+    repeating-linear-gradient(135deg, rgba(255,255,255,0) 0 2px, rgba(255,255,255,0.55) 4px, rgba(255,255,255,0) 6px),
+    repeating-linear-gradient(135deg, rgba(255,0,150,0.5) 0, rgba(255,220,0,0.45) 30px, rgba(0,255,190,0.45) 60px, rgba(0,150,255,0.5) 90px, rgba(170,0,255,0.45) 120px, rgba(255,0,150,0.5) 150px);
+  background-size: auto, 300% 300%; background-position: 0 0, var(--mx) var(--my); mix-blend-mode: overlay; opacity: 0; filter: url(#surge-wave); }
+@media (prefers-reduced-motion: reduce) { .br-tilt, .br-tilt.live { transition: none; } }
 .br-lb-art .flip { position: absolute; top: 10px; right: 10px; z-index: 2; width: 32px; height: 32px; border-radius: 999px; border: 1px solid var(--card-border); background: rgba(0,0,0,0.7); color: var(--text); cursor: pointer; font-size: 1rem; }
 .br-lb-art .flip:hover { color: var(--accent); border-color: var(--accent); }
 .br-lb-info { flex: 1 1 280px; min-width: 260px; }
@@ -207,6 +211,7 @@ table.br-list { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
 .pic.foil { --mx: 50%; --my: 50%; isolation: isolate; }
 .pic.foil::before { content: ""; position: absolute; inset: 0; z-index: 1; pointer-events: none; border-radius: 6.5%; background: radial-gradient(circle at var(--mx) var(--my), rgba(255,255,255,0.22) 0%, rgba(120,200,255,0.14) 25%, rgba(255,80,220,0.12) 45%, transparent 70%); mix-blend-mode: soft-light; opacity: 0; transition: opacity 0.7s ease; }
 .pic.foil:hover::before { opacity: 1; }
+.pic.foil.surge:hover::before { opacity: 0.55; }
 .pic.foil .qty, .pic.foil .rank, .pic.foil .flip { z-index: 2; }
 @media (max-width: 800px) { .ins-two { grid-template-columns: 1fr; } .ins-theme { grid-template-columns: 1fr; gap: 4px; } .ins-pill { justify-self: start; } }
 """
@@ -248,6 +253,7 @@ COLLECTION_BODY = """
   </div>
   <div id="ins-tip" role="tooltip"></div>
   <div id="ins-zoom"><img alt=""></div>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true"><filter id="surge-wave" x="0" y="0" width="100%" height="100%"><feTurbulence type="fractalNoise" baseFrequency="0.01 0.034" numOctaves="2" seed="4" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="15" xChannelSelector="R" yChannelSelector="G"/></filter></svg>
   <div class="br-lb" id="br-lb" role="dialog" aria-modal="true" aria-label="Card">
     <button type="button" class="br-lb-nav prev" id="br-lb-prev" aria-label="Previous card">&lsaquo;</button>
     <button type="button" class="br-lb-nav next" id="br-lb-next" aria-label="Next card">&rsaquo;</button>
