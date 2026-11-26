@@ -171,19 +171,6 @@ table.br-list { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
   background: linear-gradient(115deg, transparent 18%, rgba(255,0,150,0.55) 32%, rgba(255,220,0,0.5) 42%, rgba(0,255,190,0.5) 52%, rgba(0,150,255,0.55) 62%, transparent 78%);
   background-size: 280% 280%; background-position: var(--gx, 50%) var(--gy, 50%); }
 .br-tilt.holo .br-glare::after { opacity: 0.55; }
-/* Surge foil, matched to a photo of a real one (The One Ring, Hobbit Eternal): broad, hard-edged parallel bands running from
-   bottom-left to top-right across the whole card, alternating between lit bands (orange, pink, lime) and plain ones where the
-   art shows through. Tilting the card slides the bands across it. A faint fine ridging underneath gives the rippled texture. */
-.br-tilt.surge .br-glare { opacity: var(--go, 0.5); }  /* a surge foil is never fully dull: a faint sheen at rest */
-.br-tilt.surge .br-glare::after { opacity: 0.62; filter: url(#surge-wave);
-  background:
-    repeating-linear-gradient(142deg, rgba(255,255,255,0) 0 52px, rgba(255,150,60,0.9) 56px, rgba(255,95,160,0.85) 72px, rgba(190,255,70,0.9) 88px, rgba(255,255,255,0) 92px 140px),
-    repeating-linear-gradient(142deg, rgba(255,255,255,0) 0 3px, rgba(255,255,255,0.14) 5px, rgba(255,255,255,0) 7px);
-  background-size: 260% 260%, auto; background-position: var(--gx, 50%) var(--gy, 50%), 0 0; }
-.pic.foil.surge::before { background:
-    repeating-linear-gradient(142deg, rgba(255,255,255,0) 0 24px, rgba(255,150,60,0.9) 26px, rgba(255,95,160,0.85) 34px, rgba(190,255,70,0.9) 42px, rgba(255,255,255,0) 44px 64px),
-    repeating-linear-gradient(142deg, rgba(255,255,255,0) 0 2px, rgba(255,255,255,0.14) 3px, rgba(255,255,255,0) 5px);
-  background-size: 260% 260%, auto; background-position: var(--mx) var(--my), 0 0; mix-blend-mode: color-dodge; opacity: 0; filter: url(#surge-wave); }
 @media (prefers-reduced-motion: reduce) { .br-tilt, .br-tilt.live { transition: none; } }
 .br-lb-art .flip { position: absolute; top: 10px; right: 10px; z-index: 2; width: 32px; height: 32px; border-radius: 999px; border: 1px solid var(--card-border); background: rgba(0,0,0,0.7); color: var(--text); cursor: pointer; font-size: 1rem; }
 .br-lb-art .flip:hover { color: var(--accent); border-color: var(--accent); }
@@ -212,7 +199,6 @@ table.br-list { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
 .pic.foil { --mx: 50%; --my: 50%; isolation: isolate; }
 .pic.foil::before { content: ""; position: absolute; inset: 0; z-index: 1; pointer-events: none; border-radius: 6.5%; background: radial-gradient(circle at var(--mx) var(--my), rgba(255,255,255,0.22) 0%, rgba(120,200,255,0.14) 25%, rgba(255,80,220,0.12) 45%, transparent 70%); mix-blend-mode: soft-light; opacity: 0; transition: opacity 0.7s ease; }
 .pic.foil:hover::before { opacity: 1; }
-.pic.foil.surge:hover::before { opacity: 0.6; }
 .pic.foil .qty, .pic.foil .rank, .pic.foil .flip { z-index: 2; }
 @media (max-width: 800px) { .ins-two { grid-template-columns: 1fr; } .ins-theme { grid-template-columns: 1fr; gap: 4px; } .ins-pill { justify-self: start; } }
 """
@@ -254,7 +240,6 @@ COLLECTION_BODY = """
   </div>
   <div id="ins-tip" role="tooltip"></div>
   <div id="ins-zoom"><img alt=""></div>
-  <svg width="0" height="0" style="position:absolute" aria-hidden="true"><filter id="surge-wave" x="0" y="0" width="100%" height="100%"><feTurbulence type="fractalNoise" baseFrequency="0.02 0.05" numOctaves="2" seed="4" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="5" xChannelSelector="R" yChannelSelector="G"/></filter></svg>
   <div class="br-lb" id="br-lb" role="dialog" aria-modal="true" aria-label="Card">
     <button type="button" class="br-lb-nav prev" id="br-lb-prev" aria-label="Previous card">&lsaquo;</button>
     <button type="button" class="br-lb-nav next" id="br-lb-next" aria-label="Next card">&rsaquo;</button>
@@ -549,7 +534,6 @@ const PAGE = 96;
 // what one copy is worth: a single figure, or the range when the printings you hold differ (a foil and a regular copy)
 const eachTxt = (c) => c.top == null ? '—' : (c.top === c.low ? money(c.top) : money(c.low) + '–' + money(c.top));
 // the tile shows one printing (the best one you own); it shimmers when that printing is a foil
-const shownIsSurge = (c) => BR.surge.has(c.id);
 const shownIsFoil = (c) => { const x = (c.pr || []).find((p) => p.id === c.id); return x ? x.f > 0 : c.foil > 0; };
 function brMatchesColor(ci) {
   const must = 'WUBRG'.split('').filter((c) => BR.pips[c] === 2), allowed = 'WUBRG'.split('').filter((c) => BR.pips[c] >= 1);
@@ -621,7 +605,7 @@ function brRender() {
     html = '<div class="ins-cards" style="padding:0;">' + shownRows.map((c, i) => {
       const img = c.id ? '<img loading="lazy" alt="' + esc(c.name) + '" src="' + cardImg(c.id) + '">' : '<div style="aspect-ratio:5/7;border-radius:6%;background:var(--bg);"></div>';
       const worthTxt = c.value != null ? '<span class="worth">' + money(c.value) + (c.qty > 1 ? ' <small>(' + eachTxt(c) + (c.top === c.low ? ' each' : '') + ')</small>' : '') + '</span>' : '<span class="worth"><small>no price</small></span>';
-      return '<div class="ins-card" data-i="' + i + '" data-id="' + esc(c.id || '') + '"><div class="pic' + (shownIsFoil(c) ? ' foil' : '') + (shownIsSurge(c) ? ' surge' : '') + '">' + img + flipBtn({ scryfall_id: c.id, layout: c.layout }) + (c.qty > 1 ? '<span class="qty">×' + c.qty + '</span>' : '') + '</div>'
+      return '<div class="ins-card" data-i="' + i + '" data-id="' + esc(c.id || '') + '"><div class="pic' + (shownIsFoil(c) ? ' foil' : '') + '">' + img + flipBtn({ scryfall_id: c.id, layout: c.layout }) + (c.qty > 1 ? '<span class="qty">×' + c.qty + '</span>' : '') + '</div>'
         + '<div class="nm">' + esc(c.name) + (c.foil ? ' ✦' : '') + '</div><div class="ty">' + esc(c.type_line || '') + '</div>' + worthTxt + '</div>';
     }).join('') + '</div>';
   }
@@ -751,9 +735,7 @@ function lbRender() {
   const cur = pr[LB.p];
   const img = brEl('br-lb-img');
   img.src = cardImg(cur.id, LB.face); img.alt = c.name;
-  const surge = BR.surge.has(cur.id);
-  brEl('br-tilt').classList.toggle('holo', cur.f > 0 && !surge);
-  brEl('br-tilt').classList.toggle('surge', surge);
+  brEl('br-tilt').classList.toggle('holo', cur.f > 0);
   const canFlip = FLIPS.includes(c.layout);
   brEl('br-lb-flip').hidden = !canFlip;
   const names = (BR.data && BR.data.set_names) || {};
