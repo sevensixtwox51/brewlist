@@ -158,7 +158,20 @@ table.br-list { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
 .br-lb.show { display: flex; }
 .br-lb-panel { position: relative; display: flex; gap: 26px; align-items: flex-start; max-width: min(960px, 100%); max-height: 94vh; overflow: auto; background: var(--bg-elevated); border: 1px solid var(--card-border); border-radius: 16px; padding: 22px 26px; box-shadow: var(--shadow); }
 .br-lb-art { position: relative; flex: 0 0 auto; width: min(380px, 70vw); }
-.br-lb-art img { display: block; width: 100%; aspect-ratio: 5 / 7; border-radius: 4.8%; background: var(--bg); box-shadow: 0 6px 26px rgba(0,0,0,0.6); }
+/* The card is held in the hand: it tilts toward the pointer in 3D, its shadow slides the other way, and a glare sweeps
+   across it (a rainbow band too when the printing is a foil) as the angle changes. */
+.br-lb-art { perspective: 900px; }
+.br-tilt { position: relative; border-radius: 4.8%; transform-style: preserve-3d; transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)) scale(var(--sc, 1));
+  box-shadow: var(--sh, 0 6px 26px rgba(0,0,0,0.6)); transition: transform 0.55s cubic-bezier(.2,.8,.2,1), box-shadow 0.55s cubic-bezier(.2,.8,.2,1); will-change: transform; }
+.br-tilt.live { transition: transform 0.07s linear, box-shadow 0.07s linear; }
+.br-tilt img { display: block; width: 100%; aspect-ratio: 5 / 7; border-radius: 4.8%; background: var(--bg); }
+.br-glare { position: absolute; inset: 0; border-radius: 4.8%; overflow: hidden; pointer-events: none; opacity: var(--go, 0); transition: opacity 0.4s ease; }
+.br-glare::before { content: ""; position: absolute; inset: 0; background: radial-gradient(farthest-corner circle at var(--gx, 50%) var(--gy, 50%), rgba(255,255,255,0.5) 0%, rgba(255,255,255,0.14) 30%, transparent 60%); mix-blend-mode: soft-light; }
+.br-glare::after { content: ""; position: absolute; inset: 0; opacity: 0; mix-blend-mode: color-dodge;
+  background: linear-gradient(115deg, transparent 18%, rgba(255,0,150,0.55) 32%, rgba(255,220,0,0.5) 42%, rgba(0,255,190,0.5) 52%, rgba(0,150,255,0.55) 62%, transparent 78%);
+  background-size: 280% 280%; background-position: var(--gx, 50%) var(--gy, 50%); }
+.br-tilt.holo .br-glare::after { opacity: 0.55; }
+@media (prefers-reduced-motion: reduce) { .br-tilt, .br-tilt.live { transition: none; } }
 .br-lb-art .flip { position: absolute; top: 10px; right: 10px; z-index: 2; width: 32px; height: 32px; border-radius: 999px; border: 1px solid var(--card-border); background: rgba(0,0,0,0.7); color: var(--text); cursor: pointer; font-size: 1rem; }
 .br-lb-art .flip:hover { color: var(--accent); border-color: var(--accent); }
 .br-lb-info { flex: 1 1 280px; min-width: 260px; }
@@ -183,10 +196,9 @@ table.br-list { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
 .br-lb-nav.prev { left: 14px; } .br-lb-nav.next { right: 14px; }
 #br-results .ins-card[data-i], #br-results tr[data-i] { cursor: pointer; }
 /* Foil printings get the same hover shimmer as the compare report's tiles: a soft rainbow glow that follows the pointer. */
-.pic.foil, .br-lb-art.foil { --mx: 50%; --my: 50%; isolation: isolate; }
-.pic.foil::before, .br-lb-art.foil::before { content: ""; position: absolute; inset: 0; z-index: 1; pointer-events: none; border-radius: 6.5%; background: radial-gradient(circle at var(--mx) var(--my), rgba(255,255,255,0.22) 0%, rgba(120,200,255,0.14) 25%, rgba(255,80,220,0.12) 45%, transparent 70%); mix-blend-mode: soft-light; opacity: 0; transition: opacity 0.7s ease; }
-.br-lb-art.foil::before { border-radius: 4.8%; }
-.pic.foil:hover::before, .br-lb-art.foil:hover::before { opacity: 1; }
+.pic.foil { --mx: 50%; --my: 50%; isolation: isolate; }
+.pic.foil::before { content: ""; position: absolute; inset: 0; z-index: 1; pointer-events: none; border-radius: 6.5%; background: radial-gradient(circle at var(--mx) var(--my), rgba(255,255,255,0.22) 0%, rgba(120,200,255,0.14) 25%, rgba(255,80,220,0.12) 45%, transparent 70%); mix-blend-mode: soft-light; opacity: 0; transition: opacity 0.7s ease; }
+.pic.foil:hover::before { opacity: 1; }
 .pic.foil .qty, .pic.foil .rank, .pic.foil .flip { z-index: 2; }
 @media (max-width: 800px) { .ins-two { grid-template-columns: 1fr; } .ins-theme { grid-template-columns: 1fr; gap: 4px; } .ins-pill { justify-self: start; } }
 """
@@ -233,7 +245,7 @@ COLLECTION_BODY = """
     <button type="button" class="br-lb-nav next" id="br-lb-next" aria-label="Next card">&rsaquo;</button>
     <div class="br-lb-panel">
       <button type="button" class="br-lb-close" id="br-lb-close" aria-label="Close">&times;</button>
-      <div class="br-lb-art"><img id="br-lb-img" alt=""><button type="button" class="flip" id="br-lb-flip" title="Show the other face" hidden>&#8635;</button></div>
+      <div class="br-lb-art"><div class="br-tilt" id="br-tilt"><img id="br-lb-img" alt=""><div class="br-glare"></div></div><button type="button" class="flip" id="br-lb-flip" title="Show the other face" hidden>&#8635;</button></div>
       <div class="br-lb-info" id="br-lb-info"></div>
     </div>
   </div>
@@ -483,7 +495,7 @@ attachZoom(modalBody);
 // the foil shimmer follows the pointer across a foil card's picture
 function attachFoil(box) {
   box.addEventListener('mousemove', (e) => {
-    const t = e.target.closest ? e.target.closest('.pic.foil, .br-lb-art.foil') : null;
+    const t = e.target.closest ? e.target.closest('.pic.foil') : null;
     if (!t) return;
     const r = t.getBoundingClientRect();
     t.style.setProperty('--mx', ((e.clientX - r.left) / r.width * 100) + '%');
@@ -695,7 +707,23 @@ brEl('br-reset').addEventListener('click', (e) => {
 brEl('br-results').addEventListener('click', (e) => { if (e.target.closest('#br-more')) { BR.shown += PAGE; brRender(); } });
 attachZoom(brEl('br-results'));
 attachFoil(brEl('br-results'));
-attachFoil(brEl('br-lb'));
+// the card follows the pointer like it is held in a hand: tilt, a sliding shadow and a moving glare
+const lbArt = brEl('br-lb').querySelector('.br-lb-art'), lbTilt = brEl('br-tilt');
+const noMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+lbArt.addEventListener('pointermove', (e) => {
+  if (noMotion) return;
+  const r = lbArt.getBoundingClientRect();
+  const nx = Math.max(-1, Math.min(1, (e.clientX - r.left) / r.width * 2 - 1)), ny = Math.max(-1, Math.min(1, (e.clientY - r.top) / r.height * 2 - 1));
+  lbTilt.classList.add('live');
+  const st = lbTilt.style;
+  st.setProperty('--ry', (nx * 14).toFixed(2) + 'deg'); st.setProperty('--rx', (-ny * 14).toFixed(2) + 'deg'); st.setProperty('--sc', '1.03');
+  st.setProperty('--sh', (-nx * 22).toFixed(1) + 'px ' + (-ny * 22 + 14).toFixed(1) + 'px 38px rgba(0,0,0,0.65)');
+  st.setProperty('--gx', ((nx + 1) * 50).toFixed(1) + '%'); st.setProperty('--gy', ((ny + 1) * 50).toFixed(1) + '%'); st.setProperty('--go', '1');
+});
+lbArt.addEventListener('pointerleave', () => {
+  lbTilt.classList.remove('live');
+  ['--rx', '--ry', '--sc', '--sh', '--go'].forEach((k) => lbTilt.style.removeProperty(k));
+});
 
 // ---- click a card: a lightbox with every printing of it you own ----
 const LB = { i: -1, p: 0, face: 'front' };
@@ -707,7 +735,7 @@ function lbRender() {
   const cur = pr[LB.p];
   const img = brEl('br-lb-img');
   img.src = cardImg(cur.id, LB.face); img.alt = c.name;
-  brEl('br-lb').querySelector('.br-lb-art').classList.toggle('foil', cur.f > 0);
+  brEl('br-tilt').classList.toggle('holo', cur.f > 0);
   const canFlip = FLIPS.includes(c.layout);
   brEl('br-lb-flip').hidden = !canFlip;
   const names = (BR.data && BR.data.set_names) || {};

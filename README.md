@@ -216,7 +216,9 @@ card database and Scryfall's Oracle Tags.
   flip buttons. Click a card for a lightbox with a big picture and every
   printing of it you own (set, foil or not, copies and price; click one to see
   that art), and step through the list with the arrow keys. Foil printings
-  get the same hover shimmer as the compare report's foil tiles. Value is the
+  get the same hover shimmer as the compare report's foil tiles, and in the
+  lightbox the card tilts toward your pointer as if you were holding it, with a
+  glare that sweeps across it (and a rainbow band for a foil). Value is the
   market price of the exact printing you own, the same prices the Market
   value tile adds up
 
