@@ -20,7 +20,7 @@ import re
 import urllib.error
 import urllib.request
 
-from brewlist_core import PRICE_INDEX_PATH, commander_eligible, gameplay_data_in_index, normalize_name, prices_data_in_index
+from brewlist_core import PRICE_INDEX_PATH, best_offer, commander_eligible, gameplay_data_in_index, normalize_name, prices_data_in_index
 import edhrec_data
 from tag_synergy import _index as _tag_index
 from turn_clock import _PROTECT_RE, _REANIMATE_RE
@@ -224,10 +224,10 @@ def _use_best_printings(result: dict, owned_ids: dict[str, str]) -> None:
 
 
 def _cheapest(price_data: dict, name: str) -> float | None:
-    """Cheapest nonfoil USD price found (Cardmarket is EUR and never mixed in), or None."""
+    """Cheapest nonfoil USD price among the stores the user picked (Cardmarket is EUR and never mixed in), or None."""
     entry = price_data.get(normalize_name(name)) or price_data.get(_front(name)) or {}
-    prices = [o[1] for o in (entry.get("nonfoil") or []) if o and o[0] != "CM" and o[1] is not None]
-    return min(prices) if prices else None
+    offer = best_offer(entry)
+    return offer[1] if offer else None
 
 
 def commander_ranks() -> dict[str, dict[str, int]]:

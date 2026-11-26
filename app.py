@@ -49,6 +49,7 @@ from brewlist_core import (
     fetch_deck,
     gameplay_data_in_index,
     load_collection,
+    active_price_stores,
     load_store_prefs,
     normalize_name,
     parse_deck_ref,
@@ -1002,7 +1003,7 @@ def render_decks_page(error: str | None = None, prefill_url: str = "") -> str:
         <summary id="store-summary" title="Which stores to show prices from">Prices from {store_summary_text}</summary>
         <div class="store-body">
           <div class="store-grid">{store_checkboxes_html}</div>
-          <div class="hint">Which stores to show prices from -- saved for next time.</div>
+          <div class="hint">Which stores prices come from, saved as soon as you tick a box. Applies everywhere: Compare, the Deck Builder, Commander research, Matchups and Collection insights (Cardmarket is EUR, so it is shown in Compare only).</div>
         </div>
       </details>
     </div>
@@ -1029,7 +1030,15 @@ function updateStoreSummary() {{
   const picked = [...form.querySelectorAll('input[name="stores"]:checked')].map(i => STORE_NAMES[i.value] || i.value);
   document.getElementById('store-summary').childNodes[0].textContent = 'Prices from ' + (picked.length ? picked.join(', ') : 'no stores selected');
 }}
-form.querySelectorAll('input[name="stores"]').forEach(i => i.addEventListener('change', updateStoreSummary));
+// ...and is saved the moment a box changes, so it works as a default without having to press Compare.
+let storeSaveNote = null;
+function saveStores() {{
+  const body = new URLSearchParams();
+  form.querySelectorAll('input[name="stores"]:checked').forEach(i => body.append('stores', i.value));
+  if (!body.has('stores')) return;  // nothing ticked: keep the last saved choice (Compare asks for at least one)
+  fetch('/store-prefs', {{ method: 'POST', body }}).catch(() => {{}});
+}}
+form.querySelectorAll('input[name="stores"]').forEach(i => i.addEventListener('change', () => {{ updateStoreSummary(); saveStores(); }}));
 const submitBtn = document.getElementById('submit-btn');
 const progressWrap = document.getElementById('progress-wrap');
 const progressFill = document.getElementById('progress-fill');
@@ -6033,12 +6042,25 @@ def commander_research_buildable():
         return jsonify(score={"status": "no-data"})
 
 
+@app.route("/store-prefs", methods=["POST"])
+def store_prefs_save():
+    """Saves which stores prices come from (the Decks page picker), as soon as a box is ticked. Prices everywhere --
+    Compare, builder suggestions, Commander research, Matchups pills, Collection insights -- follow it."""
+    selected = [s for s in request.form.getlist("stores") if s in PICKABLE_STORE_LABELS]
+    if not selected:
+        return jsonify(error="Pick at least one store."), 400
+    save_store_prefs(selected)
+    return jsonify(stores=selected)
+
+
 @app.route("/collection/data", methods=["GET"])
 def collection_insights_data():
     if not os.path.isfile(COLLECTION_PATH):
         return jsonify(error="No ManaBox collection on file yet -- upload your export on the Setup page first.")
     try:
-        return jsonify(get_insights(COLLECTION_PATH, os.path.getmtime(COLLECTION_PATH), load_collection, owned_collection_gameplay_view))
+        data = dict(get_insights(COLLECTION_PATH, os.path.getmtime(COLLECTION_PATH), load_collection, owned_collection_gameplay_view))
+        data["price_stores"] = [STORE_DISPLAY_NAMES[s] for s in active_price_stores()]
+        return jsonify(data)
     except ValueError as e:
         return jsonify(error=str(e))
 

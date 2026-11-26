@@ -259,6 +259,7 @@ function typesHtml(t) {
 const modal = document.getElementById('ins-modal');
 const modalBody = document.getElementById('ins-modal-body');
 const modalFilter = document.getElementById('ins-modal-filter');
+let priceStores = 'your chosen stores';
 let modalCards = [], modalSeq = 0, modalKey = '', modalMode = 'owned', modalCache = {};
 const cardImg = (id, face) => id ? 'https://cards.scryfall.io/normal/' + (face || 'front') + '/' + id[0] + '/' + id[1] + '/' + id + '.jpg' : '';
 // only these layouts have a second image on Scryfall (adventure/split cards 404 on /back/)
@@ -273,7 +274,7 @@ function renderModalCards() {
   const copies = shown.reduce((n, c) => n + (c.quantity || 1), 0);
   document.getElementById('ins-modal-count').textContent = shown.length + (shown.length === 1 ? ' card' : ' cards') + (!missing && copies !== shown.length ? ' · ' + copies + ' copies' : '');
   const noneOwned = modalCache.owned && modalCache.owned.length === 0;
-  const hint = missing ? '<div class="ins-modal-hint">' + (noneOwned ? 'You don\u2019t own any of these yet. ' : '') + 'The most popular Commander-legal cards like this that aren’t in your collection, most popular first (EDHREC rank). Prices are the cheapest nonfoil from TCGplayer, Card Kingdom and ManaPool; click a price to open that listing, or a card for its Scryfall page.</div>' : '';
+  const hint = missing ? '<div class="ins-modal-hint">' + (noneOwned ? 'You don\u2019t own any of these yet. ' : '') + 'The most popular Commander-legal cards like this that aren’t in your collection, most popular first (EDHREC rank). Prices are the cheapest nonfoil from ' + esc(priceStores) + ' (change the stores on the Decks page); click a price to open that listing, or a card for its Scryfall page.</div>' : '';
   const tile = (c) => {
     const img = c.scryfall_id ? '<img loading="lazy" alt="' + esc(c.name) + '" src="' + cardImg(c.scryfall_id) + '">' : '<div style="aspect-ratio:5/7;border-radius:6%;background:var(--bg);"></div>';
     if (!missing) {
@@ -385,6 +386,7 @@ document.addEventListener('click', hideTip, true);
 fetch('/collection/data').then((r) => r.json()).then((d) => {
   const el = document.getElementById('insights');
   if (d.error) { el.innerHTML = '<div class="card"><p>' + esc(d.error) + '</p><a class="btn small" href="/">Go to Setup</a></div>'; return; }
+  if (d.price_stores && d.price_stores.length) priceStores = d.price_stores.join(', ');
   el.innerHTML = snapshotHtml(d.snapshot) + colorsHtml(d.colors) + rolesHtml(d.roles) + themesHtml(d.themes) + typesHtml(d.types)
     + '<p class="ins-note">All of this is worked out on your computer from your collection and the local card database (' + fmt(d.pool_size) + ' Commander-legal nonland cards; you own ' + d.baseline_pct + '% of them). Nothing is sent anywhere.</p>';
   paintHeat();

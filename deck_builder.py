@@ -30,6 +30,7 @@ from brewlist_core import (
     game_changers_in_index,
     gameplay_data_in_index,
     normalize_name,
+    best_offer,
     prices_data_in_index,
     scryfall_prices_in_index,
 )
@@ -3333,9 +3334,9 @@ def suggest_builder_cards(
         number."""
         entry = prices.get(nm) or {}
         for finish in ("nonfoil", "foil"):
-            rows = entry.get(finish)
-            if rows:
-                return rows[0][1], rows[0][2]
+            offer = best_offer(entry, finish)  # cheapest among the stores picked on the Decks page
+            if offer:
+                return offer[1], offer[2]
         return None, None
 
     def suggestion_basis(nm: str) -> str:

@@ -33,7 +33,7 @@ __all__ = [
     "normalize_name", "find_collection_candidates", "load_collection", "load_overrides",
     "fetch_scryfall_prices_by_id", "price_for_printing", "select_used_printings",
     "printing_info_fetch_running", "flavor_names_in_cache", "price_index_age_days", "price_index_built_at", "rebuild_price_index", "rebuild_price_index_isolated", "ensure_price_index", "game_changers_in_index",
-    "load_store_prefs", "save_store_prefs", "STORE_LABELS", "STORE_DISPLAY_NAMES", "update_from_git",
+    "load_store_prefs", "save_store_prefs", "active_price_stores", "best_offer", "STORE_LABELS", "STORE_DISPLAY_NAMES", "update_from_git",
     "EXTRA_STORE_LABELS", "PICKABLE_STORE_LABELS",
     "commander_legality_in_index", "deck_is_commander_format",
     "find_deck_combos", "estimate_deck_bracket", "BRACKET_TAG_LABELS", "scryfall_prices_in_index",
@@ -887,6 +887,32 @@ def save_store_prefs(stores: list[str], path: str = STORE_PREFS_PATH) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump({"stores": selected}, f)
+
+
+_price_stores_cache: dict = {}
+
+
+def active_price_stores(path: str = STORE_PREFS_PATH) -> list[str]:
+    """The USD stores whose prices count everywhere outside the Compare report's own picker (builder suggestions, Commander
+    research, Matchups pills, Collection insights): the saved store preference, minus Cardmarket (EUR, never mixed into
+    dollar prices). If the preference holds no USD store (only Cardmarket), all USD stores count rather than hiding every
+    price. Re-read only when the preference file changes."""
+    try:
+        stamp = os.path.getmtime(path)
+    except OSError:
+        stamp = None
+    if _price_stores_cache.get("stamp") != stamp or _price_stores_cache.get("path") != path:
+        usd = [s for s in load_store_prefs(path) if s in STORE_LABELS]
+        _price_stores_cache.update(stamp=stamp, path=path, stores=usd or list(STORE_LABELS))
+    return _price_stores_cache["stores"]
+
+
+def best_offer(entry: dict | None, finish: str = "nonfoil"):
+    """The cheapest [store_label, price, url] in a price-index entry's `finish` list among the stores the user picked
+    (active_price_stores), or None when none of those stores lists the card."""
+    stores = active_price_stores()
+    offers = [o for o in ((entry or {}).get(finish) or []) if o and o[0] in stores and o[1] is not None]
+    return min(offers, key=lambda o: o[1]) if offers else None
 
 
 def price_index_built_at(path: str = PRICE_INDEX_PATH) -> datetime.datetime | None:

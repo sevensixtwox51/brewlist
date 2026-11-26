@@ -28,6 +28,8 @@ from brewlist_core import (
     normalize_name,
     categorize,
     price_for_printing,
+    active_price_stores,
+    best_offer,
     prices_data_in_index,
     scryfall_prices_in_index,
     sets_data_in_index,
@@ -174,8 +176,7 @@ def _rank(g: dict) -> int:
 def _missing_card(g: dict, price_data: dict) -> dict:
     """A card you don't own, for the "popular to add" view: its EDHREC rank and the cheapest nonfoil price found."""
     entry = (price_data.get(normalize_name(g["name"])) or price_data.get(normalize_name(g["name"]).split(" // ")[0]) or {})
-    offers = [o for o in (entry.get("nonfoil") or []) if o and o[0] != "CM" and o[1] is not None]  # CM is EUR; never mixed in
-    best = min(offers, key=lambda o: o[1]) if offers else None
+    best = best_offer(entry)  # cheapest among the stores picked on the Decks page (never Cardmarket: EUR)
     return {"name": g["name"], "scryfall_id": g.get("scryfall_id"), "type_line": g.get("type_line"), "mana_cost": g.get("mana_cost"),
             "layout": g.get("layout"), "rank": _rank(g) if _rank(g) < 10**9 else None, "price": best[1] if best else None,
             "store": best[0] if best else None, "url": best[2] if best else None}
@@ -390,7 +391,7 @@ def build_insights(owned: dict, owned_rows: list[dict]) -> dict:
 def get_insights(collection_path: str, collection_mtime: float, load_owned, owned_view) -> dict:
     """build_insights with an in-memory cache keyed on the collection file and the card database's build time."""
     gp = gameplay_data_in_index()
-    key = (collection_mtime, len(gp), id(gp))
+    key = (collection_mtime, len(gp), id(gp), tuple(active_price_stores()))  # prices follow the picked stores
     if _cache["key"] == key and _cache["data"] is not None:
         return _cache["data"]
     t = time.time()
