@@ -45,6 +45,8 @@ from brewlist_core import (
     printing_info_fetch_running,
     rebuild_price_index_isolated,
     ensure_printing_info_async,
+    ensure_printing_info,
+    surge_foil_ids,
     extract_entries,
     fetch_deck,
     gameplay_data_in_index,
@@ -6074,7 +6076,13 @@ def collection_browse_data():
         get_insights(COLLECTION_PATH, os.path.getmtime(COLLECTION_PATH), load_collection, owned_collection_gameplay_view)
     except ValueError as e:
         return jsonify(error=str(e))
-    return jsonify(browse_cards() or {"error": "Nothing to browse yet."})
+    data = browse_cards()
+    if not data:
+        return jsonify(error="Nothing to browse yet.")
+    # Which foil printings are surge foils: only foils can be, so look up just those (cached after the first time).
+    foil_ids = [x["id"] for c in data["cards"] for x in c.get("pr", []) if x.get("f")]
+    ensure_printing_info(foil_ids, max_fetch=2000, need_pt=True)
+    return jsonify(dict(data, surge=sorted(surge_foil_ids(foil_ids))))
 
 
 @app.route("/collection/cards", methods=["GET"])

@@ -32,7 +32,7 @@ __all__ = [
     "parse_deck_ref", "deck_key", "split_deck_key", "fetch_deck", "extract_entries",
     "normalize_name", "find_collection_candidates", "load_collection", "load_overrides",
     "fetch_scryfall_prices_by_id", "price_for_printing", "select_used_printings",
-    "printing_info_fetch_running", "flavor_names_in_cache", "price_index_age_days", "price_index_built_at", "rebuild_price_index", "rebuild_price_index_isolated", "ensure_price_index", "game_changers_in_index",
+    "printing_info_fetch_running", "flavor_names_in_cache", "surge_foil_ids", "ensure_printing_info", "price_index_age_days", "price_index_built_at", "rebuild_price_index", "rebuild_price_index_isolated", "ensure_price_index", "game_changers_in_index",
     "load_store_prefs", "save_store_prefs", "active_price_stores", "best_offer", "STORE_LABELS", "STORE_DISPLAY_NAMES", "update_from_git",
     "EXTRA_STORE_LABELS", "PICKABLE_STORE_LABELS",
     "commander_legality_in_index", "deck_is_commander_format",
@@ -1790,15 +1790,22 @@ def best_printing(printings: list, prices: dict | None = None) -> "OwnedPrinting
     )[1]
 
 
-def _printing_info_missing(cache: dict, sid: str) -> bool:
+def _printing_info_missing(cache: dict, sid: str, need_pt: bool = False) -> bool:
     """True when a printing still needs fetching: never seen, or cached before flavor names were kept (a looked-up printing
-    with no "fn" key). A printing Scryfall didn't know is cached as {} and not asked about again."""
+    with no "fn" key), or, when need_pt, cached before promo types ("pt": surge foil and the like) were kept. A printing
+    Scryfall didn't know is cached as {} and not asked about again."""
     entry = cache.get(sid)
-    return entry is None or (bool(entry) and "fn" not in entry)
+    return entry is None or (bool(entry) and ("fn" not in entry or (need_pt and "pt" not in entry)))
 
 
 def printing_info_fetch_running() -> bool:
     return _printing_fetch_running
+
+
+def surge_foil_ids(scryfall_ids) -> set[str]:
+    """Which of these printings are surge foils, from cached Scryfall promo types (see ensure_printing_info need_pt)."""
+    cache = _read_printing_info()
+    return {sid for sid in scryfall_ids if "surgefoil" in ((cache.get(sid) or {}).get("pt") or [])}
 
 
 def flavor_names_in_cache() -> dict[str, str]:
@@ -1806,7 +1813,7 @@ def flavor_names_in_cache() -> dict[str, str]:
     return {sid: e["fn"] for sid, e in _read_printing_info().items() if e.get("fn")}
 
 
-def ensure_printing_info(scryfall_ids, max_fetch: int = 450) -> int:
+def ensure_printing_info(scryfall_ids, max_fetch: int = 450, need_pt: bool = False) -> int:
     """Fetch and cache art data for printings not seen yet (Scryfall's
     75-per-request collection endpoint). At most `max_fetch` ids per call so a
     first load stays quick -- the rest are picked up on the next one. Network
@@ -1814,7 +1821,7 @@ def ensure_printing_info(scryfall_ids, max_fetch: int = 450) -> int:
     ids were fetched."""
     import time as _time
     cache = dict(_read_printing_info())
-    need = [sid for sid in dict.fromkeys(scryfall_ids) if sid and _printing_info_missing(cache, sid)][:max_fetch]
+    need = [sid for sid in dict.fromkeys(scryfall_ids) if sid and _printing_info_missing(cache, sid, need_pt)][:max_fetch]
     fetched = 0
     for i in range(0, len(need), 75):
         chunk = need[i:i + 75]
@@ -1835,6 +1842,7 @@ def ensure_printing_info(scryfall_ids, max_fetch: int = 450) -> int:
                 "b": card.get("border_color"), "fa": bool(card.get("full_art")),
                 "fe": card.get("frame_effects") or [], "l": card.get("lang"),
                 "fn": card.get("flavor_name") or "",   # the crossover name ("Chekov, Young Wayfinder" on a Tatyova)
+                "pt": card.get("promo_types") or [],   # "surgefoil", "boosterfun", ...
             }
         for sid in chunk:
             cache.setdefault(sid, {})  # not found: remember, don't ask again

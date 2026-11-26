@@ -171,7 +171,15 @@ table.br-list { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
   background: linear-gradient(115deg, transparent 18%, rgba(255,0,150,0.55) 32%, rgba(255,220,0,0.5) 42%, rgba(0,255,190,0.5) 52%, rgba(0,150,255,0.55) 62%, transparent 78%);
   background-size: 280% 280%; background-position: var(--gx, 50%) var(--gy, 50%); }
 .br-tilt.holo .br-glare::after { opacity: 0.55; }
-@media (prefers-reduced-motion: reduce) { .br-tilt, .br-tilt.live { transition: none; } }
+/* Surge foil: a rippling pattern radiating from the light, with an iridescent rainbow that slowly cycles. */
+.br-tilt.surge .br-glare::after { opacity: 0.7; animation: surge-hue 7s linear infinite;
+  background: repeating-radial-gradient(circle at var(--gx, 50%) var(--gy, 50%), rgba(255,255,255,0) 0 7px, rgba(255,255,255,0.5) 11px, rgba(255,255,255,0) 17px),
+    linear-gradient(115deg, transparent 10%, rgba(255,0,150,0.6) 28%, rgba(255,220,0,0.55) 40%, rgba(0,255,190,0.55) 52%, rgba(0,150,255,0.6) 64%, rgba(170,0,255,0.5) 74%, transparent 90%);
+  background-size: auto, 300% 300%; background-position: 0 0, var(--gx, 50%) var(--gy, 50%); }
+@keyframes surge-hue { from { filter: hue-rotate(0deg); } to { filter: hue-rotate(360deg); } }
+.pic.foil.surge::before { background: repeating-radial-gradient(circle at var(--mx) var(--my), rgba(255,255,255,0) 0 6px, rgba(255,255,255,0.4) 10px, rgba(255,255,255,0) 15px),
+    radial-gradient(circle at var(--mx) var(--my), rgba(255,255,255,0.3) 0%, rgba(120,200,255,0.24) 25%, rgba(255,80,220,0.24) 45%, transparent 72%); mix-blend-mode: overlay; }
+@media (prefers-reduced-motion: reduce) { .br-tilt, .br-tilt.live { transition: none; } .br-tilt.surge .br-glare::after { animation: none; } }
 .br-lb-art .flip { position: absolute; top: 10px; right: 10px; z-index: 2; width: 32px; height: 32px; border-radius: 999px; border: 1px solid var(--card-border); background: rgba(0,0,0,0.7); color: var(--text); cursor: pointer; font-size: 1rem; }
 .br-lb-art .flip:hover { color: var(--accent); border-color: var(--accent); }
 .br-lb-info { flex: 1 1 280px; min-width: 260px; }
@@ -527,13 +535,14 @@ document.addEventListener('click', hideTip, true);
 // ---- Browse cards: every card you own, filtered and added up ----
 const brEl = (id) => document.getElementById(id);
 const BR = { data: null, loaded: false, loading: false, q: '', cat: '', role: '', theme: '', pips: { W: 0, U: 0, B: 0, R: 0, G: 0 }, colorless: false, exact: true,
-  sets: new Set(), pmin: null, pmax: null, foil: false, sort: 'name', desc: false, view: 'cards', shown: 96 };
+  sets: new Set(), surge: new Set(), pmin: null, pmax: null, foil: false, sort: 'name', desc: false, view: 'cards', shown: 96 };
 const money = (n) => '$' + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const PAGE = 96;
 
 // what one copy is worth: a single figure, or the range when the printings you hold differ (a foil and a regular copy)
 const eachTxt = (c) => c.top == null ? '—' : (c.top === c.low ? money(c.top) : money(c.low) + '–' + money(c.top));
 // the tile shows one printing (the best one you own); it shimmers when that printing is a foil
+const shownIsSurge = (c) => BR.surge.has(c.id);
 const shownIsFoil = (c) => { const x = (c.pr || []).find((p) => p.id === c.id); return x ? x.f > 0 : c.foil > 0; };
 function brMatchesColor(ci) {
   const must = 'WUBRG'.split('').filter((c) => BR.pips[c] === 2), allowed = 'WUBRG'.split('').filter((c) => BR.pips[c] >= 1);
@@ -605,7 +614,7 @@ function brRender() {
     html = '<div class="ins-cards" style="padding:0;">' + shownRows.map((c, i) => {
       const img = c.id ? '<img loading="lazy" alt="' + esc(c.name) + '" src="' + cardImg(c.id) + '">' : '<div style="aspect-ratio:5/7;border-radius:6%;background:var(--bg);"></div>';
       const worthTxt = c.value != null ? '<span class="worth">' + money(c.value) + (c.qty > 1 ? ' <small>(' + eachTxt(c) + (c.top === c.low ? ' each' : '') + ')</small>' : '') + '</span>' : '<span class="worth"><small>no price</small></span>';
-      return '<div class="ins-card" data-i="' + i + '" data-id="' + esc(c.id || '') + '"><div class="pic' + (shownIsFoil(c) ? ' foil' : '') + '">' + img + flipBtn({ scryfall_id: c.id, layout: c.layout }) + (c.qty > 1 ? '<span class="qty">×' + c.qty + '</span>' : '') + '</div>'
+      return '<div class="ins-card" data-i="' + i + '" data-id="' + esc(c.id || '') + '"><div class="pic' + (shownIsFoil(c) ? ' foil' : '') + (shownIsSurge(c) ? ' surge' : '') + '">' + img + flipBtn({ scryfall_id: c.id, layout: c.layout }) + (c.qty > 1 ? '<span class="qty">×' + c.qty + '</span>' : '') + '</div>'
         + '<div class="nm">' + esc(c.name) + (c.foil ? ' ✦' : '') + '</div><div class="ty">' + esc(c.type_line || '') + '</div>' + worthTxt + '</div>';
     }).join('') + '</div>';
   }
@@ -634,7 +643,7 @@ function brRenderSets() {
   brEl('br-setbtn').textContent = BR.sets.size ? 'Sets (' + BR.sets.size + ')' : 'Sets';
 }
 function brInit(d) {
-  BR.data = d; BR.loaded = true;
+  BR.data = d; BR.loaded = true; BR.surge = new Set(d.surge || []);
   brEl('br-cat').innerHTML += d.categories.map((c) => '<option value="' + esc(c) + '">' + esc(c) + '</option>').join('');
   brEl('br-role').innerHTML += d.roles.map((r, i) => '<option value="' + i + '">' + esc(r) + '</option>').join('');
   brEl('br-theme').innerHTML += d.themes.map((t, i) => '<option value="' + i + '">' + esc(t) + '</option>').join('');
@@ -735,7 +744,9 @@ function lbRender() {
   const cur = pr[LB.p];
   const img = brEl('br-lb-img');
   img.src = cardImg(cur.id, LB.face); img.alt = c.name;
-  brEl('br-tilt').classList.toggle('holo', cur.f > 0);
+  const surge = BR.surge.has(cur.id);
+  brEl('br-tilt').classList.toggle('holo', cur.f > 0 && !surge);
+  brEl('br-tilt').classList.toggle('surge', surge);
   const canFlip = FLIPS.includes(c.layout);
   brEl('br-lb-flip').hidden = !canFlip;
   const names = (BR.data && BR.data.set_names) || {};
@@ -745,7 +756,7 @@ function lbRender() {
     + '<h4>' + (pr.length > 1 ? 'Your ' + pr.length + ' printings' : 'Your printing') + '</h4>'
     + pr.map((x, k) => '<button type="button" class="br-pr' + (k === LB.p ? ' on' : '') + '" data-k="' + k + '">'
       + '<img loading="lazy" alt="" src="' + smallImg(x.id) + '">'
-      + '<span class="nm">' + esc(names[x.set] || x.set || 'Unknown set') + (x.f ? '<span class="tag">' + finishName(x.f) + '</span>' : '') + '</span>'
+      + '<span class="nm">' + esc(names[x.set] || x.set || 'Unknown set') + (x.f ? '<span class="tag">' + (BR.surge.has(x.id) ? 'Surge foil' : finishName(x.f)) + '</span>' : '') + '</span>'
       + '<span class="px">' + (x.p != null ? money(x.p * x.q) + (x.q > 1 ? '<small>' + money(x.p) + ' each</small>' : '') : '—') + '</span>'
       + '<span class="sub">' + esc(x.set) + (x.n ? ' #' + esc(x.n) : '') + ' · ×' + x.q + '</span></button>').join('');
   const many = (BR.rows || []).length > 1;
