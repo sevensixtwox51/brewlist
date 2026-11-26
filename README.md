@@ -213,8 +213,11 @@ card database and Scryfall's Oracle Tags.
   total value, mana value, popularity or copies. The totals follow the
   filters: unique cards, copies, total value, average per card and the
   priciest copy. It shows pictures or a compact list, with hover to enlarge and
-  flip buttons. Value is the market price of the exact printing you own, the
-  same prices the Market value tile adds up
+  flip buttons. Click a card for a lightbox with a big picture and every
+  printing of it you own (set, foil or not, copies and price; click one to see
+  that art), and step through the list with the arrow keys. Value is the
+  market price of the exact printing you own, the same prices the Market
+  value tile adds up
 
 ![Browse cards: green creatures worth at least $1, sorted by total value, with the totals above](screenshots/collection-browse.png)
 

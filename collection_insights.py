@@ -409,6 +409,7 @@ def _browse_payload(owned: dict, owned_rows: list[dict], prices: dict, sets: dic
         copies_priced = 0
         copy_prices: list[float] = []  # one entry per printing you hold; printings of one card can differ a lot (foil vs not)
         codes: list[str] = []
+        prs: list[dict] = []  # every printing you hold, for the lightbox: id, set, collector number, finish, copies, price
         if oc:
             for p in oc.printings:
                 sp = prices.get(p.scryfall_id)
@@ -420,6 +421,8 @@ def _browse_payload(owned: dict, owned_rows: list[dict], prices: dict, sets: dic
                 code = (p.set_code or "").upper()
                 if code and code not in codes:
                     codes.append(code)
+                prs.append({"id": p.scryfall_id, "set": code, "n": p.collector_number, "f": 2 if p.etched else (1 if p.foil else 0),
+                            "q": p.quantity, "p": round(price, 2) if price is not None else None})
         for c in codes:
             set_counts[c] = set_counts.get(c, 0) + 1
         al = _aliases(r["name"])
@@ -433,13 +436,14 @@ def _browse_payload(owned: dict, owned_rows: list[dict], prices: dict, sets: dic
             "low": round(min(copy_prices), 2) if copy_prices else None,
             "unpriced": (r.get("quantity") or 1) - copies_priced if copies_priced else (r.get("quantity") or 1),
             "sets": codes, "rank": r.get("edhrec_rank"),
+            "pr": sorted(prs, key=lambda x: -(x["p"] or 0)),
             "roles": [role_idx[n] for n, m in role_members.items() if n in role_idx and al & m],
             "themes": [theme_idx[n] for n, m in theme_members.items() if n in theme_idx and al & m],
         })
     set_list = sorted(({"code": c, "name": (sets.get(c) or {}).get("name") or c, "release": (sets.get(c) or {}).get("release_date") or "", "n": n}
                        for c, n in set_counts.items()), key=lambda s: s["release"], reverse=True)
     cats = sorted({c["category"] for c in cards if c["category"]})
-    return {"cards": cards, "roles": role_names, "themes": theme_names, "sets": set_list, "categories": cats, "total_value": total_value}
+    return {"cards": cards, "roles": role_names, "themes": theme_names, "sets": set_list, "set_names": {c: (sets.get(c) or {}).get("name") or c for c in set_counts}, "categories": cats, "total_value": total_value}
 
 
 def get_insights(collection_path: str, collection_mtime: float, load_owned, owned_view) -> dict:

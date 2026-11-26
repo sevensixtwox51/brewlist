@@ -154,6 +154,34 @@ table.br-list { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
 .br-list .ty { color: var(--text-dim); }
 .ins-card .worth { display: block; margin-top: 3px; font-size: 0.74rem; color: var(--owned); font-weight: 600; font-variant-numeric: tabular-nums; }
 .ins-card .worth small { color: var(--text-dim); font-weight: 400; }
+.br-lb { display: none; position: fixed; inset: 0; z-index: 350; background: rgba(8, 6, 4, 0.86); align-items: center; justify-content: center; padding: 3vh 16px; }
+.br-lb.show { display: flex; }
+.br-lb-panel { position: relative; display: flex; gap: 26px; align-items: flex-start; max-width: min(960px, 100%); max-height: 94vh; overflow: auto; background: var(--bg-elevated); border: 1px solid var(--card-border); border-radius: 16px; padding: 22px 26px; box-shadow: var(--shadow); }
+.br-lb-art { position: relative; flex: 0 0 auto; width: min(380px, 70vw); }
+.br-lb-art img { display: block; width: 100%; aspect-ratio: 5 / 7; border-radius: 4.8%; background: var(--bg); box-shadow: 0 6px 26px rgba(0,0,0,0.6); }
+.br-lb-art .flip { position: absolute; top: 10px; right: 10px; z-index: 2; width: 32px; height: 32px; border-radius: 999px; border: 1px solid var(--card-border); background: rgba(0,0,0,0.7); color: var(--text); cursor: pointer; font-size: 1rem; }
+.br-lb-art .flip:hover { color: var(--accent); border-color: var(--accent); }
+.br-lb-info { flex: 1 1 280px; min-width: 260px; }
+.br-lb-info h3 { font-family: var(--serif); font-weight: 600; font-size: 1.6rem; color: var(--accent); margin: 0 0 2px; }
+.br-lb-info .ty { color: var(--text-dim); font-size: 0.9rem; }
+.br-lb-info .sum { margin: 10px 0 14px; font-size: 0.95rem; }
+.br-lb-info .sum b { color: var(--owned); font-variant-numeric: tabular-nums; }
+.br-lb-info h4 { margin: 0 0 8px; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-dim); font-weight: 600; }
+.br-pr { display: grid; grid-template-columns: 46px 1fr auto; gap: 4px 12px; align-items: center; width: 100%; text-align: left; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--card-border); border-radius: 10px; padding: 7px 10px; margin: 0 0 7px; cursor: pointer; }
+.br-pr:hover { border-color: var(--accent); }
+.br-pr.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--bg)); }
+.br-pr img { width: 46px; aspect-ratio: 5 / 7; border-radius: 4px; background: var(--bg-elevated); display: block; grid-column: 1; grid-row: 1 / span 2; }
+.br-pr .nm { grid-column: 2; grid-row: 1; align-self: end; font-weight: 600; font-size: 0.88rem; }
+.br-pr .sub { grid-column: 2; grid-row: 2; align-self: start; color: var(--text-dim); font-size: 0.78rem; }
+.br-pr .px { grid-column: 3; grid-row: 1 / span 2; text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; color: var(--owned); font-size: 0.92rem; }
+.br-pr .px small { display: block; color: var(--text-dim); font-weight: 400; font-size: 0.72rem; }
+.br-pr .tag { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 999px; border: 1px solid var(--accent); color: var(--accent); font-size: 0.68rem; font-weight: 700; }
+.br-lb-close { position: absolute; top: 8px; right: 12px; background: none; border: none; color: var(--text-dim); font-size: 1.7rem; line-height: 1; cursor: pointer; z-index: 3; }
+.br-lb-close:hover { color: var(--accent); }
+.br-lb-nav { position: fixed; top: 50%; transform: translateY(-50%); width: 44px; height: 64px; border-radius: 12px; border: 1px solid var(--card-border); background: rgba(0,0,0,0.55); color: var(--text); font-size: 1.8rem; cursor: pointer; z-index: 351; }
+.br-lb-nav:hover { color: var(--accent); border-color: var(--accent); }
+.br-lb-nav.prev { left: 14px; } .br-lb-nav.next { right: 14px; }
+#br-results .ins-card[data-i], #br-results tr[data-i] { cursor: pointer; }
 @media (max-width: 800px) { .ins-two { grid-template-columns: 1fr; } .ins-theme { grid-template-columns: 1fr; gap: 4px; } .ins-pill { justify-self: start; } }
 """
 
@@ -194,6 +222,15 @@ COLLECTION_BODY = """
   </div>
   <div id="ins-tip" role="tooltip"></div>
   <div id="ins-zoom"><img alt=""></div>
+  <div class="br-lb" id="br-lb" role="dialog" aria-modal="true" aria-label="Card">
+    <button type="button" class="br-lb-nav prev" id="br-lb-prev" aria-label="Previous card">&lsaquo;</button>
+    <button type="button" class="br-lb-nav next" id="br-lb-next" aria-label="Next card">&rsaquo;</button>
+    <div class="br-lb-panel">
+      <button type="button" class="br-lb-close" id="br-lb-close" aria-label="Close">&times;</button>
+      <div class="br-lb-art"><img id="br-lb-img" alt=""><button type="button" class="flip" id="br-lb-flip" title="Show the other face" hidden>&#8635;</button></div>
+      <div class="br-lb-info" id="br-lb-info"></div>
+    </div>
+  </div>
   <div class="ins-modal" id="ins-modal" role="dialog" aria-modal="true" aria-label="Cards">
     <div class="ins-modal-panel">
       <div class="ins-modal-head">
@@ -511,6 +548,7 @@ function brFiltered() {
 function brRender() {
   if (!BR.data) return;
   const rows = brFiltered();
+  BR.rows = rows;  // the lightbox steps through exactly what is listed
   const copies = rows.reduce((n, c) => n + c.qty, 0);
   const worth = rows.reduce((n, c) => n + (c.value || 0), 0);
   const unpriced = rows.reduce((n, c) => n + c.unpriced, 0);
@@ -530,13 +568,13 @@ function brRender() {
   if (!rows.length) html = '<div class="ins-empty">No cards match these filters.</div>';
   else if (BR.view === 'list') {
     html = '<table class="br-list"><thead><tr><th>Card</th><th>Type</th><th>Sets</th><th class="num">Copies</th><th class="num">Each copy</th><th class="num">Value</th></tr></thead><tbody>'
-      + shownRows.map((c) => '<tr class="ins-card" data-id="' + esc(c.id || '') + '"><td>' + esc(c.name) + (c.foil ? ' ✦' : '') + '</td><td class="ty">' + esc(c.type_line || '') + '</td><td>' + esc(c.sets.join(', ')) + '</td><td class="num">' + c.qty + '</td><td class="num">' + eachTxt(c) + '</td><td class="num">' + (c.value != null ? money(c.value) : '—') + '</td></tr>').join('')
+      + shownRows.map((c, i) => '<tr class="ins-card" data-i="' + i + '" data-id="' + esc(c.id || '') + '"><td>' + esc(c.name) + (c.foil ? ' ✦' : '') + '</td><td class="ty">' + esc(c.type_line || '') + '</td><td>' + esc(c.sets.join(', ')) + '</td><td class="num">' + c.qty + '</td><td class="num">' + eachTxt(c) + '</td><td class="num">' + (c.value != null ? money(c.value) : '—') + '</td></tr>').join('')
       + '</tbody></table>';
   } else {
-    html = '<div class="ins-cards" style="padding:0;">' + shownRows.map((c) => {
+    html = '<div class="ins-cards" style="padding:0;">' + shownRows.map((c, i) => {
       const img = c.id ? '<img loading="lazy" alt="' + esc(c.name) + '" src="' + cardImg(c.id) + '">' : '<div style="aspect-ratio:5/7;border-radius:6%;background:var(--bg);"></div>';
       const worthTxt = c.value != null ? '<span class="worth">' + money(c.value) + (c.qty > 1 ? ' <small>(' + eachTxt(c) + (c.top === c.low ? ' each' : '') + ')</small>' : '') + '</span>' : '<span class="worth"><small>no price</small></span>';
-      return '<div class="ins-card" data-id="' + esc(c.id || '') + '"><div class="pic">' + img + flipBtn({ scryfall_id: c.id, layout: c.layout }) + (c.qty > 1 ? '<span class="qty">×' + c.qty + '</span>' : '') + '</div>'
+      return '<div class="ins-card" data-i="' + i + '" data-id="' + esc(c.id || '') + '"><div class="pic">' + img + flipBtn({ scryfall_id: c.id, layout: c.layout }) + (c.qty > 1 ? '<span class="qty">×' + c.qty + '</span>' : '') + '</div>'
         + '<div class="nm">' + esc(c.name) + (c.foil ? ' ✦' : '') + '</div><div class="ty">' + esc(c.type_line || '') + '</div>' + worthTxt + '</div>';
     }).join('') + '</div>';
   }
@@ -637,6 +675,49 @@ brEl('br-reset').addEventListener('click', (e) => {
 });
 brEl('br-results').addEventListener('click', (e) => { if (e.target.closest('#br-more')) { BR.shown += PAGE; brRender(); } });
 attachZoom(brEl('br-results'));
+
+// ---- click a card: a lightbox with every printing of it you own ----
+const LB = { i: -1, p: 0, face: 'front' };
+const finishName = (f) => f === 2 ? 'Etched' : (f === 1 ? 'Foil' : 'Nonfoil');
+function lbRender() {
+  const c = (BR.rows || [])[LB.i]; if (!c) return;
+  const pr = c.pr && c.pr.length ? c.pr : [{ id: c.id, set: (c.sets || [])[0] || '', n: '', f: c.foil ? 1 : 0, q: c.qty, p: c.each }];
+  if (LB.p >= pr.length) LB.p = 0;
+  const cur = pr[LB.p];
+  const img = brEl('br-lb-img');
+  img.src = cardImg(cur.id, LB.face); img.alt = c.name;
+  const canFlip = FLIPS.includes(c.layout);
+  brEl('br-lb-flip').hidden = !canFlip;
+  const names = (BR.data && BR.data.set_names) || {};
+  const total = c.value != null ? '<b>' + money(c.value) + '</b>' : '<b>no price</b>';
+  brEl('br-lb-info').innerHTML = '<h3>' + esc(c.name) + '</h3><div class="ty">' + esc(c.type_line || '') + '</div>'
+    + '<div class="sum">' + c.qty + (c.qty === 1 ? ' copy' : ' copies') + ' · ' + total + (c.unpriced ? ' <span class="ty">(' + c.unpriced + ' unpriced)</span>' : '') + '</div>'
+    + '<h4>' + (pr.length > 1 ? 'Your ' + pr.length + ' printings' : 'Your printing') + '</h4>'
+    + pr.map((x, k) => '<button type="button" class="br-pr' + (k === LB.p ? ' on' : '') + '" data-k="' + k + '">'
+      + '<img loading="lazy" alt="" src="' + smallImg(x.id) + '">'
+      + '<span class="nm">' + esc(names[x.set] || x.set || 'Unknown set') + (x.f ? '<span class="tag">' + finishName(x.f) + '</span>' : '') + '</span>'
+      + '<span class="px">' + (x.p != null ? money(x.p * x.q) + (x.q > 1 ? '<small>' + money(x.p) + ' each</small>' : '') : '—') + '</span>'
+      + '<span class="sub">' + esc(x.set) + (x.n ? ' #' + esc(x.n) : '') + ' · ×' + x.q + '</span></button>').join('');
+  const many = (BR.rows || []).length > 1;
+  brEl('br-lb-prev').style.display = brEl('br-lb-next').style.display = many ? '' : 'none';
+}
+function lbOpen(i) { hideZoom(); LB.i = i; LB.p = 0; LB.face = 'front'; brEl('br-lb').classList.add('show'); document.body.style.overflow = 'hidden'; lbRender(); }
+function lbClose() { brEl('br-lb').classList.remove('show'); document.body.style.overflow = ''; LB.i = -1; }
+function lbStep(d) { const n = (BR.rows || []).length; if (!n) return; LB.i = (LB.i + d + n) % n; LB.p = 0; LB.face = 'front'; lbRender(); }
+brEl('br-results').addEventListener('click', (e) => {
+  if (e.target.closest('.flip') || e.target.closest('#br-more')) return;
+  const t = e.target.closest('[data-i]'); if (t) lbOpen(Number(t.dataset.i));
+});
+brEl('br-lb').addEventListener('click', (e) => { if (e.target === brEl('br-lb')) lbClose(); });
+brEl('br-lb-close').addEventListener('click', lbClose);
+brEl('br-lb-prev').addEventListener('click', () => lbStep(-1));
+brEl('br-lb-next').addEventListener('click', () => lbStep(1));
+brEl('br-lb-flip').addEventListener('click', () => { LB.face = LB.face === 'back' ? 'front' : 'back'; lbRender(); });
+brEl('br-lb-info').addEventListener('click', (e) => { const b = e.target.closest('.br-pr'); if (b) { LB.p = Number(b.dataset.k); LB.face = 'front'; lbRender(); } });
+document.addEventListener('keydown', (e) => {
+  if (!brEl('br-lb').classList.contains('show')) return;
+  if (e.key === 'Escape') lbClose(); else if (e.key === 'ArrowLeft') lbStep(-1); else if (e.key === 'ArrowRight') lbStep(1);
+});
 if (location.hash === '#browse') setView('browse');
 
 fetch('/collection/data').then((r) => r.json()).then((d) => {
