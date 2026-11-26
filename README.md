@@ -195,8 +195,8 @@ card database and Scryfall's Oracle Tags.
 - **Browse cards:** a second tab on the page lists every card you own (lands
   included) and lets you filter it by name or type, card type, color (click a
   color to allow it, again to require it, with an exact-colors toggle like the
-  builder's), sets, price each, foils, and the roles and themes above, then
-  sort it by name, price, total value, mana value, popularity or copies. The
+  builder's), sets, price of a copy (judged by the priciest copy you own of a card), foils, and
+  the roles and themes above, then sort it by name, priciest copy, total value, mana value, popularity or copies. The
   totals follow the filters: unique cards, copies, total value, average per
   card and the priciest card. It shows pictures or a compact list, with hover
   to enlarge and flip buttons. Value is the market price of the exact printing

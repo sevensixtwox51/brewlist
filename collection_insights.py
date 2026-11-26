@@ -396,7 +396,8 @@ def _browse_payload(owned: dict, owned_rows: list[dict], prices: dict, sets: dic
                     role_names: list[str], theme_names: list[str], total_value: float) -> dict:
     """Every card you own (lands too) with what the card browser filters and totals on: type, color, mana value, the sets
     of the printings you own, which roles and themes it fills (as indexes into the two name lists), and what it is worth.
-    Worth is the market price of the exact printings you hold (the same price the Rough value tile adds up), per copy."""
+    Worth is the market price of the exact printings you hold (the same price the Rough value tile adds up); top/low are
+    the priciest and cheapest single copy."""
     role_idx = {n: i for i, n in enumerate(role_names)}
     theme_idx = {n: i for i, n in enumerate(theme_names)}
     cards = []
@@ -406,6 +407,7 @@ def _browse_payload(owned: dict, owned_rows: list[dict], prices: dict, sets: dic
         oc = owned.get(key) or owned.get(key.split(" // ")[0])
         value = 0.0
         copies_priced = 0
+        copy_prices: list[float] = []  # one entry per printing you hold; printings of one card can differ a lot (foil vs not)
         codes: list[str] = []
         if oc:
             for p in oc.printings:
@@ -414,6 +416,7 @@ def _browse_payload(owned: dict, owned_rows: list[dict], prices: dict, sets: dic
                 if price is not None:
                     value += price * p.quantity
                     copies_priced += p.quantity
+                    copy_prices.append(price)
                 code = (p.set_code or "").upper()
                 if code and code not in codes:
                     codes.append(code)
@@ -425,7 +428,9 @@ def _browse_payload(owned: dict, owned_rows: list[dict], prices: dict, sets: dic
             "category": r.get("category"), "mana_cost": r.get("mana_cost"), "cmc": r.get("cmc") or 0,
             "ci": r.get("color_identity") or [], "qty": r.get("quantity") or 1, "foil": (oc.foil if oc else 0),
             "value": round(value, 2) if copies_priced else None,
-            "each": round(value / copies_priced, 2) if copies_priced else None,
+            # the priciest and cheapest single copy: a card held in two printings is not worth their average
+            "top": round(max(copy_prices), 2) if copy_prices else None,
+            "low": round(min(copy_prices), 2) if copy_prices else None,
             "unpriced": (r.get("quantity") or 1) - copies_priced if copies_priced else (r.get("quantity") or 1),
             "sets": codes, "rank": r.get("edhrec_rank"),
             "roles": [role_idx[n] for n, m in role_members.items() if n in role_idx and al & m],

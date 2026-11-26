@@ -177,10 +177,10 @@ COLLECTION_BODY = """
       <div class="br-filters">
         <select id="br-role"><option value="">Any role</option></select>
         <select id="br-theme"><option value="">Any theme</option></select>
-        <span class="br-sep">Price each $</span><input type="number" id="br-pmin" min="0" step="0.01" placeholder="min"><span class="br-sep">to</span><input type="number" id="br-pmax" min="0" step="0.01" placeholder="max">
+        <span class="br-sep" title="Judged by the priciest copy you own of each card">Price of a copy $</span><input type="number" id="br-pmin" min="0" step="0.01" placeholder="min"><span class="br-sep">to</span><input type="number" id="br-pmax" min="0" step="0.01" placeholder="max">
         <label class="br-check"><input type="checkbox" id="br-foil"> Has a foil</label>
         <select id="br-sort" title="How to order the cards">
-          <option value="name">Sort: name</option><option value="each">Sort: price each</option><option value="value">Sort: total value</option>
+          <option value="name">Sort: name</option><option value="each">Sort: priciest copy</option><option value="value">Sort: total value</option>
           <option value="cmc">Sort: mana value</option><option value="rank">Sort: popularity</option><option value="qty">Sort: copies owned</option>
         </select>
         <button type="button" class="btn ghost small" id="br-dir" title="Reverse the order">&#8593;</button>
@@ -465,6 +465,8 @@ const BR = { data: null, loaded: false, loading: false, q: '', cat: '', role: ''
 const money = (n) => '$' + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const PAGE = 96;
 
+// what one copy is worth: a single figure, or the range when the printings you hold differ (a foil and a regular copy)
+const eachTxt = (c) => c.top == null ? '—' : (c.top === c.low ? money(c.top) : money(c.low) + '–' + money(c.top));
 function brMatchesColor(ci) {
   const must = 'WUBRG'.split('').filter((c) => BR.pips[c] === 2), allowed = 'WUBRG'.split('').filter((c) => BR.pips[c] >= 1);
   if (must.length) return must.every((c) => ci.includes(c)) && ci.every((c) => allowed.includes(c));
@@ -488,15 +490,15 @@ function brFiltered() {
     if (BR.sets.size && !c.sets.some((s) => BR.sets.has(s))) return false;
     if (BR.foil && !(c.foil > 0)) return false;
     if (priceOn) {
-      if (c.each == null) return false;
-      if (BR.pmin != null && c.each < BR.pmin) return false;
-      if (BR.pmax != null && c.each > BR.pmax) return false;
+      if (c.top == null) return false;
+      if (BR.pmin != null && c.top < BR.pmin) return false;
+      if (BR.pmax != null && c.top > BR.pmax) return false;
     }
     return true;
   });
   // Ascending is the natural order of what is sorted; cards with nothing to sort on (no price, unranked) always go last.
   const dir = BR.desc ? -1 : 1, key = BR.sort;
-  const val = { name: (c) => c.name.toLowerCase(), each: (c) => c.each, value: (c) => c.value, cmc: (c) => c.cmc, rank: (c) => c.rank, qty: (c) => c.qty }[key];
+  const val = { name: (c) => c.name.toLowerCase(), each: (c) => c.top, value: (c) => c.value, cmc: (c) => c.cmc, rank: (c) => c.rank, qty: (c) => c.qty }[key];
   rows.sort((a, b) => {
     const x = val(a), y = val(b);
     if (x == null && y == null) return a.name.localeCompare(b.name);
@@ -512,14 +514,14 @@ function brRender() {
   const copies = rows.reduce((n, c) => n + c.qty, 0);
   const worth = rows.reduce((n, c) => n + (c.value || 0), 0);
   const unpriced = rows.reduce((n, c) => n + c.unpriced, 0);
-  const best = rows.reduce((m, c) => (c.each != null && (!m || c.each > m.each) ? c : m), null);
+  const best = rows.reduce((m, c) => (c.top != null && (!m || c.top > m.top) ? c : m), null);
   const tile = (value, label, sub) => '<div class="stat-tile"><div class="stat-value">' + value + '</div><div class="stat-label">' + label + '</div>' + (sub ? '<div class="stat-sub">' + sub + '</div>' : '') + '</div>';
   const filtering = rows.length !== BR.data.cards.length;
   brEl('br-summary').innerHTML = tile(fmt(rows.length), 'Unique cards', filtering ? 'of ' + fmt(BR.data.cards.length) + ' you own' : 'you own')
     + tile(fmt(copies), 'Copies', '')
     + tile(money(worth), 'Total value', filtering ? 'of ' + money(BR.data.total_value) + ' overall' : 'at today’s market price')
     + tile(rows.length ? money(worth / rows.length) : '—', 'Average per card', rows.length ? 'per unique card' : '')
-    + tile(best ? money(best.each) : '—', 'Priciest card', best ? esc(best.name) : '');
+    + tile(best ? money(best.top) : '—', 'Priciest copy', best ? esc(best.name) : '');
   brEl('br-note').textContent = 'Value is today’s market price of the exact printing you own (the same prices as the Rough value tile; not your store setting, which only applies to cards you’d buy).'
     + (unpriced ? ' ' + fmt(unpriced) + ' ' + (unpriced === 1 ? 'copy has' : 'copies have') + ' no price on file and count as $0.' : '')
     + ((BR.pmin != null || BR.pmax != null) ? ' With a price filter on, cards with no price are left out.' : '');
@@ -527,13 +529,13 @@ function brRender() {
   let html;
   if (!rows.length) html = '<div class="ins-empty">No cards match these filters.</div>';
   else if (BR.view === 'list') {
-    html = '<table class="br-list"><thead><tr><th>Card</th><th>Type</th><th>Sets</th><th class="num">Copies</th><th class="num">Each</th><th class="num">Value</th></tr></thead><tbody>'
-      + shownRows.map((c) => '<tr class="ins-card" data-id="' + esc(c.id || '') + '"><td>' + esc(c.name) + (c.foil ? ' ✦' : '') + '</td><td class="ty">' + esc(c.type_line || '') + '</td><td>' + esc(c.sets.join(', ')) + '</td><td class="num">' + c.qty + '</td><td class="num">' + (c.each != null ? money(c.each) : '—') + '</td><td class="num">' + (c.value != null ? money(c.value) : '—') + '</td></tr>').join('')
+    html = '<table class="br-list"><thead><tr><th>Card</th><th>Type</th><th>Sets</th><th class="num">Copies</th><th class="num">Each copy</th><th class="num">Value</th></tr></thead><tbody>'
+      + shownRows.map((c) => '<tr class="ins-card" data-id="' + esc(c.id || '') + '"><td>' + esc(c.name) + (c.foil ? ' ✦' : '') + '</td><td class="ty">' + esc(c.type_line || '') + '</td><td>' + esc(c.sets.join(', ')) + '</td><td class="num">' + c.qty + '</td><td class="num">' + eachTxt(c) + '</td><td class="num">' + (c.value != null ? money(c.value) : '—') + '</td></tr>').join('')
       + '</tbody></table>';
   } else {
     html = '<div class="ins-cards" style="padding:0;">' + shownRows.map((c) => {
       const img = c.id ? '<img loading="lazy" alt="' + esc(c.name) + '" src="' + cardImg(c.id) + '">' : '<div style="aspect-ratio:5/7;border-radius:6%;background:var(--bg);"></div>';
-      const worthTxt = c.value != null ? '<span class="worth">' + money(c.value) + (c.qty > 1 ? ' <small>(' + money(c.each) + ' each)</small>' : '') + '</span>' : '<span class="worth"><small>no price</small></span>';
+      const worthTxt = c.value != null ? '<span class="worth">' + money(c.value) + (c.qty > 1 ? ' <small>(' + eachTxt(c) + (c.top === c.low ? ' each' : '') + ')</small>' : '') + '</span>' : '<span class="worth"><small>no price</small></span>';
       return '<div class="ins-card" data-id="' + esc(c.id || '') + '"><div class="pic">' + img + flipBtn({ scryfall_id: c.id, layout: c.layout }) + (c.qty > 1 ? '<span class="qty">×' + c.qty + '</span>' : '') + '</div>'
         + '<div class="nm">' + esc(c.name) + (c.foil ? ' ✦' : '') + '</div><div class="ty">' + esc(c.type_line || '') + '</div>' + worthTxt + '</div>';
     }).join('') + '</div>';
