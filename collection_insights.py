@@ -67,7 +67,8 @@ _THEMES: list[tuple[str, dict]] = [
     ("Graveyard and reanimation", {"regex": r"^reanimate|castable from graveyard|activate from graveyard|cards in graveyard matter|graveyard fuel|trigger from graveyard|^mill-self|^regrowth"}),
     ("Sacrifice and death triggers", {"regex": r"sacrifice outlet|^death trigger|blood artist ability|^multiple bodies"}),
     ("Tokens", {"regex": r"repeatable .*tokens?|^synergy-token|^tokenfall", "oracle": r"\bcreates? [^.]*\btokens?\b"}),
-    ("+1/+1 counters", {"regex": r"counters matter|gives pp counters|proliferate", "oracle": r"\+1/\+1 counters?"}),
+    # "counters matter" alone is every kind of counter (burden, charge, oil, shield...), so only the +1/+1 ("pp") tags count
+    ("+1/+1 counters", {"regex": r"^pp counters matter|gives pp counters|proliferate", "oracle": r"\+1/\+1 counters?"}),
     ("Lifegain", {"regex": r"^lifegain|lifegain matters|blood artist ability"}),
     ("Landfall and extra lands", {"regex": r"^landfall$|^land ramp|tutor-land-to-battlefield", "oracle": r"\bland(?:s)? (?:you control )?enters?\b|play an additional land"}),
     ("Treasure and artifacts", {"regex": r"repeatable treasures|repeatable artifact tokens|synergy-artifact|sacrifice outlet-artifact", "oracle": r"\btreasure\b|whenever an artifact"}),
