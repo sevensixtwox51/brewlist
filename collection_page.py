@@ -156,11 +156,11 @@ table.br-list { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
 .ins-card .worth small { color: var(--text-dim); font-weight: 400; }
 .br-lb { display: none; position: fixed; inset: 0; z-index: 350; background: rgba(8, 6, 4, 0.86); align-items: center; justify-content: center; padding: 3vh 16px; }
 .br-lb.show { display: flex; }
-.br-lb-panel { position: relative; display: flex; gap: 26px; align-items: flex-start; max-width: min(960px, 100%); max-height: 94vh; overflow: auto; background: var(--bg-elevated); border: 1px solid var(--card-border); border-radius: 16px; padding: 22px 26px; box-shadow: var(--shadow); }
+.br-lb-panel { position: relative; display: flex; gap: 26px; align-items: flex-start; max-width: min(960px, 100%); max-height: 94vh; overflow: auto; background: var(--bg-elevated); border: 1px solid var(--card-border); border-radius: 16px; padding: 36px 40px; box-shadow: var(--shadow); }
 .br-lb-art { position: relative; flex: 0 0 auto; width: min(380px, 70vw); }
 /* The card is held in the hand: it tilts toward the pointer in 3D, its shadow slides the other way, and a glare sweeps
    across it (a rainbow band too when the printing is a foil) as the angle changes. */
-.br-lb-art { perspective: 900px; }
+.br-lb-art { perspective: 1300px; }
 .br-tilt { position: relative; border-radius: 4.8%; transform-style: preserve-3d; transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)) scale(var(--sc, 1));
   box-shadow: var(--sh, 0 6px 26px rgba(0,0,0,0.6)); transition: transform 0.55s cubic-bezier(.2,.8,.2,1), box-shadow 0.55s cubic-bezier(.2,.8,.2,1); will-change: transform; }
 .br-tilt.live { transition: transform 0.07s linear, box-shadow 0.07s linear; }
@@ -716,7 +716,7 @@ lbArt.addEventListener('pointermove', (e) => {
   const nx = Math.max(-1, Math.min(1, (e.clientX - r.left) / r.width * 2 - 1)), ny = Math.max(-1, Math.min(1, (e.clientY - r.top) / r.height * 2 - 1));
   lbTilt.classList.add('live');
   const st = lbTilt.style;
-  st.setProperty('--ry', (nx * 14).toFixed(2) + 'deg'); st.setProperty('--rx', (-ny * 14).toFixed(2) + 'deg'); st.setProperty('--sc', '1.03');
+  st.setProperty('--ry', (nx * 14).toFixed(2) + 'deg'); st.setProperty('--rx', (-ny * 14).toFixed(2) + 'deg'); st.setProperty('--sc', '1.02');
   st.setProperty('--sh', (-nx * 22).toFixed(1) + 'px ' + (-ny * 22 + 14).toFixed(1) + 'px 38px rgba(0,0,0,0.65)');
   st.setProperty('--gx', ((nx + 1) * 50).toFixed(1) + '%'); st.setProperty('--gy', ((ny + 1) * 50).toFixed(1) + '%'); st.setProperty('--go', '1');
 });
