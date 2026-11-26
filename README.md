@@ -18,7 +18,11 @@ and checks any [Moxfield](https://moxfield.com) or
   what's missing, and what it'll cost to finish at today's market prices,
   with budget alternatives, Game Changers, legality and combos.
 - **See your collection**: a **Collection insights** page shows where your
-  collection is deep and where it's thin, by color, role and theme.
+  collection is deep and where it's thin, by color, role and theme, and a
+  **Browse cards** view lists and adds up the cards you own under any filter.
+- **Research a commander**: **Commander research** looks at any commander,
+  owned or not: how people build it, how much of that build you own and what
+  it costs to finish, and what the build is weak to.
 
 Available two ways: a **web app** (upload a CSV, build or paste a URL, done —
 no terminal needed) and the original **CLI** (menu-driven, generates
@@ -34,8 +38,9 @@ Deck Builder is web-app only.
 The **Decks** page is home base for both tools: a **Compare** panel on top
 (paste a decklist URL) and your saved decks as art tiles below, badged **Brew**
 or **Comparison**, with a filter, a **Brew something new** tile, and a small
-&times; to delete one. The app is dark by default and switches to light with
-your system.
+&times; to delete one. Links across the top open **Collection & Settings**,
+**Collection insights** and **Commander research**. The app is dark by default
+and switches to light with your system.
 
 ![Decks page: Compare panel, Brew and Comparison tiles](screenshots/decks.png)
 
@@ -119,7 +124,10 @@ tile). A saved brew can be run through the same report a compared deck gets.
   against common deck types, naming popular commanders of each kind (ones the
   build should handle, and ones that tend to give it trouble; click one to
   research it). These are rules of thumb from the deck's own cards, not a
-  simulation, and it all works offline
+  simulation, and it all works offline. Cards you already own are marked with
+  a check, and the rest show the cheapest price
+
+![Matchups: what a Teysa Karlov build is weak to, with the cards that punish it and the ones to answer them (shown on the Commander research page, where the same panel runs on a typical list)](screenshots/matchups.png)
 
 ![Analyze Deck: mana simulation, curve, sample hand](screenshots/analyze.png)
 
@@ -134,9 +142,13 @@ Paste a Moxfield or Archidekt link on the Decks page:
 
 - See what you own and what's missing, with prices at today's market. Owned
   cards are priced by the *exact printing you have*, missing ones by the
-  cheapest printing across TCGPlayer, Card Kingdom and ManaPool (Cardmarket is
-  an opt-in extra, shown separately in EUR), with a foil toggle and ▲/▼ trend
-  arrows from MTGJSON's 90-day history
+  cheapest printing across the stores you pick (TCGPlayer, Card Kingdom and
+  ManaPool; Cardmarket is an opt-in extra, shown separately in EUR), with a foil
+  toggle and ▲/▼ trend arrows from MTGJSON's 90-day history. The **Prices from**
+  picker on the Compare panel saves as soon as you tick a box, and the same
+  choice sets the prices everywhere else: Deck Builder suggestions, Commander
+  research, Matchups and Collection insights (so "ManaPool only" means
+  ManaPool prices throughout; a card that store doesn't list shows no price)
 - Prices come from a local MTGJSON index (a one-time ~325MB download,
   refreshed weekly or on demand), so lookups are instant
 - For missing cards over $20, **budget alternatives** from Scryfall's Oracle
@@ -168,8 +180,9 @@ card database and Scryfall's Oracle Tags.
 - **Snapshot and colors:** unique cards, copies, rough value, foils, sets, and
   your unique nonland cards by color identity
 - **Roles by color:** a grid of ramp, card draw, spot removal, board wipes,
-  counterspells, tutors, recursion, sacrifice outlets, token makers and
-  lifegain against each color. Each cell shows your count and the share of all
+  counterspells, tutors, land search (landcycling, Cultivate and the like, kept
+  out of Tutors), recursion, sacrifice outlets, token makers and lifegain
+  against each color. Each cell shows your count and the share of all
   such cards that exist in that color. Every row is shaded from red (your
   lowest color for that job) to green (your highest), and a toggle switches the
   shading to the share you own instead of the count
@@ -195,12 +208,15 @@ card database and Scryfall's Oracle Tags.
 - **Browse cards:** a second tab on the page lists every card you own (lands
   included) and lets you filter it by name or type, card type, color (click a
   color to allow it, again to require it, with an exact-colors toggle like the
-  builder's), sets, price of a copy (judged by the priciest copy you own of a card), foils, and
-  the roles and themes above, then sort it by name, priciest copy, total value, mana value, popularity or copies. The
-  totals follow the filters: unique cards, copies, total value, average per
-  card and the priciest card. It shows pictures or a compact list, with hover
-  to enlarge and flip buttons. Value is the market price of the exact printing
-  you own, the same prices the Rough value tile adds up
+  builder's), sets, price of a copy (judged by the priciest copy you own of a
+  card), foils, and the roles and themes above. Sort by name, priciest copy,
+  total value, mana value, popularity or copies. The totals follow the
+  filters: unique cards, copies, total value, average per card and the
+  priciest copy. It shows pictures or a compact list, with hover to enlarge and
+  flip buttons. Value is the market price of the exact printing you own, the
+  same prices the Rough value tile adds up
+
+![Browse cards: green creatures worth at least $1, sorted by total value, with the totals above](screenshots/collection-browse.png)
 
 - **Themes:** graveyard, sacrifice, tokens, +1/+1 counters, landfall,
   spellslinger and more, each showing how much of that plan's cards you own
@@ -233,6 +249,8 @@ EDHREC, with the same past 2 years / month / week choice the builder has):
 
 A commander's EDHREC data is fetched the first time you look at it and saved,
 so only the first look at one that isn't saved yet needs the internet.
+
+![Commander research: Teysa Karlov's deck types, what you own of the typical Aristocrats build and what it costs to finish](screenshots/commander-research.png)
 
 ## Requirements
 
