@@ -2310,6 +2310,27 @@ def color_pip_breakdown(entries: list[CardEntry]) -> dict[str, int]:
     return counts
 
 
+_MANA_ADD_CLAUSE_RE = re.compile(r"\bAdd\b([^.\n]*)")
+_BASIC_LAND_TYPES = (("Plains", "W"), ("Island", "U"), ("Swamp", "B"), ("Mountain", "R"), ("Forest", "G"))
+
+
+def colors_produced(type_line: str | None, oracle_text: str | None) -> set[str]:
+    """The colors of mana a card can make: the basic land types on a land (each gives its own mana) plus every colored
+    symbol after an "Add" in its text, and all five for "any color". Used so a budget alternative to a dual land or mana
+    rock has to fix at least the same colors."""
+    out: set[str] = set()
+    tl = type_line or ""
+    if "Land" in tl:
+        subtypes = tl.split("\u2014", 1)[1] if "\u2014" in tl else ""
+        out |= {c for t, c in _BASIC_LAND_TYPES if re.search(r"\b" + t + r"\b", subtypes)}
+    for m in _MANA_ADD_CLAUSE_RE.finditer(oracle_text or ""):
+        seg = m.group(1)
+        out |= set(re.findall(r"\{([WUBRG])\}", seg))
+        if re.search(r"any (?:one )?color|any type|mana of any", seg, re.I):
+            out |= set(WUBRG)
+    return out
+
+
 _MANA_SOURCE_RE = {c: re.compile(r"Add(?:[^.]*?)\{" + c + r"\}") for c in WUBRG}
 _MANA_SOURCE_ANY_COLOR_RE = re.compile(r"add one mana of any color", re.IGNORECASE)
 
@@ -2590,6 +2611,7 @@ def build_comparison(
         wotc_bracket = estimate_wotc_bracket(game_changers_count, has_two_card_combo, has_mass_land_denial, extra_turn_count)
 
     budget_alt = budget_alt_data_in_index()
+    gameplay_lookup = gameplay_data_in_index()
 
     buckets: dict[str, list[CardResult]] = {}
     totals = {
@@ -2621,6 +2643,10 @@ def build_comparison(
             self_price = prices[0][1]
             self_norm = normalize_name(e.name)
             self_is_land = "Land" in e.type_line
+            # An alternative to a dual land or a mana rock has to make at least the same colors (Tundra's tag holds every
+            # dual land of every color pair; only the ones that also make white and blue are real alternatives).
+            self_info = gameplay_lookup.get(self_norm) or {}
+            self_colors = colors_produced(e.type_line, self_info.get("oracle_text"))
             tag_id = budget_alt["tag_by_name"].get(self_norm)
             group = budget_alt["groups"].get(tag_id) if tag_id else None
             if group:
@@ -2629,6 +2655,10 @@ def build_comparison(
                 for member_norm, member_display, member_is_land, member_scryfall_id in group:
                     if member_norm == self_norm or member_is_land != self_is_land or member_norm in deck_names:
                         continue
+                    if self_colors:
+                        member_info = gameplay_lookup.get(member_norm) or {}
+                        if not self_colors <= colors_produced(member_info.get("type_line"), member_info.get("oracle_text")):
+                            continue
                     member_owned = owned_collection.get(member_norm)
                     if member_owned and member_owned.total > 0:
                         # Show *your* printing's art, not a generic one --

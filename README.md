@@ -152,7 +152,8 @@ Paste a Moxfield or Archidekt link on the Decks page:
 - Prices come from a local MTGJSON index (a one-time ~325MB download,
   refreshed weekly or on demand), so lookups are instant
 - For missing cards over $20, **budget alternatives** from Scryfall's Oracle
-  Tags (or the one you already own), no AI guesses
+  Tags (or the one you already own), no AI guesses. A stand-in for a dual land or
+  a colored mana source has to make at least the same colors
 
 ![Budget-alternative suggestions on a card tile](screenshots/budget-alternatives.png)
 
