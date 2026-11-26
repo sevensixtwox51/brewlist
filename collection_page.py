@@ -228,7 +228,7 @@ function snapshotHtml(s) {
   return '<div class="stat-tiles">'
     + tile(fmt(s.unique), 'Unique cards', fmt(s.lands) + ' lands')
     + tile(fmt(s.copies), 'Copies', '')
-    + tile('$' + fmt(Math.round(s.value)), 'Rough value', 'at today’s market price')
+    + tile('$' + fmt(Math.round(s.value)), 'Market value', 'at today’s market price')
     + tile(s.foil_pct + '%', 'Foils', 'of your copies')
     + tile(fmt(s.sets), 'Sets', 'you own cards from')
     + '</div>';
@@ -522,7 +522,7 @@ function brRender() {
     + tile(money(worth), 'Total value', filtering ? 'of ' + money(BR.data.total_value) + ' overall' : 'at today’s market price')
     + tile(rows.length ? money(worth / rows.length) : '—', 'Average per card', rows.length ? 'per unique card' : '')
     + tile(best ? money(best.top) : '—', 'Priciest copy', best ? esc(best.name) : '');
-  brEl('br-note').textContent = 'Value is today’s market price of the exact printing you own (the same prices as the Rough value tile; not your store setting, which only applies to cards you’d buy).'
+  brEl('br-note').textContent = 'Value is today’s market price of the exact printing you own (the same prices as the Market value tile; not your store setting, which only applies to cards you’d buy).'
     + (unpriced ? ' ' + fmt(unpriced) + ' ' + (unpriced === 1 ? 'copy has' : 'copies have') + ' no price on file and count as $0.' : '')
     + ((BR.pmin != null || BR.pmax != null) ? ' With a price filter on, cards with no price are left out.' : '');
   const shownRows = rows.slice(0, BR.shown);

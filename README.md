@@ -177,7 +177,7 @@ read-only look at what you own that stays out of the builder and the compare
 flow. Everything is worked out on your computer from your collection, the local
 card database and Scryfall's Oracle Tags.
 
-- **Snapshot and colors:** unique cards, copies, rough value, foils, sets, and
+- **Snapshot and colors:** unique cards, copies, market value, foils, sets, and
   your unique nonland cards by color identity
 - **Roles by color:** a grid of ramp, card draw, spot removal, board wipes,
   counterspells, tutors, land search (landcycling, Cultivate and the like, kept
@@ -214,7 +214,7 @@ card database and Scryfall's Oracle Tags.
   filters: unique cards, copies, total value, average per card and the
   priciest copy. It shows pictures or a compact list, with hover to enlarge and
   flip buttons. Value is the market price of the exact printing you own, the
-  same prices the Rough value tile adds up
+  same prices the Market value tile adds up
 
 ![Browse cards: green creatures worth at least $1, sorted by total value, with the totals above](screenshots/collection-browse.png)
 

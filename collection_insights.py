@@ -4,7 +4,7 @@ A read-only look at what you own, separate from the Deck Builder and the compare
 Everything comes from data the app already has locally -- the ManaBox export, the card database's per-card
 gameplay data, and Scryfall's Oracle Tags -- so it works offline and costs no network calls.
 
-  - snapshot:  how many cards, copies, rough value, foils, sets.
+  - snapshot:  how many cards, copies, market value, foils, sets.
   - colors:    unique nonland cards per color identity.
   - roles:     a role x color grid (ramp, draw, removal, wipes, counterspells, tutors, recursion, ...): how many
                cards you own for each job in each color, and how many such cards exist in the game. The page shades
@@ -396,7 +396,7 @@ def _browse_payload(owned: dict, owned_rows: list[dict], prices: dict, sets: dic
                     role_names: list[str], theme_names: list[str], total_value: float) -> dict:
     """Every card you own (lands too) with what the card browser filters and totals on: type, color, mana value, the sets
     of the printings you own, which roles and themes it fills (as indexes into the two name lists), and what it is worth.
-    Worth is the market price of the exact printings you hold (the same price the Rough value tile adds up); top/low are
+    Worth is the market price of the exact printings you hold (the same price the Market value tile adds up); top/low are
     the priciest and cheapest single copy."""
     role_idx = {n: i for i, n in enumerate(role_names)}
     theme_idx = {n: i for i, n in enumerate(theme_names)}
