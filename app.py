@@ -480,6 +480,13 @@ input[type="text"], input[type="url"], input[type="file"] {
 #compare-form.flash { animation: form-flash 1.2s ease; }
 @keyframes form-flash { 0%, 60% { box-shadow: 0 0 0 2px var(--gold), 0 0 24px -4px var(--gold); } 100% { box-shadow: var(--shadow); } }
 @media (prefers-reduced-motion: reduce) { #compare-form.flash { animation: none; } }
+/* After a saved comparison is picked, the form flashes once and the Compare button then pulses until it is pressed (or the link is edited). */
+#submit-btn.needs-click { animation: compare-pulse 1.5s ease-in-out infinite; }
+@keyframes compare-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--gold) 65%, transparent), 0 0 10px -2px var(--gold); }
+  50% { box-shadow: 0 0 0 8px color-mix(in srgb, var(--gold) 0%, transparent), 0 0 28px 2px var(--gold); }
+}
+@media (prefers-reduced-motion: reduce) { #submit-btn.needs-click { animation: none; box-shadow: 0 0 0 3px var(--gold), 0 0 18px -2px var(--gold); } }
 .ai-disclosure { display: flex; justify-content: center; align-items: center; gap: 14px; margin-top: 32px; }
 .ai-disclosure img { height: 24px; width: auto; display: block; }
 """
@@ -1057,8 +1064,12 @@ document.querySelectorAll('.recent-deck-link').forEach(link => {{
     form.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
     form.classList.remove('flash'); void form.offsetWidth; form.classList.add('flash');
     submitBtn.focus({{ preventScroll: true }});
+    submitBtn.classList.add('needs-click');  // pulse until Compare is pressed
   }});
 }});
+const stopComparePulse = () => submitBtn.classList.remove('needs-click');
+submitBtn.addEventListener('click', stopComparePulse);
+moxfieldUrlInput.addEventListener('input', stopComparePulse);  // they changed the link: it's no longer "press Compare for this one"
 
 // Comparisons made before the tiles had art don't know their commander yet: ask once, one at a time, and fill in the tile.
 // Only visible tiles are asked about (the rest wait for "Show more").
