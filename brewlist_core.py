@@ -32,7 +32,7 @@ __all__ = [
     "parse_deck_ref", "deck_key", "split_deck_key", "fetch_deck", "extract_entries",
     "normalize_name", "find_collection_candidates", "load_collection", "load_overrides",
     "fetch_scryfall_prices_by_id", "price_for_printing", "select_used_printings",
-    "printing_info_fetch_running", "flavor_names_in_cache", "surge_foil_ids", "ensure_printing_info", "price_index_age_days", "price_index_built_at", "rebuild_price_index", "rebuild_price_index_isolated", "ensure_price_index", "game_changers_in_index",
+    "printing_info_fetch_running", "flavor_names_in_cache", "surge_foil_ids", "ensure_printing_info", "colors_produced", "price_index_age_days", "price_index_built_at", "rebuild_price_index", "rebuild_price_index_isolated", "ensure_price_index", "game_changers_in_index",
     "load_store_prefs", "save_store_prefs", "active_price_stores", "best_offer", "STORE_LABELS", "STORE_DISPLAY_NAMES", "update_from_git",
     "EXTRA_STORE_LABELS", "PICKABLE_STORE_LABELS",
     "commander_legality_in_index", "deck_is_commander_format",
@@ -768,6 +768,18 @@ BUDGET_ALT_EXCLUDED_TAGS = {
 # ("deprecated mechanics", 17 tags like "old lifelink"/"deprecated p/t
 # counter") and a third ("type errata", creature-type correction metadata
 # like "type errata hound") that would have had the exact same problem.
+# Tags that are about a card's NAME, ART, FRAME or JOKE, not what it does (found by reading a random sample of real alternatives:
+# Lu Su, Wu Advisor was matched with Defective Detective through "rhyming name"; Ydwen Efreet with Atog through "anagram").
+# Applied when a report is built, so it works on the saved index, and added to the excluded tags above for the next rebuild.
+BUDGET_ALT_META_TAGS = {
+    "rhyming name", "punny name", "real life animal name", "three-letter name", "anagram", "game name", "magic term name",
+    "doctor who episode name", "shares name with a format", "shares name with a set", "eponymous", "misnomer", "vanity card",
+    "art matters", "card style matters", "border color matters", "sleeves matter", "set matters", "format matters", "legacy",
+    "un-color", "change name", "inscryption achievement", "exo-storyline-in-cards", "planechase mechanic", "start of game",
+    "rules nightmare", "you matter", "virtual legendary", "legendary team-up", "untracked indefinite effect",
+    "functional reminder counter", "type errata",
+}
+BUDGET_ALT_EXCLUDED_TAGS |= BUDGET_ALT_META_TAGS
 BUDGET_ALT_EXCLUDED_BRANCHES = {"deprecated card types", "deprecated mechanics", "type errata"}
 # A short, evidence-checked list of unambiguous "this is the card's actual
 # deck-building role" tags -- checked before the generic has-parent/fewest-
@@ -2612,6 +2624,9 @@ def build_comparison(
 
     budget_alt = budget_alt_data_in_index()
     gameplay_lookup = gameplay_data_in_index()
+    # The deck's colors (its commander's color identity), when it has a commander: a mana source that makes "any color" only
+    # has to be matched in the colors this deck can actually use.
+    deck_identity = {c for e in entries if e.section == "commander" for c in (e.color_identity or [])}
 
     buckets: dict[str, list[CardResult]] = {}
     totals = {
@@ -2646,18 +2661,29 @@ def build_comparison(
             # An alternative to a dual land or a mana rock has to make at least the same colors (Tundra's tag holds every
             # dual land of every color pair; only the ones that also make white and blue are real alternatives).
             self_info = gameplay_lookup.get(self_norm) or {}
-            self_colors = colors_produced(e.type_line, self_info.get("oracle_text"))
+            self_colors = colors_produced(e.type_line, self_info.get("oracle_text")) & (deck_identity or set(WUBRG))
+            # ...and it has to be something that deck could actually play: inside the deck's colors (the card's own colors when
+            # there is no commander), and a creature only stands in for a creature.
+            self_ci = set(self_info.get("color_identity") or e.color_identity or [])
+            allowed_ci = deck_identity or self_ci
+            self_is_creature = "Creature" in e.type_line.split("\u2014")[0]
             tag_id = budget_alt["tag_by_name"].get(self_norm)
             group = budget_alt["groups"].get(tag_id) if tag_id else None
+            if (budget_alt["tag_labels"].get(tag_id) or "").lower() in BUDGET_ALT_META_TAGS:
+                group = None  # a name/art/joke tag says nothing about what the card does
             if group:
                 owned_alts: list[tuple[str, str | None]] = []
                 cheap_candidates: list[tuple[str, float, str | None]] = []
                 for member_norm, member_display, member_is_land, member_scryfall_id in group:
                     if member_norm == self_norm or member_is_land != self_is_land or member_norm in deck_names:
                         continue
-                    if self_colors:
-                        member_info = gameplay_lookup.get(member_norm) or {}
-                        if not self_colors <= colors_produced(member_info.get("type_line"), member_info.get("oracle_text")):
+                    member_info = gameplay_lookup.get(member_norm) or {}
+                    if member_info:
+                        if not set(member_info.get("color_identity") or []) <= allowed_ci:
+                            continue
+                        if ("Creature" in (member_info.get("type_line") or "").split("\u2014")[0]) != self_is_creature:
+                            continue
+                        if self_colors and not self_colors <= colors_produced(member_info.get("type_line"), member_info.get("oracle_text")):
                             continue
                     member_owned = owned_collection.get(member_norm)
                     if member_owned and member_owned.total > 0:
@@ -3631,6 +3657,7 @@ body.gallery .card-prices {{ align-items: stretch; max-width: none; }}
 @media (min-width: 900px) {{ .deck-analysis-body {{ grid-template-columns: 1fr 1fr; }} .deck-analysis-body > .span-all, .deck-analysis-body > .ai-summary-note {{ grid-column: 1 / -1; }} }}
 .sample-hand.an-panel {{ grid-column: 1 / -1; }}
 details.combos-panel > summary {{ font-family: var(--serif); font-size: 1.08rem; }}
+{analysis_css}
 </style>
 </head>
 <body{body_attrs}>
@@ -3732,6 +3759,9 @@ const ORIGINAL_DECK_VALUE = {deck_value:.4f};
 const ORIGINAL_OWNED_VALUE = {owned_value:.4f};
 const DECK_ID = {deck_id_json};
 const DECK_NAME = {deck_name_json};
+window.ANALYSIS_DECK = {analysis_deck_json};
+
+{analysis_js}
 
 const search = document.getElementById('search');
 const missingOnly = document.getElementById('missing-only');
@@ -4750,6 +4780,26 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
     ]
     sample_hand_json = json.dumps(sample_hand_pool)
 
+    # The full analysis (analysis_ui.py) works on the deck's cards, so it needs a commander and the web app to answer.
+    from analysis_ui import ANALYSIS_CSS, ANALYSIS_JS, ANALYSIS_PANEL_HTML
+    cmd_entry = next((r.entry for r in all_results if r.entry.section == "commander"), None)
+
+    def _analysis_card(e):
+        return {
+            "name": e.name, "quantity": e.quantity, "scryfall_id": _display_scryfall_id(next(r for r in all_results if r.entry is e)),
+            "type_line": e.type_line, "color_identity": list(e.color_identity or []), "category": categorize(e.type_line),
+            "cmc": e.cmc, "mana_cost": e.mana_cost, "set_code": e.set_code, "collector_number": e.collector_number,
+        }
+
+    analysis_deck = None
+    if cmd_entry is not None and library_size:
+        analysis_deck = {
+            "commander": _analysis_card(cmd_entry),
+            "cards": [_analysis_card(r.entry) for r in library_results],
+        }
+    analysis_deck_json = json.dumps(analysis_deck).replace("</", "<\\/")
+    analysis_panel_html = ANALYSIS_PANEL_HTML if analysis_deck else ""
+
     ai_summary_html = (
         f'<div class="ai-summary-note"><b>&#10024; AI Summary</b> -- {html.escape(ai_summary)}</div>'
         if ai_summary else ""
@@ -4823,6 +4873,7 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
     </div>
     <div class="sample-hand-cards" id="sample-hand-cards"></div>
   </div>
+  {analysis_panel_html}
 </div>
 </details>""" if library_size else ""
 
@@ -5155,6 +5206,9 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
         wotc_bracket_html=wotc_bracket_html,
         combos_html=combos_html,
         deck_analysis_html=deck_analysis_html,
+        analysis_css=ANALYSIS_CSS,
+        analysis_js=ANALYSIS_JS if analysis_deck else "",
+        analysis_deck_json=analysis_deck_json,
         sample_hand_json=sample_hand_json,
         pct=pct,
         buckets_html="\n".join(bucket_blocks),

@@ -1,0 +1,265 @@
+"""The full deck analysis for the compare report: the same checks the Deck Builder's Analyze has (Rule 0 summary and bracket,
+land and color-source check, mana simulation, Turn Clock, Resilience, synergy packages, Matchups), drawn into the compare report.
+
+Pure presentation. The numbers come from the same /builder/* endpoints the builder's Analyze uses, called with the compared
+deck's cards, so the two can't drift apart. brewlist_core.render_html embeds ANALYSIS_CSS, ANALYSIS_JS and the deck payload; the
+report page is served by the web app, so the endpoints are there. (A report saved as a plain file has no server, so the panel
+says so instead of failing quietly.)
+"""
+from matchups_ui import MATCHUPS_CSS, MATCHUPS_JS
+
+ANALYSIS_CSS = MATCHUPS_CSS + """
+.bv-badge { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; margin: 0 6px 6px 0; border-radius: 999px; background: var(--bg); border: 1px solid var(--card-border); font-size: 0.78rem; color: var(--text); cursor: help; }
+.bv-badge.warn { border-color: color-mix(in srgb, var(--missing) 45%, var(--card-border)); color: var(--missing); }
+.bv-badge.good { border-color: color-mix(in srgb, var(--owned) 45%, var(--card-border)); color: var(--owned); }
+.bv-badge.highlight { border-color: color-mix(in srgb, var(--gold) 45%, var(--card-border)); color: var(--gold); }
+.fa-hint { color: var(--text-dim); font-size: 0.8rem; margin: 6px 0 8px; }
+.fa-status { color: var(--text-dim); font-size: 0.82rem; margin: 8px 0 0; min-height: 1.2em; }
+.fa-section { margin: 18px 0 0; }
+.fa-section > h5 { margin: 0 0 8px; padding-bottom: 6px; border-bottom: 1px solid var(--card-border); font-family: var(--serif); font-size: 1.05rem; font-weight: 600; color: var(--accent); }
+.fa-badges { margin: 0 0 8px; }
+.fa-list { margin: 6px 0 0; padding-left: 18px; columns: 2 320px; column-gap: 24px; font-size: 0.88rem; }
+.fa-list li { break-inside: avoid; margin-bottom: 4px; }
+.fa-shape-row { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; font-size: 0.82rem; }
+.fa-shape-row .fa-label { width: 90px; flex-shrink: 0; }
+.fa-track { flex: 1; height: 9px; border-radius: 5px; background: var(--card-border); overflow: hidden; }
+.fa-bar { height: 100%; border-radius: 5px; }
+.fa-bar.under { background: var(--missing); } .fa-bar.near { background: var(--owned); } .fa-bar.over { background: var(--gold); }
+.fa-shape-row .fa-count { text-align: right; flex-shrink: 0; color: var(--text-dim); white-space: nowrap; min-width: 80px; }
+.fa-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 10px; margin: 0 0 14px; }
+.fa-tile { background: var(--bg-elevated); border: 1px solid var(--card-border); border-radius: 10px; padding: 10px 12px 11px; min-width: 0; }
+.fa-tile .fa-value { font-family: var(--serif); font-size: 1.9rem; font-weight: 600; line-height: 1.05; color: var(--accent); font-variant-numeric: tabular-nums; }
+.fa-tile.good .fa-value, .fa-colors b.good { color: var(--owned); }
+.fa-tile.ok .fa-value, .fa-colors b.ok { color: var(--gold); }
+.fa-tile.bad .fa-value, .fa-colors b.bad { color: var(--missing); }
+.fa-tile .fa-tl { margin-top: 5px; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-dim); }
+.fa-tile .fa-ts { margin-top: 2px; font-size: 0.72rem; color: var(--text-dim); line-height: 1.3; }
+.fa-tile.span2 { grid-column: span 2; }
+.fa-colors { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 4px; }
+.fa-colors span { display: inline-flex; align-items: center; gap: 5px; }
+.fa-colors img { width: 18px; height: 18px; }
+.fa-colors b { font-family: var(--serif); font-size: 1.05rem; font-weight: 600; }
+table.fa-land { width: 100%; font-size: 13px; border-collapse: collapse; }
+table.fa-land th { text-align: left; font-weight: 600; color: var(--text-dim); }
+table.fa-land td, table.fa-land th { padding: 3px 8px 3px 0; }
+#fa-hover { position: fixed; pointer-events: none; z-index: 400; display: none; width: 240px; border-radius: 4.75% / 3.5%; box-shadow: 0 12px 32px rgba(0,0,0,0.5), 0 0 0 1px var(--card-border); }
+"""
+
+ANALYSIS_PANEL_HTML = """
+  <div class="an-panel" id="full-analysis" hidden>
+    <h4>Full analysis</h4>
+    <div class="analysis-stat-line">The same checks as the Deck Builder's Analyze, run on this list: Rule 0 summary and bracket, land and color sources, a mana simulation, how fast it wins, how well it survives wipes and removal, and what it is weak to.</div>
+    <div class="sample-hand-actions"><button type="button" class="btn ghost" id="fa-run-btn">&#128269; Run full analysis</button></div>
+    <div class="fa-status" id="fa-status" role="status" aria-live="polite"></div>
+    <div id="fa-body"></div>
+  </div>
+"""
+
+ANALYSIS_JS = r"""
+// ---- Full analysis (analysis_ui.py): the builder's Analyze checks on the compared deck ----
+function escapeHtml(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function muImg(id) { return id ? 'https://cards.scryfall.io/normal/front/' + id[0] + '/' + id[1] + '/' + id + '.jpg' : ''; }
+""" + MATCHUPS_JS + r"""
+(function () {
+  const deck = window.ANALYSIS_DECK;
+  const panel = document.getElementById('full-analysis');
+  if (!deck || !panel) return;
+  panel.hidden = false;
+  const $ = (id) => document.getElementById(id);
+  const WUBRG = ['W', 'U', 'B', 'R', 'G'];
+  const COLOR_NAMES = { W: 'White', U: 'Blue', B: 'Black', R: 'Red', G: 'Green' };
+  const SOURCE_COLOR_HEX = { W: '#e9dfae', U: '#6fa8e0', B: '#8a7a8f', R: '#e0735a', G: '#6fb07a' };
+  const BRACKET_TAG_LABELS = { E: 'Exhibition', C: 'Core', P: 'Powerful', O: 'Oddball', S: 'Spicy', R: 'Ruthless', B: 'Banned' };
+  const MANA_SIM_GOOD = { 2: 95, 3: 88, 4: 78, 5: 66, 6: 55 };
+  const ROLE_HELP = {
+    Lands: 'Land cards in the 99-card library: nonbasic lands plus basics.',
+    Ramp: 'Cards that make or fetch mana: mana rocks, mana creatures, and spells that put lands onto the battlefield.',
+    Draw: 'Card advantage: spells and permanents that draw cards or let you play cards from the top of the library.',
+    Interaction: 'Answers to what opponents do: targeted removal, board wipes, counterspells, bounce and tuck effects, and edicts.',
+    Synergy: 'Everything else: creatures, win conditions, and cards that support the commander’s plan.',
+  };
+  const tile = (value, label, sub, cls, tip) => '<div class="fa-tile ' + (cls || '') + '"' + (tip ? ' title="' + escapeHtml(tip) + '"' : '') + '><div class="fa-value">' + value + '</div><div class="fa-tl">' + label + '</div>' + (sub ? '<div class="fa-ts">' + sub + '</div>' : '') + '</div>';
+  const tiles = (arr) => '<div class="fa-tiles">' + arr.filter(Boolean).join('') + '</div>';
+  const row = (label, cls, pct, count, tip, labelW) => '<div class="fa-shape-row" title="' + escapeHtml(tip || '') + '"><span class="fa-label"' + (labelW ? ' style="width:' + labelW + 'px"' : '') + '>' + label + '</span><div class="fa-track"><div class="fa-bar ' + cls + '" style="width:' + pct + '%"></div></div><span class="fa-count">' + count + '</span></div>';
+  const section = (id, title) => '<div class="fa-section" id="' + id + '" hidden><h5>' + title + '</h5><div class="fa-content"></div></div>';
+  const fill = (id, html) => { const s = $(id); s.hidden = false; s.querySelector('.fa-content').innerHTML = html; };
+  const post = (url, body) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json());
+  const base = { cards: deck.cards, commander: deck.commander, format: 'commander' };
+
+  function colorsLabel() {
+    const set = new Set(deck.commander ? deck.commander.color_identity || [] : []);
+    deck.cards.forEach((c) => (c.color_identity || []).forEach((x) => set.add(x)));
+    const ordered = WUBRG.filter((c) => set.has(c));
+    return ordered.length ? ordered.map((c) => COLOR_NAMES[c]).join(' / ') : 'Colorless';
+  }
+  function badgesHtml(d) {
+    const b = [{ cls: 'highlight', label: '&#128176; $' + d.deck_value.toFixed(2), tip: "Total deck value at today's market price" }];
+    b.push({ cls: d.game_changers ? 'highlight' : '', label: '&#9889; ' + d.game_changers + ' Game Changer' + (d.game_changers === 1 ? '' : 's'), tip: d.game_changers_names.length ? 'Game Changers in this deck: ' + d.game_changers_names.join(', ') : "On WotC's official Commander Game Changers list -- none found in this deck" });
+    b.push(d.banned_count ? { cls: 'warn', label: '&#9940; ' + d.banned_count + ' not legal', tip: 'Cards not legal in Commander (banned/restricted)' } : { cls: 'good', label: '&#10003; Commander legal', tip: 'No Commander-banned or restricted cards found' });
+    if (d.bracket_tag) b.push({ label: BRACKET_TAG_LABELS[d.bracket_tag] || d.bracket_tag, tip: "Commander Spellbook's own community power/style rating for this deck -- not the official WotC bracket system" });
+    if (d.wotc_bracket) b.push({ label: 'Bracket ' + d.wotc_bracket[0], tip: "Estimated from WotC's published Bracket rules (Game Changers, mass land denial, combos, extra turns): " + d.wotc_bracket[1] });
+    b.push(d.spellbook_unavailable ? { label: '&#128279; combos: lookup unavailable', tip: "Commander Spellbook couldn't be reached, so combos, mass land denial and extra turns are unknown, not zero." }
+      : { label: '&#128279; ' + d.combos_included + ' combo' + (d.combos_included === 1 ? '' : 's') + ', ' + d.combos_almost + ' one away', tip: d.combos_included + ' known combo(s) already in this deck, and ' + d.combos_almost + ' more exactly one card away (via Commander Spellbook)' });
+    return '<div class="fa-badges">' + b.map((x) => '<span class="bv-badge ' + (x.cls || '') + '" title="' + escapeHtml(x.tip) + '">' + x.label + '</span>').join('') + '</div>';
+  }
+  function rule0Html(d) {
+    const items = ['<b>Colors:</b> ' + colorsLabel()];
+    if (d.wotc_bracket) items.push('<b>Estimated Bracket ' + d.wotc_bracket[0] + '</b> (' + d.wotc_bracket[1] + ") -- WotC's published rules, from this deck's Game Changers, combos, extra turns and land denial");
+    if (d.spellbook_unavailable) items.push("<b>Combo data unavailable:</b> Commander Spellbook couldn't be reached, so mass land denial, extra turns and combos are unknown (not zero)");
+    items.push('<b>Game Changers (' + d.game_changers + '):</b> ' + (d.game_changers_names.length ? d.game_changers_names.map(escapeHtml).join(', ') : 'none'));
+    if (!d.spellbook_unavailable) {
+      const mld = d.mass_land_denial_names || [], xt = d.extra_turn_names || [];
+      items.push('<b>Mass land denial:</b> ' + (d.mass_land_denial ? 'Yes' + (mld.length ? ' (' + mld.map(escapeHtml).join(', ') + ')' : '') : 'No'));
+      items.push('<b>Extra-turn effects:</b> ' + d.extra_turn_count + (xt.length ? ' (' + xt.map(escapeHtml).join(', ') + ')' : ''));
+      items.push('<b>Combos:</b> ' + d.combos_included + ' already assembled, ' + d.combos_almost + ' one card away');
+    }
+    items.push('<b>Deck value:</b> $' + d.deck_value.toFixed(2) + " (today's market)");
+    return '<ul class="fa-list">' + items.map((t) => '<li>' + t + '</li>').join('') + '</ul>';
+  }
+  function shapeHtml(d) {
+    const counts = d.role_counts || {}, targets = d.role_targets || {};
+    let html = ['Lands', 'Ramp', 'Draw', 'Interaction', 'Synergy'].map((role) => {
+      const actual = counts[role] || 0, target = targets[role];
+      if (target === null || target === undefined) return row(role, 'near', 0, actual + ' card(s)', ROLE_HELP[role]);
+      const ratio = target ? actual / target : (actual ? 2 : 0);
+      const cls = ratio < 0.8 ? 'under' : (ratio > 1.3 ? 'over' : 'near');
+      return row(role, cls, Math.min(100, ratio * 100), actual + ' / ~' + target, actual + ' of a ~' + target + ' target. ' + (ROLE_HELP[role] || ''));
+    }).join('');
+    const k = d.karsten;
+    if (k) {
+      const diff = k.lands_actual - k.lands_formula;
+      html += '<div class="fa-hint"><b>Karsten’s land formula</b> gives ' + k.lands_formula + ' lands for this deck’s average mana value (' + k.avg_mv.toFixed(2) + ') and ' + k.cheap + ' cheap ramp or draw cards; it has ' + k.lands_actual + ' (' + (Math.abs(diff) < 1.5 ? 'about right' : (diff < 0 ? 'light on lands' : 'heavy on lands')) + ').</div>';
+    }
+    const cs = d.color_sources;
+    if (cs && cs.length) {
+      html += '<div class="fa-hint"><b>Colored sources</b> against Karsten’s requirement (90–96% on-curve odds). A dual or tri-land counts toward every color it makes:</div>' + cs.map((r) => {
+        const gap = r.need - r.have, cls = gap <= 0 ? 'near' : (gap <= 5 ? 'over' : 'under');
+        const verdict = gap <= 0 ? 'enough' : (gap <= 5 ? 'a little short' : 'add ' + gap + ' more');
+        const tip = r.have + ' ' + r.name + ' sources (lands that make it, plus mana rocks and dorks costing 2 or less). Karsten’s requirement is ~' + r.need + '; the hardest card is ' + r.hardest.card + ' at ~' + r.hardest.need + '.';
+        return row('<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:' + SOURCE_COLOR_HEX[r.color] + ';margin-right:6px;"></span>' + r.name[0].toUpperCase() + r.name.slice(1), cls, Math.min(100, r.have / Math.max(1, r.need) * 100), r.have + ' / ~' + r.need + ' &middot; ' + verdict, tip);
+      }).join('');
+    }
+    const fixes = d.mana_fixes || [];
+    if (fixes.length) {
+      html += '<div class="fa-hint"><b>Land swaps from your collection</b> that would close those gaps:</div><ul class="fa-list">' + fixes.map((f) => '<li>Swap a <b>' + escapeHtml(f.remove) + '</b> for <b>' + escapeHtml(f.add.name) + '</b> (' + f.makes.map((c) => '+' + c).join(' ') + (f.tapped ? ', enters tapped' : '') + ')</li>').join('') + '</ul>';
+    }
+    return html;
+  }
+  function manaSimHtml(sim) {
+    const good = (v, hi, mid) => v >= hi ? 'good' : (v >= mid ? 'ok' : 'bad');
+    const curve = [2, 3, 4, 5, 6].map((t) => {
+      const pct = sim.on_curve[t], g = MANA_SIM_GOOD[t];
+      return row('Turn ' + t, pct >= g ? 'near' : (pct >= g - 8 ? 'over' : 'under'), pct, pct + '%', 'In ' + pct + '% of ' + sim.games + ' games you have at least ' + t + ' mana on turn ' + t + ' (average ' + sim.avg_mana[t] + ').');
+    }).join('');
+    const colorTile = '<div class="fa-tile span2" title="Chance each color is available by turn 4"><div class="fa-colors">' + Object.entries(sim.color_by_turn_4).map(([c, p]) => SOURCE_COLOR_HEX[c] ? '<span><img src="/static/mana/' + c + '.svg" alt="' + c + '"><b class="' + good(p, 94, 85) + '">' + p + '%</b></span>' : '').join('') + '</div><div class="fa-tl">Color available by turn 4</div></div>';
+    return '<div class="fa-hint">' + sim.games.toLocaleString() + ' simulated games of just the mana game (' + sim.lands + ' lands, ' + sim.ramp + ' mana rocks, dorks and land-fetching spells, plus card draw): the chance of having at least as much mana as the turn number.</div>'
+      + tiles([
+        sim.commander ? tile(sim.commander.on_curve + '%', 'Commander on curve', 'mana value ' + sim.commander.mv + ' &middot; within two turns of that: ' + sim.commander.within_two + '%', good(sim.commander.on_curve, 80, 65), sim.commander.name + ' can be cast on curve in ' + sim.commander.on_curve + '% of games.') : '',
+        tile(sim.avg_opening_lands, 'Opening lands', 'average &middot; ' + sim.mulligan_rate + '% mulligan', '', ''),
+        tile(sim.stuck_on_two_turn_4 + '%', 'Stuck on turn 4', 'with two mana or less', sim.stuck_on_two_turn_4 <= 3 ? 'good' : (sim.stuck_on_two_turn_4 <= 8 ? 'ok' : 'bad'), ''),
+        colorTile,
+      ]) + curve + '<div class="fa-hint">Mana only: no spells are cast but ramp.</div>';
+  }
+  function landCurveHtml(curve) {
+    const wanted = new Set([curve.current - 4, curve.current - 2, curve.current, curve.current + 2, curve.current + 4]);
+    const rows = curve.rows.filter((r) => wanted.has(r.lands)).map((r) => '<tr><td>' + r.lands + ' lands' + (r.lands === curve.current ? ' <span class="fa-hint" style="margin:0">(yours)</span>' : '') + '</td><td>' + r.four_on_four + '%</td><td>' + r.five_on_five + '%</td><td>' + r.flood + '%</td></tr>').join('');
+    const lo = curve.rows.find((r) => r.lands === curve.current - 4) || curve.rows[0], hi = curve.rows.find((r) => r.lands === curve.current + 4) || curve.rows[curve.rows.length - 1];
+    const span = (hi.lands - lo.lands) || 1;
+    return '<div class="fa-hint" style="margin-top:12px"><b>Land count:</b> the same deck with more or fewer lands (' + curve.games.toLocaleString() + ' games each). Around ' + curve.current + ' lands, each extra land adds about <b>' + ((hi.four_on_four - lo.four_on_four) / span).toFixed(1) + '</b> points of four-mana-on-turn-4 odds and about <b>' + ((hi.flood - lo.flood) / span).toFixed(1) + '</b> points of flood odds.</div>'
+      + '<table class="fa-land"><thead><tr><th>Lands</th><th title="Chance of at least four mana on turn 4">4 on T4</th><th title="Chance of at least five mana on turn 5">5 on T5</th><th title="Chance of 8 or more lands in the first 14 cards">Flood</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }
+  function synergyHtml(d) {
+    const syn = d.synergy;
+    if (!syn || !(syn.packages.length || syn.thin.length || syn.off_plan_total)) return '';
+    const rows = syn.packages.map((p) => {
+      const total = p.enablers + p.payoffs, share = Math.round(p.enablers / total * 100);
+      const tip = p.blurb + '. Enablers (' + p.enablers + '): ' + p.enabler_cards.join(', ') + (p.enablers > p.enabler_cards.length ? '...' : '') + '. Payoffs (' + p.payoffs + '): ' + (p.payoff_cards.join(', ') || 'none') + (p.payoffs > p.payoff_cards.length ? '...' : '');
+      return '<div class="fa-shape-row" title="' + escapeHtml(tip) + '"><span class="fa-label" style="width:150px">' + escapeHtml(p.name) + '</span><div class="fa-track" style="display:flex"><div class="fa-bar ' + (p.verdict === 'balanced' ? 'near' : 'over') + '" style="width:' + share + '%;border-radius:0"></div><div class="fa-bar near" style="width:' + (100 - share) + '%;border-radius:0;opacity:.55"></div></div><span class="fa-count" style="min-width:200px">' + p.enablers + ' enabler' + (p.enablers === 1 ? '' : 's') + ' &middot; ' + p.payoffs + ' payoff' + (p.payoffs === 1 ? '' : 's') + (p.verdict === 'balanced' ? '' : ' &middot; ' + p.verdict) + '</span></div>';
+    }).join('');
+    const thin = syn.thin.length ? '<div class="fa-hint"><b>Payoffs with little to enable them:</b> ' + syn.thin.map((p) => escapeHtml(p.name) + ' (' + p.payoffs + ' payoffs, ' + p.enablers + ' enabler' + (p.enablers === 1 ? '' : 's') + ')').join('; ') + '. Those cards may sit idle in hand.</div>' : '';
+    const off = syn.off_plan_total ? '<div class="fa-hint"><b>Outside every package above (' + syn.off_plan_total + '):</b> ' + syn.off_plan.map((c) => escapeHtml(c.name)).join(', ') + (syn.off_plan_total > syn.off_plan.length ? '...' : '') + '. These are the likeliest cuts.</div>' : '';
+    return (syn.packages.length ? '<div class="fa-hint">What the deck is built around, from card text: enablers (left, bright) against payoffs (right). Hover a bar for the cards.</div>' + rows : '<div class="fa-hint">No package has both enablers and payoffs in this deck yet.</div>') + thin + off;
+  }
+  function turnClockHtml(clock) {
+    const bars = [];
+    for (let t = 5; t <= clock.max_turn; t++) { const pct = clock.by_turn[t]; bars.push(row('By turn ' + t, 'near', pct, pct + '%', 'In ' + pct + '% of ' + clock.games + ' simulated games the deck has dealt ' + clock.life + ' damage to one do-nothing opponent by turn ' + t + '.')); }
+    return '<div class="fa-hint">' + clock.games.toLocaleString() + ' simulated games against opponents at ' + clock.life + ' life who block nothing and remove nothing. Commander damage (21) counts as a kill.</div>'
+      + tiles([
+        tile(clock.median_turn ? 'Turn ' + clock.median_turn : '&mdash;', 'Kills one opponent', clock.median_turn ? 'in half of games' + (clock.fast_turn ? ' &middot; fastest tenth by turn ' + clock.fast_turn : '') + (clock.slow_turn ? ', slowest tenth by turn ' + clock.slow_turn : '') : 'fewer than half of games by turn ' + clock.max_turn, '', ''),
+        tile(clock.table_median_turn ? 'Turn ' + clock.table_median_turn : clock.table_kill_rate + '%', 'Whole table dead', clock.table_median_turn ? 'all ' + clock.opponents + ' opponents, in half of games' : 'of games by turn ' + clock.max_turn, '', ''),
+        tile(clock.kill_rate + '%', 'Games that kill', 'one opponent by turn ' + clock.max_turn, '', ''),
+        clock.combos ? tile(clock.combo_kill_rate + '%', 'End by combo', clock.combos + ' assembled game-ending combo' + (clock.combos === 1 ? '' : 's'), '', '') : '',
+      ]) + bars.join('')
+      + (clock.kill_rate < 60 ? '<div class="fa-hint"><b>Most games never kill.</b> The clock reads combat, tokens, equipment and auras, team boosts, extra combats, damage that scales with the board, direct life loss and assembled combos; a deck that wins another way will read slow.</div>' : '')
+      + '<div class="fa-hint">A ruler for comparing builds, not a prediction.</div>';
+  }
+  function resilienceHtml(res) {
+    const baseS = res.baseline, turnText = (s) => s.median_turn ? 'turn ' + s.median_turn : 'rarely';
+    const delta = (s) => (s.median_turn && baseS.median_turn) ? (s.median_turn - baseS.median_turn) : null;
+    const rrow = (label, s, tip) => { const d = delta(s), cls = d === null ? 'under' : (d <= 1 ? 'near' : (d <= 2 ? 'over' : 'under')); return row(label, cls, Math.max(4, Math.min(100, s.by_10)), 'kills on ' + turnText(s) + (d ? ' (+' + d + ')' : '') + ' &middot; ' + s.by_10 + '% by turn 10', tip, 210); };
+    const delayTile = (label, s, tip) => { const d = delta(s); return tile(d === null ? 'Rarely' : (d <= 0 ? 'No delay' : '+' + d + (d === 1 ? ' turn' : ' turns')), label, s.by_10 + '% still kill by turn 10', d === null ? 'bad' : (d <= 1 ? 'good' : (d <= 2 ? 'ok' : 'bad')), tip); };
+    const wipeDelay = delta(res.wipe);
+    const advice = (res.protection + res.recursion === 0)
+      ? 'Nothing in the deck protects the board or brings it back, so a wipe on turn ' + res.wipe_turn + ' costs ' + (wipeDelay === null ? 'the game' : wipeDelay + ' turn' + (wipeDelay === 1 ? '' : 's')) + '.'
+      : res.protection + ' protection spell' + (res.protection === 1 ? '' : 's') + ' and ' + res.recursion + ' reanimation spell' + (res.recursion === 1 ? '' : 's') + ' soften a wipe: it costs ' + (wipeDelay === null ? 'the game' : wipeDelay + ' turn' + (wipeDelay === 1 ? '' : 's')) + '.';
+    return '<div class="fa-hint">The same Turn Clock when opponents interact (' + res.games.toLocaleString() + ' games each): how many turns later the kill comes than with no interaction (turn ' + (baseS.median_turn || '?') + ').</div>'
+      + tiles([delayTile('Spot removal', res.spot, 'Each turn from turn 3 there is a ' + Math.round(res.spot_chance * 100) + '% chance an opponent removes your best creature.'), delayTile('Board wipe T' + res.wipe_turn, res.wipe, 'Every creature and token dies at the start of turn ' + res.wipe_turn + ' unless protected.'), delayTile('Wipe + spot', res.both, 'Both in the same game.'), delayTile('Commander removed', res.commander, 'Removed each time it is cast (twice), and recasting costs {2} more.')])
+      + rrow('No interaction', baseS, 'The baseline Turn Clock.') + rrow('Spot removal (' + Math.round(res.spot_chance * 100) + '% each turn)', res.spot, 'From turn 3, each turn an opponent may remove your best creature.')
+      + rrow('Board wipe on turn ' + res.wipe_turn, res.wipe, 'Every creature and token dies on that turn unless a protection spell is in hand; reanimation brings creatures back.') + rrow('Wipe and spot removal', res.both, 'Both in the same game, the closest to a real table.')
+      + rrow('Commander removed when cast (twice)', res.commander, 'Removed each time it is cast, and recasting costs {2} more.')
+      + '<div class="fa-hint">' + advice + ' Protection ' + res.protection + ' &middot; reanimation ' + res.recursion + ' &middot; card draw ' + res.draw + ' &middot; threats ' + res.threats + '.</div>';
+  }
+
+  // hover a named card in the Matchups panel to see it
+  const hover = document.createElement('img'); hover.id = 'fa-hover'; hover.alt = ''; document.body.appendChild(hover);
+  document.addEventListener('mousemove', (e) => {
+    const c = e.target.closest ? e.target.closest('#fa-body .mu-card[data-full]') : null;
+    if (!c) { hover.style.display = 'none'; return; }
+    if (hover.dataset.src !== c.dataset.full) { hover.dataset.src = c.dataset.full; hover.src = c.dataset.full; }
+    hover.style.display = 'block';
+    const pad = 18, w = 240, h = Math.round(w * 1.4);
+    let x = e.clientX + pad, y = e.clientY + pad;
+    if (x + w > window.innerWidth) x = e.clientX - w - pad;
+    if (y + h > window.innerHeight) y = window.innerHeight - h - pad;
+    hover.style.left = x + 'px'; hover.style.top = Math.max(0, y) + 'px';
+  });
+
+  const SECTIONS = [['fa-rule0', 'Rule 0 summary'], ['fa-shape', 'Lands, ramp and colors'], ['fa-mana', 'Mana simulation'], ['fa-synergy', 'Synergy packages'], ['fa-clock', 'Turn Clock'], ['fa-resilience', 'Resilience'], ['fa-matchups', 'Matchups']];
+  const statusEl = $('fa-status'), body = $('fa-body'), btn = $('fa-run-btn');
+  let running = false;
+  btn.addEventListener('click', () => {
+    if (running) return;
+    if (!/^https?:$/.test(location.protocol)) { statusEl.textContent = 'The full analysis needs the Brewlist app running. Open this report from the app (not as a saved file).'; return; }
+    running = true; btn.disabled = true;
+    body.innerHTML = SECTIONS.map(([id, t]) => section(id, t)).join('');
+    const stages = { stats: 'deck stats and combos', mana: 'mana simulation', clock: 'Turn Clock', resilience: 'resilience', matchups: 'matchups' };
+    const pending = new Set(Object.keys(stages));
+    const progress = () => { const left = pending.size, total = Object.keys(stages).length; statusEl.textContent = left ? 'Analyzing… ' + (total - left) + ' of ' + total + ' done · working on ' + [...pending].map((k) => stages[k]).join(', ') : ''; if (!left) { running = false; btn.disabled = false; btn.textContent = '↻ Run again'; } };
+    const done = (k) => { pending.delete(k); progress(); };
+    progress();
+    post('/builder/stats', base).then((d) => {
+      done('stats');
+      if (d.error) { statusEl.textContent = d.error; pending.clear(); running = false; btn.disabled = false; return; }
+      fill('fa-rule0', badgesHtml(d) + rule0Html(d));
+      fill('fa-shape', shapeHtml(d));
+      const syn = synergyHtml(d); if (syn) fill('fa-synergy', syn);
+      const combos = d.combos_included_list || [];
+      post('/builder/mana-sim', { cards: deck.cards, commander: deck.commander }).then((sim) => {
+        if (sim && !sim.error) {
+          fill('fa-mana', manaSimHtml(sim));
+          post('/builder/land-curve', { cards: deck.cards, commander: deck.commander }).then((c) => { if (c && !c.error) $('fa-mana').querySelector('.fa-content').insertAdjacentHTML('beforeend', landCurveHtml(c)); }).catch(() => {});
+        }
+        done('mana');
+      }).catch(() => done('mana'));
+      post('/builder/turn-clock', { cards: deck.cards, commander: deck.commander, combos }).then((clock) => {
+        if (clock && !clock.error) {
+          fill('fa-clock', turnClockHtml(clock));
+          post('/builder/resilience', { cards: deck.cards, commander: deck.commander, combos }).then((res) => { if (res && !res.error) fill('fa-resilience', resilienceHtml(res)); done('resilience'); }).catch(() => done('resilience'));
+        } else done('resilience');
+        done('clock');
+      }).catch(() => { done('clock'); done('resilience'); });
+      post('/builder/matchups', { cards: deck.cards, commander: deck.commander }).then((res) => { if (res && !res.error) fill('fa-matchups', muRender(res, { intro: 'Cards an opponent could use against this deck.' })); done('matchups'); }).catch(() => done('matchups'));
+    }).catch(() => { statusEl.textContent = 'Could not reach the Brewlist app.'; pending.clear(); running = false; btn.disabled = false; });
+  });
+})();
+"""

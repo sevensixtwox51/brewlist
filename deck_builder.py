@@ -26,6 +26,7 @@ from brewlist_core import (
     best_printing,
     budget_alt_data_in_index,
     categorize,
+    colors_produced,
     find_deck_combos,
     game_changers_in_index,
     gameplay_data_in_index,
@@ -2200,6 +2201,14 @@ def suggest_replacements(
     target_role = role_of(target_name, target_category)
     target_tag = tag_by_name.get(normalize_name(target_name))
     same_role = [c for c in candidates if role_of(c["name"], c["category"]) == target_role]
+    # A swap for a dual land or a colored mana source has to keep the fixing: it must make at least the colors the card
+    # makes (within the deck's own colors, so Arcane Signet in a two-color deck only needs those two).
+    target_info = gameplay_data_in_index().get(normalize_name(target_name)) or {}
+    need_colors = colors_produced(target_info.get("type_line"), target_info.get("oracle_text"))
+    if commander_color_identity:
+        need_colors &= set(commander_color_identity)
+    if need_colors:
+        same_role = [c for c in same_role if need_colors <= colors_produced(c.get("type_line"), c.get("oracle_text"))]
 
     edhrec_profile = edhrec_view["profile"]
     wipe_stance, symmetric_wipes, one_sided_wipes = _wipe_policy(

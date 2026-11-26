@@ -164,7 +164,14 @@ Paste a Moxfield or Archidekt link on the Decks page:
 
 ![Combos panel](screenshots/combos.png)
 
-- Deck value, a **Deck Analysis** panel (curve, colors, sample hand), a
+- A **Deck Analysis** panel with the mana curve, colors and a sample hand, plus a
+  **Run full analysis** button that brings in the same checks as the builder's
+  Analyze (for a deck with a commander): a Rule 0 summary and bracket, lands,
+  ramp, draw and interaction against typical targets, colored sources against
+  Karsten's numbers, a mana simulation with a land-count table, synergy
+  packages, the Turn Clock, Resilience, and Matchups. It runs in the app, so a
+  report saved as a plain file says to open it from the app instead
+- Deck value, a
   **Shopping List**, an **In-Store CSV** grouped like a store's binders, a price
   slider, and per-card "reserved for another deck" overrides that are
   remembered
@@ -492,6 +499,7 @@ appreciated!
 | `collection_insights.py`, `collection_page.py` | The Collection insights page: the calculations (read-only, nothing from the builder or compare code) and its page. |
 | `matchups.py` | The Matchups section of Analyze: what a deck is weak to and strong against (read-only, local data). |
 | `research.py`, `research_page.py` | The Commander research page: the calculations (read-only, built on EDHREC's saved data and the Matchups analysis) and its page. |
+| `analysis_ui.py` | The full analysis in the compare report: draws the builder's Analyze checks (from the same `/builder/*` endpoints) for the compared deck. |
 | `matchups_ui.py` | The Matchups panel's look and HTML, shared by Analyze and Commander research. |
 | `app.py` | Flask web app, including the Deck Builder (`/builder`). Its `static/` folder holds the mana-symbol SVGs. |
 | `brewlist_cli.py` | Terminal CLI (interactive menu or scriptable flags). |
