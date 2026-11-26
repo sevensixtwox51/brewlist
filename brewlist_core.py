@@ -205,6 +205,9 @@ class CardEntry:
     cheaper_alt_tag: str | None = None
     owned_alternatives: list[tuple[str, str | None]] | None = None
     cheaper_alternatives: list[tuple[str, float, str | None]] | None = None
+    # Every owned stand-in found for this missing card (owned_alternatives is only the first few shown), names only: used to work
+    # out what finishing the deck would cost if each owned card were used for one missing card at most once.
+    owned_alt_pool: list[str] | None = None
     # Whether this card is on WotC's official Commander "Game Changers" list
     # -- see game_changers_in_index. Only set (and only meaningful) when
     # build_comparison was told this deck is Commander format; False otherwise.
@@ -2646,6 +2649,7 @@ def build_comparison(
         "extra_turn_count": extra_turn_count,  # only meaningful when is_commander_format was set
     }
 
+    swap_candidates: list[tuple[float, float, CardEntry, int]] = []  # missing cards that have an owned stand-in
     for e, have, shortfall, owned_used, picks, remainder, reserved_qty in per_entry:
         if ignore_basics and "Basic" in e.type_line and "Land" in e.type_line:
             bucket = "Basic Lands"
@@ -2701,6 +2705,7 @@ def build_comparison(
                             cheap_candidates.append((member_display, cheapest, member_scryfall_id))
                 if owned_alts or cheap_candidates:
                     e.cheaper_alt_tag = budget_alt["tag_labels"].get(tag_id)
+                    e.owned_alt_pool = [name for name, _id in owned_alts]
                     if owned_alts:
                         e.owned_alternatives = owned_alts[:BUDGET_ALT_MAX_RESULTS]
                     if cheap_candidates:
@@ -2735,6 +2740,8 @@ def build_comparison(
                 totals["cost_nonfoil"] += nonfoil_prices[0][1] * shortfall
             if foil_prices:
                 totals["cost_foil"] += foil_prices[0][1] * shortfall
+            if e.owned_alt_pool and nonfoil_prices:
+                swap_candidates.append((nonfoil_prices[0][1], foil_prices[0][1] if foil_prices else nonfoil_prices[0][1], e, shortfall))
             if prices:
                 totals["deck_value"] += prices[0][1] * shortfall
             else:
@@ -2752,6 +2759,27 @@ def build_comparison(
                 owned_set_code, owned_collector_number, owned_value, reserved_qty,
             )
         )
+
+    # What finishing the deck would cost if the owned stand-ins were used instead: each owned card fills at most one missing
+    # copy, and the priciest missing cards pick first, so the saving is real rather than one owned card counted several times.
+    used_alts: set[str] = set()
+    swap_pairs: list[tuple[str, str]] = []
+    swap_save_nonfoil = swap_save_foil = 0.0
+    for price_nf, price_foil, e, shortfall in sorted(swap_candidates, key=lambda c: -c[0]):
+        covered = 0
+        for alt in e.owned_alt_pool or []:
+            if covered >= shortfall:
+                break
+            if alt in used_alts:
+                continue
+            used_alts.add(alt)
+            swap_pairs.append((e.name, alt))
+            covered += 1
+        swap_save_nonfoil += price_nf * covered
+        swap_save_foil += price_foil * covered
+    totals["swap_savings_nonfoil"] = swap_save_nonfoil
+    totals["swap_savings_foil"] = swap_save_foil
+    totals["swap_pairs"] = swap_pairs
 
     for cards in buckets.values():
         # Commander first in whatever bucket its type line lands it in
@@ -3610,6 +3638,9 @@ footer {{
 .stat-tile.owned .stat-value {{ color: var(--owned); }}
 .stat-tile.missing .stat-value {{ color: var(--missing); }}
 .stat-tile.cost .stat-value {{ color: var(--gold); }}
+.stat-sub.swap-line {{ margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--card-border); color: var(--text-dim); cursor: help; }}
+.stat-sub.swap-line b {{ color: var(--owned); font-variant-numeric: tabular-nums; }}
+.stat-sub.swap-line .swap-save {{ display: block; font-size: 0.74rem; }}
 .stat-tile.value .stat-value, .stat-tile.completion .stat-value {{ color: var(--accent); }}
 .stat-tile.value {{ cursor: pointer; transition: transform .15s ease, border-color .15s ease; }}
 .stat-tile.value:hover {{ transform: translateY(-2px); border-color: var(--accent); }}
@@ -3699,7 +3730,7 @@ details.combos-panel > summary {{ font-family: var(--serif); font-size: 1.08rem;
   <div class="stat-tiles">
     <div class="stat-tile owned"><div class="stat-value" id="stat-owned">{owned}</div><div class="stat-label">Owned</div></div>
     <div class="stat-tile missing"><div class="stat-value" id="stat-missing">{missing}</div><div class="stat-label">Missing</div></div>
-    <div class="stat-tile cost"><div class="stat-value" id="stat-cost-nonfoil">${cost_nonfoil:.2f}</div><div class="stat-label">To complete</div><div class="stat-sub">non-foil &middot; <span id="stat-cost-foil">${cost_foil:.2f}</span> foil</div></div>
+    <div class="stat-tile cost"><div class="stat-value" id="stat-cost-nonfoil">${cost_nonfoil:.2f}</div><div class="stat-label">To complete</div><div class="stat-sub">non-foil &middot; <span id="stat-cost-foil">${cost_foil:.2f}</span> foil</div>{swap_line_html}</div>
     <div class="stat-tile value" id="deck-value-stat" title="Click for a per-card breakdown"><div class="stat-value" id="stat-deck-value">${deck_value:.2f}</div><div class="stat-label">Deck value</div><div class="stat-sub">today&#39;s market &middot; owned <span id="stat-owned-value">${owned_value:.2f}</span></div></div>
     <div class="stat-tile completion" title="Share of this deck you already own"><div class="stat-value" id="progress-pct">{pct:.0f}%</div><div class="stat-label">Complete</div><div class="progress"><div id="progress-bar" style="width:{pct:.1f}%"></div></div></div>
   </div>
@@ -3755,6 +3786,8 @@ const ORIGINAL_OWNED = {owned};
 const ORIGINAL_MISSING = {missing};
 const ORIGINAL_COST_NONFOIL = {cost_nonfoil:.4f};
 const ORIGINAL_COST_FOIL = {cost_foil:.4f};
+const SWAP_SAVE_NONFOIL = {swap_save_nonfoil:.4f};
+const SWAP_SAVE_FOIL = {swap_save_foil:.4f};
 const ORIGINAL_DECK_VALUE = {deck_value:.4f};
 const ORIGINAL_OWNED_VALUE = {owned_value:.4f};
 const DECK_ID = {deck_id_json};
@@ -3809,6 +3842,9 @@ function updateOverrideCounts() {{
   document.getElementById('stat-missing').textContent = missing;
   document.getElementById('stat-cost-nonfoil').textContent = '$' + costNonfoil.toFixed(2);
   document.getElementById('stat-cost-foil').textContent = '$' + costFoil.toFixed(2);
+  const swapNonfoil = document.getElementById('stat-swap-nonfoil'), swapFoil = document.getElementById('stat-swap-foil');
+  if (swapNonfoil) swapNonfoil.textContent = '$' + Math.max(0, costNonfoil - SWAP_SAVE_NONFOIL).toFixed(2);
+  if (swapFoil) swapFoil.textContent = '$' + Math.max(0, costFoil - SWAP_SAVE_FOIL).toFixed(2);
   document.getElementById('stat-deck-value').textContent = '$' + deckValue.toFixed(2);
   document.getElementById('stat-owned-value').textContent = '$' + ownedValue.toFixed(2);
   const total = owned + missing;
@@ -4800,6 +4836,21 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
     analysis_deck_json = json.dumps(analysis_deck).replace("</", "<\\/")
     analysis_panel_html = ANALYSIS_PANEL_HTML if analysis_deck else ""
 
+    swap_pairs = totals.get("swap_pairs") or []
+    swap_save_nonfoil = totals.get("swap_savings_nonfoil") or 0.0
+    swap_save_foil = totals.get("swap_savings_foil") or 0.0
+    if swap_pairs and swap_save_nonfoil > 0:
+        swap_tip = "Each missing card with an already-owned stand-in (the 'You already own' suggestions on its tile), using each owned card at most once:\n" + "\n".join(
+            f"{missing} -> {alt}" for missing, alt in swap_pairs[:20]) + ("\n..." if len(swap_pairs) > 20 else "")
+        swap_line_html = (
+            f'<div class="stat-sub swap-line" id="swap-line" title="{html.escape(swap_tip)}">With your own cards instead: '
+            f'<b id="stat-swap-nonfoil">${max(0.0, totals["cost_nonfoil"] - swap_save_nonfoil):.2f}</b> non-foil &middot; '
+            f'<span id="stat-swap-foil">${max(0.0, totals["cost_foil"] - swap_save_foil):.2f}</span> foil'
+            f'<span class="swap-save">saves ${swap_save_nonfoil:.2f} by swapping in {len(swap_pairs)} card{"s" if len(swap_pairs) != 1 else ""} you own</span></div>'
+        )
+    else:
+        swap_line_html = ""
+
     ai_summary_html = (
         f'<div class="ai-summary-note"><b>&#10024; AI Summary</b> -- {html.escape(ai_summary)}</div>'
         if ai_summary else ""
@@ -5197,6 +5248,9 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
         owned=totals["owned"],
         missing=totals["missing"],
         cost_nonfoil=totals["cost_nonfoil"],
+        swap_line_html=swap_line_html,
+        swap_save_nonfoil=swap_save_nonfoil if swap_line_html else 0.0,
+        swap_save_foil=swap_save_foil if swap_line_html else 0.0,
         cost_foil=totals["cost_foil"],
         deck_value=totals["deck_value"],
         owned_value=totals["owned_value"],

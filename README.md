@@ -149,6 +149,11 @@ Paste a Moxfield or Archidekt link on the Decks page:
   choice sets the prices everywhere else: Deck Builder suggestions, Commander
   research, Matchups and Collection insights (so "ManaPool only" means
   ManaPool prices throughout; a card that store doesn't list shows no price)
+- Under **To complete**, a second line shows what finishing the deck would cost
+  if you used the already-owned stand-ins suggested on the missing cards'
+  tiles instead (each owned card counted for one missing card at most, the
+  priciest cards choosing first), with how much that saves and a tooltip listing
+  the swaps
 - Prices come from a local MTGJSON index (a one-time ~325MB download,
   refreshed weekly or on demand), so lookups are instant
 - For missing cards over $20, **budget alternatives** from Scryfall's Oracle
