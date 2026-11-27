@@ -91,7 +91,7 @@ table.ins-grid { border-collapse: separate; border-spacing: 4px; width: 100%; mi
 .ins-card .nm { font-size: 0.8rem; font-weight: 600; margin-top: 6px; line-height: 1.2; }
 .ins-card .ty { font-size: 0.7rem; color: var(--text-dim); line-height: 1.25; }
 .ins-card .pic { position: relative; }
-.ins-card .qty { position: absolute; bottom: 6px; left: 6px; background: rgba(0,0,0,0.78); color: var(--accent); font-weight: 700; font-size: 0.75rem; padding: 1px 7px; border-radius: 999px; }
+.ins-card .qty { position: absolute; bottom: 6px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.78); color: var(--accent); font-weight: 700; font-size: 0.75rem; padding: 1px 7px; border-radius: 999px; }
 #ins-tip { position: fixed; z-index: 400; display: none; pointer-events: none; max-width: 470px; padding: 10px 12px 11px; background: var(--bg-elevated); border: 1px solid var(--accent);
   border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,0.6); font-size: 0.82rem; line-height: 1.35; }
 #ins-tip.show { display: block; }
