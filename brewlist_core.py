@@ -4823,7 +4823,7 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
     sample_hand_json = json.dumps(sample_hand_pool)
 
     # The full analysis (analysis_ui.py) works on the deck's cards, so it needs a commander and the web app to answer.
-    from analysis_ui import ANALYSIS_CSS, ANALYSIS_JS, ANALYSIS_PANEL_HTML
+    from analysis_ui import ANALYSIS_CSS, ANALYSIS_JS, ANALYSIS_STATUS_HTML, panel as analysis_panel
     cmd_entry = next((r.entry for r in all_results if r.entry.section == "commander"), None)
 
     def _analysis_card(e):
@@ -4840,7 +4840,18 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
             "cards": [_analysis_card(r.entry) for r in library_results],
         }
     analysis_deck_json = json.dumps(analysis_deck).replace("</", "<\\/")
-    analysis_panel_html = ANALYSIS_PANEL_HTML if analysis_deck else ""
+    # The builder's Analyze layout: a status line, a full-width Rule 0 panel, then the titled panels in two columns (they stay
+    # hidden until their numbers arrive). Without a commander there is nothing to run, so only the static panels show.
+    analysis_status_html = ANALYSIS_STATUS_HTML if analysis_deck else ""
+    rule0_panel_html = analysis_panel("fa-rule0", "&#9878;&#65039;", "Rule 0 summary") if analysis_deck else ""
+    analysis_panels_html = (
+        analysis_panel("fa-shape", "&#9878;&#65039;", "Deck Shape")
+        + analysis_panel("fa-synergy", "&#129513;", "Synergy Packages")
+        + analysis_panel("fa-mana", "&#127922;", "Mana Simulation")
+        + analysis_panel("fa-clock", "&#9201;&#65039;", "Turn Clock")
+        + analysis_panel("fa-resilience", "&#128737;&#65039;", "Resilience")
+        + analysis_panel("fa-matchups", "&#9876;&#65039;", "Matchups")
+    ) if analysis_deck else ""
 
     swap_pairs = totals.get("swap_pairs") or []
     swap_save_nonfoil = totals.get("swap_savings_nonfoil") or 0.0
@@ -4905,36 +4916,37 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
   {ai_summary_html}
   {further_optimizations_html}
   {maybeboard_html}
-  <div class="an-panel">
-    <h4>Mana curve</h4>
-    <div class="analysis-stat-line">
-      Average mana value: <b>{avg_with_lands:.2f}</b> with lands / <b>{avg_without_lands:.2f}</b> without &middot;
-      Median: <b>{median_with_lands:.2f}</b> with lands / <b>{median_without_lands:.2f}</b> without &middot;
-      Total mana value: <b>{total_mana_value:.0f}</b>
+  {analysis_status_html}
+  {rule0_panel_html}
+  <div class="an-grid">
+    {analysis_panels_html}
+    <div class="an-panel">
+      <h4 class="analysis-heading">&#128202; Mana Curve &amp; Colors</h4>
+      <div class="analysis-stat-line">
+        Average mana value: <b>{avg_with_lands:.2f}</b> with lands / <b>{avg_without_lands:.2f}</b> without &middot;
+        Median: <b>{median_with_lands:.2f}</b> with lands / <b>{median_without_lands:.2f}</b> without &middot;
+        Total mana value: <b>{total_mana_value:.0f}</b>
+      </div>
+      <div class="curve-chart">{curve_bars_html}</div>
+      <div class="chart-legend">
+        <span><span class="swatch permanents"></span>Permanents</span>
+        <span><span class="swatch spells"></span>Instants/Sorceries</span>
+      </div>
+      <div class="color-breakdown" style="margin-top:14px;">{color_rows_html}</div>
+      <div class="chart-legend">
+        <span><span class="swatch pips"></span>% of mana-cost symbols</span>
+        <span><span class="swatch sources"></span>% of mana sources (heuristic)</span>
+      </div>
     </div>
-    <div class="curve-chart">{curve_bars_html}</div>
-    <div class="chart-legend">
-      <span><span class="swatch permanents"></span>Permanents</span>
-      <span><span class="swatch spells"></span>Instants/Sorceries</span>
+    <div class="sample-hand an-panel">
+      <h4 class="analysis-heading">&#127183; Sample Opening Hand</h4>
+      <div class="analysis-stat-line">Average number of lands in opening hand: <b>{avg_lands_in_hand:.2f}</b></div>
+      <div class="sample-hand-actions">
+        <button type="button" class="btn ghost" id="draw-hand-btn">&#127183; Draw / Deal Another Hand</button>
+      </div>
+      <div class="sample-hand-cards" id="sample-hand-cards"></div>
     </div>
   </div>
-  <div class="an-panel">
-    <h4>Colors</h4>
-    <div class="color-breakdown">{color_rows_html}</div>
-    <div class="chart-legend">
-      <span><span class="swatch pips"></span>% of mana-cost symbols</span>
-      <span><span class="swatch sources"></span>% of mana sources (heuristic)</span>
-    </div>
-  </div>
-  <div class="sample-hand an-panel">
-    <h4>Sample opening hand</h4>
-    <div class="analysis-stat-line">Average number of lands in opening hand: <b>{avg_lands_in_hand:.2f}</b></div>
-    <div class="sample-hand-actions">
-      <button type="button" class="btn ghost" id="draw-hand-btn">&#127183; Draw / Deal Another Hand</button>
-    </div>
-    <div class="sample-hand-cards" id="sample-hand-cards"></div>
-  </div>
-  {analysis_panel_html}
 </div>
 </details>""" if library_size else ""
 

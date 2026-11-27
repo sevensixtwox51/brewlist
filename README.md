@@ -168,13 +168,15 @@ Paste a Moxfield or Archidekt link on the Decks page:
 
 ![Combos panel](screenshots/combos.png)
 
-- A **Deck Analysis** panel with the mana curve, colors and a sample hand, plus a
-  **Run full analysis** button that brings in the same checks as the builder's
-  Analyze (for a deck with a commander): a Rule 0 summary and bracket, lands,
-  ramp, draw and interaction against typical targets, colored sources against
-  Karsten's numbers, a mana simulation with a land-count table, synergy
-  packages, the Turn Clock, Resilience, and Matchups. It runs in the app, so a
-  report saved as a plain file says to open it from the app instead
+- A **Deck Analysis** section laid out like the builder's Analyze (for a deck
+  with a commander it fills in by itself a few seconds after the report opens):
+  a Rule 0 summary and bracket across the top, then two columns of panels: deck
+  shape against typical targets with Karsten's land formula and colored sources,
+  synergy packages, a mana simulation with a land-count table, the Turn Clock,
+  Resilience, Matchups, the mana curve and colors, and a sample opening hand. It
+  uses the same checks as the builder, so the numbers match. It runs in the app,
+  so a report saved as a plain file shows the curve, colors and sample hand and
+  says to open it from the app for the rest
 - Deck value, a
   **Shopping List**, an **In-Store CSV** grouped like a store's binders, a price
   slider, and per-card "reserved for another deck" overrides that are
