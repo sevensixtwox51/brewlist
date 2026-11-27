@@ -226,6 +226,7 @@ COLLECTION_BODY = """
         <select id="br-role"><option value="">Any role</option></select>
         <select id="br-theme"><option value="">Any theme</option></select>
         <span class="br-sep" title="Judged by the priciest copy you own of each card">Price of a copy $</span><input type="number" id="br-pmin" min="0" step="0.01" placeholder="min"><span class="br-sep">to</span><input type="number" id="br-pmax" min="0" step="0.01" placeholder="max">
+        <label class="br-check" title="Only cards that can lead a Commander deck: legendary creatures, legendary Vehicles and cards that say they can be your commander"><input type="checkbox" id="br-cmdr"> Can be a commander</label>
         <label class="br-check"><input type="checkbox" id="br-foil"> Has a foil</label>
         <select id="br-sort" title="How to order the cards">
           <option value="name">Sort: name</option><option value="each">Sort: priciest copy</option><option value="value">Sort: total value</option>
@@ -530,7 +531,7 @@ document.addEventListener('click', hideTip, true);
 // ---- Browse cards: every card you own, filtered and added up ----
 const brEl = (id) => document.getElementById(id);
 const BR = { data: null, loaded: false, loading: false, q: '', cat: '', role: '', theme: '', pips: { W: 0, U: 0, B: 0, R: 0, G: 0 }, colorless: false, exact: true,
-  sets: new Set(), surge: new Set(), pmin: null, pmax: null, foil: false, sort: 'name', desc: false, view: 'cards', shown: 96 };
+  sets: new Set(), surge: new Set(), pmin: null, pmax: null, foil: false, cmdr: false, sort: 'name', desc: false, view: 'cards', shown: 96 };
 const money = (n) => '$' + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const PAGE = 96;
 
@@ -560,6 +561,7 @@ function brFiltered() {
     if (theme >= 0 && !c.themes.includes(theme)) return false;
     if (BR.sets.size && !c.sets.some((s) => BR.sets.has(s))) return false;
     if (BR.foil && !(c.foil > 0)) return false;
+    if (BR.cmdr && !c.cmdr) return false;
     if (priceOn) {
       if (c.top == null) return false;
       if (BR.pmin != null && c.top < BR.pmin) return false;
@@ -667,6 +669,7 @@ brEl('br-role').addEventListener('change', (e) => { BR.role = e.target.value; br
 brEl('br-theme').addEventListener('change', (e) => { BR.theme = e.target.value; brChanged(); });
 brEl('br-exact').addEventListener('change', (e) => { BR.exact = e.target.checked; brChanged(); });
 brEl('br-foil').addEventListener('change', (e) => { BR.foil = e.target.checked; brChanged(); });
+brEl('br-cmdr').addEventListener('change', (e) => { BR.cmdr = e.target.checked; brChanged(); });
 const numOrNull = (v) => (v === '' || isNaN(Number(v))) ? null : Number(v);
 brEl('br-pmin').addEventListener('input', (e) => { BR.pmin = numOrNull(e.target.value); brChanged(); });
 brEl('br-pmax').addEventListener('input', (e) => { BR.pmax = numOrNull(e.target.value); brChanged(); });
@@ -700,11 +703,11 @@ brEl('br-setclear').addEventListener('click', (e) => { e.preventDefault(); BR.se
 brEl('br-setdone').addEventListener('click', (e) => { e.preventDefault(); brEl('br-setpop').classList.remove('show'); });
 brEl('br-reset').addEventListener('click', (e) => {
   e.preventDefault();
-  Object.assign(BR, { q: '', cat: '', role: '', theme: '', colorless: false, exact: true, pmin: null, pmax: null, foil: false, sort: 'name', desc: false });
+  Object.assign(BR, { q: '', cat: '', role: '', theme: '', colorless: false, exact: true, pmin: null, pmax: null, foil: false, cmdr: false, sort: 'name', desc: false });
   BR.sets.clear(); 'WUBRG'.split('').forEach((c) => { BR.pips[c] = 0; });
   ['br-q', 'br-pmin', 'br-pmax'].forEach((id) => { brEl(id).value = ''; });
   ['br-cat', 'br-role', 'br-theme'].forEach((id) => { brEl(id).value = ''; });
-  brEl('br-sort').value = 'name'; brEl('br-exact').checked = true; brEl('br-foil').checked = false; brEl('br-dir').innerHTML = '&#8593;';
+  brEl('br-sort').value = 'name'; brEl('br-exact').checked = true; brEl('br-foil').checked = false; brEl('br-cmdr').checked = false; brEl('br-dir').innerHTML = '&#8593;';
   brSyncPips(); brRenderSets(); brChanged();
 });
 brEl('br-results').addEventListener('click', (e) => { if (e.target.closest('#br-more')) { BR.shown += PAGE; brRender(); } });
