@@ -603,14 +603,14 @@ function brRender() {
   let html;
   if (!rows.length) html = '<div class="ins-empty">No cards match these filters.</div>';
   else if (BR.view === 'list') {
-    html = '<table class="br-list"><thead><tr><th>Card</th><th>Type</th><th>Sets</th><th class="num">Copies</th><th class="num">Each copy</th><th class="num">Value</th></tr></thead><tbody>'
-      + shownRows.map((c, i) => '<tr class="ins-card" data-i="' + i + '" data-id="' + esc(c.id || '') + '"><td>' + esc(c.name) + (c.foil ? ' ✦' : '') + '</td><td class="ty">' + esc(c.type_line || '') + '</td><td>' + esc(c.sets.join(', ')) + '</td><td class="num">' + c.qty + '</td><td class="num">' + eachTxt(c) + '</td><td class="num">' + (c.value != null ? money(c.value) : '—') + '</td></tr>').join('')
+    html = '<table class="br-list"><thead><tr><th>Card</th><th>Type</th><th>Sets</th><th class="num" title="EDHREC popularity rank (lower is more popular)">Popularity</th><th class="num">Copies</th><th class="num">Each copy</th><th class="num">Value</th></tr></thead><tbody>'
+      + shownRows.map((c, i) => '<tr class="ins-card" data-i="' + i + '" data-id="' + esc(c.id || '') + '"><td>' + esc(c.name) + (c.foil ? ' ✦' : '') + '</td><td class="ty">' + esc(c.type_line || '') + '</td><td>' + esc(c.sets.join(', ')) + '</td><td class="num">' + (c.rank ? '#' + fmt(c.rank) : '—') + '</td><td class="num">' + c.qty + '</td><td class="num">' + eachTxt(c) + '</td><td class="num">' + (c.value != null ? money(c.value) : '—') + '</td></tr>').join('')
       + '</tbody></table>';
   } else {
     html = '<div class="ins-cards" style="padding:0;">' + shownRows.map((c, i) => {
       const img = c.id ? '<img loading="lazy" alt="' + esc(c.name) + '" src="' + cardImg(c.id) + '">' : '<div style="aspect-ratio:5/7;border-radius:6%;background:var(--bg);"></div>';
       const worthTxt = c.value != null ? '<span class="worth">' + money(c.value) + (c.qty > 1 ? ' <small>(' + eachTxt(c) + (c.top === c.low ? ' each' : '') + ')</small>' : '') + '</span>' : '<span class="worth"><small>no price</small></span>';
-      return '<div class="ins-card" data-i="' + i + '" data-id="' + esc(c.id || '') + '"><div class="pic' + (shownIsFoil(c) ? ' foil' : '') + '">' + img + flipBtn({ scryfall_id: c.id, layout: c.layout }) + (c.qty > 1 ? '<span class="qty">×' + c.qty + '</span>' : '') + '</div>'
+      return '<div class="ins-card" data-i="' + i + '" data-id="' + esc(c.id || '') + '"><div class="pic' + (shownIsFoil(c) ? ' foil' : '') + '">' + img + flipBtn({ scryfall_id: c.id, layout: c.layout }) + (c.qty > 1 ? '<span class="qty">×' + c.qty + '</span>' : '') + (c.rank ? '<span class="rank" title="EDHREC popularity rank (lower is more popular)">#' + fmt(c.rank) + '</span>' : '') + '</div>'
         + '<div class="nm">' + esc(c.name) + (c.foil ? ' ✦' : '') + '</div><div class="ty">' + esc(c.type_line || '') + '</div>' + worthTxt + '</div>';
     }).join('') + '</div>';
   }
@@ -747,6 +747,7 @@ function lbRender() {
   const names = (BR.data && BR.data.set_names) || {};
   const total = c.value != null ? '<b>' + money(c.value) + '</b>' : '<b>no price</b>';
   brEl('br-lb-info').innerHTML = '<h3>' + esc(c.name) + '</h3><div class="ty">' + esc(c.type_line || '') + '</div>'
+    + (c.rank ? '<div class="ty">EDHREC popularity rank #' + fmt(c.rank) + '</div>' : '')
     + '<div class="sum">' + c.qty + (c.qty === 1 ? ' copy' : ' copies') + ' · ' + total + (c.unpriced ? ' <span class="ty">(' + c.unpriced + ' unpriced)</span>' : '') + '</div>'
     + '<h4>' + (pr.length > 1 ? 'Your ' + pr.length + ' printings' : 'Your printing') + '</h4>'
     + pr.map((x, k) => '<button type="button" class="br-pr' + (k === LB.p ? ' on' : '') + '" data-k="' + k + '">'
