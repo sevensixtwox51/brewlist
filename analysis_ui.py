@@ -230,7 +230,7 @@ function muImg(id) { return id ? 'https://cards.scryfall.io/normal/front/' + id[
   // hover a named card in the Matchups panel to see it
   const hover = document.createElement('img'); hover.id = 'fa-hover'; hover.alt = ''; document.body.appendChild(hover);
   document.addEventListener('mousemove', (e) => {
-    const c = e.target.closest ? e.target.closest('#fa-body .mu-card[data-full]') : null;
+    const c = e.target.closest ? e.target.closest('.deck-analysis-body .mu-card[data-full]') : null;
     if (!c) { hover.style.display = 'none'; return; }
     if (hover.dataset.src !== c.dataset.full) { hover.dataset.src = c.dataset.full; hover.src = c.dataset.full; }
     hover.style.display = 'block';
