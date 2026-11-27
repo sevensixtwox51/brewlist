@@ -20,6 +20,7 @@ import os
 import socket
 import threading
 import time
+import base64
 import urllib.error
 import urllib.request
 import re
@@ -94,6 +95,7 @@ from edhrec_data import bulk_commander_popularity, commander_data_problem, comma
 from edhrec_data import refresh_all as edhrec_refresh_all
 from collection_insights import browse_cards, get_insights, cards_for, missing_for
 from matchups import analyze_matchups
+from landscape import LANDSCAPE_CSS, LANDSCAPE_JS
 from matchups_ui import MATCHUPS_CSS, MATCHUPS_JS
 from research import archetypes as research_archetypes, commander_summary, search_commanders, typical_deck
 from research_page import render_research_page
@@ -2043,7 +2045,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" type="image/svg+xml" href="https://svgs.scryfall.io/card-symbols/PW.svg">
 <title>Brewlist -- Deck Builder</title>
-<style>{PAGE_STYLE}{BUILDER_STYLE}{MATCHUPS_CSS}</style>
+<style>{PAGE_STYLE}{BUILDER_STYLE}{MATCHUPS_CSS}{LANDSCAPE_CSS}</style>
 </head>
 <body>
 <img id="hover-preview" alt="">
@@ -2712,7 +2714,9 @@ document.getElementById('collection-grid').addEventListener('mousemove', (e) => 
   tile.style.setProperty('--my', ((e.clientY - rect.top) / rect.height * 100) + '%');
 }});
 
+{LANDSCAPE_JS}
 const hoverPreview = document.getElementById('hover-preview');
+bwUpright(hoverPreview); bwUpright(document.getElementById('lightbox-img'));
 // On a slow connection the full-size image takes a while, and sweeping the mouse over
 // tiles used to start a download for every tile passed -- the one you stopped on waited
 // in line behind them. Now: the thumbnail already on screen (blurry, but instant) shows
@@ -7163,6 +7167,103 @@ _IMG_UPSTREAM = threading.BoundedSemaphore(8)  # a screen of tiles asks for doze
 SCRYFALL_IMG_HOST = "https://cards.scryfall" + ".io/"  # joined so the page rewrite below never touches this line
 
 
+
+# ---- sideways cards -------------------------------------------------------------------------------------------------
+# Scryfall serves split cards, Rooms and the front of Battles as a normal portrait picture with the card turned on its
+# side. For a big view (hover preview, lightbox) the page asks for ".jpg?r=1", and for those cards this returns the same
+# picture turned the right way up (an SVG that carries the JPEG), so the card reads horizontally. Anything else is
+# returned unchanged, so the page never has to know which cards are sideways.
+_IMG_DIMS = {"small": (146, 204), "normal": (488, 680), "large": (672, 936), "png": (745, 1040)}
+_ORIENT_PATH = os.path.join(DATA_DIR, "orient_cache.json")
+_orient_lock = threading.Lock()
+_orient_cache: dict = {"loaded": False, "ids": {}, "known_for": None, "landscape_ids": set(), "failed": {}}
+
+
+def _is_sideways_card(layout: str | None, front_type_line: str | None) -> bool:
+    return layout == "split" or (front_type_line or "").startswith("Battle")
+
+
+def _landscape_known() -> dict:
+    """Printings we can classify without asking Scryfall: the card database's one printing per card, and every printing you
+    own of a sideways card. Rebuilt when the card database or your collection changes."""
+    gp = gameplay_data_in_index()
+    mtime = os.path.getmtime(COLLECTION_PATH) if os.path.isfile(COLLECTION_PATH) else 0
+    key = (id(gp), mtime)
+    if _orient_cache["known_for"] != key:
+        known: dict[str, bool] = {}
+        names = set()
+        for g in gp.values():
+            sid = g.get("scryfall_id")
+            sideways = _is_sideways_card(g.get("layout"), g.get("type_line"))
+            if sid:
+                known[sid] = known.get(sid, False) or sideways  # a double-faced card has a row per face; any sideways one counts
+            if sideways:
+                names.add(normalize_name(g["name"]))
+                names.add(normalize_name(g["name"]).split(" // ")[0])
+        if names and os.path.isfile(COLLECTION_PATH):
+            try:
+                for nm, oc in load_collection(COLLECTION_PATH).items():
+                    if nm in names or nm.split(" // ")[0] in names:
+                        for pr in oc.printings:
+                            known[pr.scryfall_id] = True
+            except Exception:  # noqa: BLE001 -- a bad collection just means fewer known printings
+                pass
+        _orient_cache["landscape_ids"] = known
+        _orient_cache["known_for"] = key
+    return _orient_cache["landscape_ids"]
+
+
+def _printing_is_sideways(sid: str) -> bool:
+    known = _landscape_known()
+    if known.get(sid) is True:
+        return True
+    with _orient_lock:
+        if not _orient_cache["loaded"]:
+            try:
+                with open(_ORIENT_PATH, encoding="utf-8") as f:
+                    _orient_cache["ids"] = json.load(f)
+            except (OSError, ValueError):
+                _orient_cache["ids"] = {}
+            _orient_cache["loaded"] = True
+        cached = _orient_cache["ids"].get(sid)
+    if cached is not None:
+        return bool(cached)
+    if sid in known:  # a printing of a card the database knows is upright
+        return False
+    if time.time() - _orient_cache["failed"].get(sid, 0) < 600:  # asked recently and couldn't (offline): don't wait again
+        return False
+    # Any other printing (a decklist's own printing, say): ask Scryfall once and remember the answer.
+    try:
+        with _IMG_UPSTREAM:
+            req = urllib.request.Request(f"https://api.scryfall.com/cards/{sid}", headers={"User-Agent": "brewlist/1.0 (personal use)", "Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                card = json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        _orient_cache["failed"][sid] = time.time()
+        return False  # offline or unknown: show it as served, and try again in a few minutes
+    faces = card.get("card_faces") or []
+    # Scryfall calls an Aftermath card "split" too, but its picture is upright (the lower half is printed sideways on the card).
+    sideways = "Aftermath" not in (card.get("keywords") or []) and _is_sideways_card(card.get("layout"), (faces[0].get("type_line") if faces else card.get("type_line")))
+    with _orient_lock:
+        _orient_cache["ids"][sid] = sideways
+        try:
+            tmp = f"{_ORIENT_PATH}.{uuid.uuid4().hex}.tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(_orient_cache["ids"], f)
+            os.replace(tmp, _ORIENT_PATH)
+        except OSError:
+            pass
+    return sideways
+
+
+def _turned_upright_svg(jpeg_path: str, size: str) -> bytes:
+    """The picture turned a quarter turn clockwise (a sideways card's top edge is on the left of the file), as an SVG."""
+    w, h = _IMG_DIMS[size]
+    with open(jpeg_path, "rb") as f:
+        data = base64.b64encode(f.read()).decode("ascii")
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {h} {w}" width="{h}" height="{w}">'
+            f'<image href="data:image/jpeg;base64,{data}" width="{w}" height="{h}" transform="translate({h} 0) rotate(90)"/></svg>').encode("utf-8")
+
 @app.route("/img/<size>/<face>/<a>/<b>/<sid>.jpg", methods=["GET"])
 def card_image(size, face, a, b, sid):
     version = request.args.get("v", "")
@@ -7192,6 +7293,8 @@ def card_image(size, face, a, b, sid):
             os.replace(tmp, path)
         except OSError:
             return Response(data, mimetype=ctype.split(";")[0], headers={"Cache-Control": "no-store"})
+    if request.args.get("r") == "1" and face == "front" and size in _IMG_DIMS and _printing_is_sideways(sid):
+        return Response(_turned_upright_svg(path, size), mimetype="image/svg+xml", headers={"Cache-Control": "public, max-age=2592000"})
     return send_file(path, mimetype="image/jpeg", max_age=60 * 60 * 24 * 30)
 
 

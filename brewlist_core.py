@@ -4842,6 +4842,7 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
 
     # The full analysis (analysis_ui.py) works on the deck's cards, so it needs a commander and the web app to answer.
     from analysis_ui import ANALYSIS_CSS, ANALYSIS_JS, ANALYSIS_STATUS_HTML, panel as analysis_panel
+    from landscape import LANDSCAPE_CSS, LANDSCAPE_JS
     cmd_entry = next((r.entry for r in all_results if r.entry.section == "commander"), None)
 
     def _analysis_card(e):
@@ -5309,8 +5310,8 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
         wotc_bracket_html=wotc_bracket_html,
         combos_html=combos_html,
         deck_analysis_html=deck_analysis_html,
-        analysis_css=ANALYSIS_CSS,
-        analysis_js=ANALYSIS_JS if analysis_deck else "",
+        analysis_css=ANALYSIS_CSS + LANDSCAPE_CSS,
+        analysis_js=LANDSCAPE_JS + "\nbwUpright(document.getElementById('hover-preview')); bwUpright(document.getElementById('lightbox-img'));\n" + (ANALYSIS_JS if analysis_deck else ""),
         analysis_deck_json=analysis_deck_json,
         sample_hand_json=sample_hand_json,
         pct=pct,

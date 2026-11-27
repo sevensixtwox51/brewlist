@@ -4,7 +4,9 @@ Pure presentation for collection_insights.py's numbers. app.py supplies the shar
 scripts) so this module doesn't import it; the page fetches /collection/data once it has loaded.
 """
 
-COLLECTION_STYLE = """
+from landscape import LANDSCAPE_CSS, LANDSCAPE_JS
+
+COLLECTION_STYLE = LANDSCAPE_CSS + """
 .stat-tiles { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:10px; margin:0 0 18px; }
 .stat-tile { background:var(--bg-elevated); border:1px solid var(--card-border); border-radius:10px; padding:12px 14px 13px; min-width:0; }
 .stat-value { font-family:var(--serif); font-size:2rem; font-weight:600; line-height:1.05; color:var(--accent); font-variant-numeric:tabular-nums; }
@@ -156,7 +158,7 @@ table.br-list { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
 .ins-card .worth small { color: var(--text-dim); font-weight: 400; }
 .br-lb { display: none; position: fixed; inset: 0; z-index: 350; background: rgba(8, 6, 4, 0.86); align-items: center; justify-content: center; padding: 3vh 16px; }
 .br-lb.show { display: flex; }
-.br-lb-panel { position: relative; display: flex; gap: 26px; align-items: flex-start; max-width: min(960px, 100%); max-height: 94vh; overflow: auto; background: var(--bg-elevated); border: 1px solid var(--card-border); border-radius: 16px; padding: 36px 40px; box-shadow: var(--shadow); }
+.br-lb-panel { position: relative; display: flex; flex-wrap: wrap; gap: 26px; align-items: flex-start; max-width: min(960px, 100%); max-height: 94vh; overflow: auto; background: var(--bg-elevated); border: 1px solid var(--card-border); border-radius: 16px; padding: 36px 40px; box-shadow: var(--shadow); }
 .br-lb-art { position: relative; flex: 0 0 auto; width: min(380px, 70vw); }
 /* The card is held in the hand: it tilts toward the pointer in 3D, its shadow slides the other way, and a glare sweeps
    across it (a rainbow band too when the printing is a foil) as the angle changes. */
@@ -263,7 +265,7 @@ COLLECTION_BODY = """
   </div>
 """
 
-COLLECTION_SCRIPT = r"""
+COLLECTION_SCRIPT = LANDSCAPE_JS + r"""
 const MANA_HEX = { W: '#e8dfb8', U: '#4a90c8', B: '#8d7aa0', R: '#d1553a', G: '#4f9a5a', M: '#e9c46a', C: '#9b9689' };
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = (n) => Number(n || 0).toLocaleString();
@@ -456,6 +458,7 @@ document.getElementById('insights').addEventListener('click', (e) => {
 // ---- zoom a card in the card view on hover ----
 const zoomEl = document.getElementById('ins-zoom');
 const zoomImg = zoomEl.querySelector('img');
+bwUpright(zoomImg); bwUpright(document.getElementById('br-lb-img'));
 let zoomId = null;
 const faceOf = (card) => card.dataset.face === 'back' ? 'back' : 'front';
 const hideZoom = () => { zoomId = null; zoomEl.classList.remove('show'); };

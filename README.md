@@ -448,6 +448,15 @@ MTGJSON's, EDHREC's, and (for Commander decks) Commander Spellbook's
 public APIs/pages needed to fetch decklists, prices, combos, and
 commander popularity/synergy data.
 
+## Sideways cards
+
+Split cards, Rooms and the front of Battles are printed sideways. Scryfall serves
+them as a portrait picture turned on its side, so Brewlist turns them back for the
+big views: the hover preview, the zoom in Collection insights and Browse, Commander
+research, and every lightbox show them horizontally and larger. (Small thumbnails
+stay as Scryfall serves them.) Which cards are sideways comes from the card
+database, your collection, or a one-time Scryfall lookup that is remembered.
+
 ## Without internet
 
 Brewlist keeps working from what it has stored: the builder, Suggest and

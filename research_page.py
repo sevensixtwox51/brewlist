@@ -6,7 +6,9 @@ the routes the page calls; the Matchups panel is drawn with the code shared with
 """
 from matchups_ui import MATCHUPS_CSS, MATCHUPS_JS
 
-RESEARCH_STYLE = """
+from landscape import LANDSCAPE_CSS, LANDSCAPE_JS
+
+RESEARCH_STYLE = LANDSCAPE_CSS + """
 .stat-tiles { display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:10px; margin:0 0 16px; }
 .stat-tile { background:var(--bg-elevated); border:1px solid var(--card-border); border-radius:10px; padding:12px 14px 13px; min-width:0; }
 .stat-value { font-family:var(--serif); font-size:1.9rem; font-weight:600; line-height:1.05; color:var(--accent); font-variant-numeric:tabular-nums; }
@@ -83,7 +85,7 @@ RESEARCH_BODY = """
   <div id="rs-zoom"><img alt=""></div>
 """
 
-RESEARCH_SCRIPT = r"""
+RESEARCH_SCRIPT = LANDSCAPE_JS + r"""
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const escapeHtml = esc;
 const fmt = (n) => Number(n).toLocaleString();
@@ -224,6 +226,7 @@ function renderDeck(d) {
 
 // ---------- hover: enlarge any card ----------
 const zoomEl = document.getElementById('rs-zoom'), zoomImg = zoomEl.querySelector('img');
+bwUpright(zoomImg);
 let zoomSrc = null;
 function hideZoom() { zoomSrc = null; zoomEl.classList.remove('show'); }
 document.addEventListener('mousemove', (e) => {
