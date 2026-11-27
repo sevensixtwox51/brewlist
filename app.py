@@ -1308,6 +1308,9 @@ body::after {
   display:grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap:10px; max-height:75vh; overflow-y:auto; padding-right:4px;
 }
+/* On a wide screen the card list uses the whole viewport once you scroll to it (it used to stop at 75vh, leaving a dead strip under it),
+   and the page does not add its usual 80px of bottom padding under the builder. */
+@media (min-width: 901px) { .collection-grid { max-height: calc(100vh - 48px); } main.builder { padding-bottom: 24px; } }
 .builder-tile { background:var(--bg-elevated); border:1px solid var(--card-border); border-radius:10px; padding:10px; font-size:0.82rem; display:flex; gap:10px; position:relative; }
 .builder-tile .tile-body { flex:1; min-width:0; }
 .builder-tile .name { font-weight:600; margin-bottom:2px; }
