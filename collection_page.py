@@ -794,7 +794,7 @@ def render_collection_page(page_style: str, header_html: str, footer_html: str, 
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="icon" type="image/svg+xml" href="https://svgs.scryfall.io/card-symbols/PW.svg">
+<link rel="icon" type="image/svg+xml" href="/static/logo.svg">
 <title>Brewlist -- Collection</title>
 <style>{page_style}</style>
 <style>{COLLECTION_STYLE}</style>

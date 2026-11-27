@@ -261,7 +261,7 @@ def render_research_page(page_style: str, header_html: str, footer_html: str, sh
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="icon" type="image/svg+xml" href="https://svgs.scryfall.io/card-symbols/PW.svg">
+<link rel="icon" type="image/svg+xml" href="/static/logo.svg">
 <title>Brewlist -- Commander research</title>
 <style>{page_style}</style>
 <style>{RESEARCH_STYLE}{MATCHUPS_CSS}</style>

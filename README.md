@@ -1,5 +1,7 @@
 # Brewlist
 
+<p align="center"><img src="static/logo.svg" width="120" alt="Brewlist logo: a cauldron with the five mana symbols bubbling out"></p>
+
 <p align="center">
   <a href="https://ko-fi.com/imtotallymeh"><img src="https://ko-fi.com/img/githubbutton_sm.svg" alt="ko-fi"></a>
 </p>

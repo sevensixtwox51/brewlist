@@ -333,8 +333,8 @@ main { max-width: 640px; margin: 0 auto; padding: 0 24px 80px; }
 main.wide { max-width: 1120px; }
 h1 { font-family: var(--serif); font-weight: 600; font-size: 2rem; letter-spacing: 0.02em; color: var(--accent); margin: 0 0 4px; line-height: 1.1; }
 .wordmark { display: flex; align-items: center; gap: 12px; }
-.wordmark .pips { display: inline-flex; gap: 4px; }
-.wordmark .pips img { width: 16px; height: 16px; display: block; opacity: 0.9; }
+.wordmark .logo { width: 46px; height: 46px; display: block; flex: none; }
+.wordmark h1 { margin: 0; }
 p.subtitle { color: var(--text-dim); margin-top: 0; }
 .card {
   background: var(--bg-elevated); border: 1px solid var(--card-border);
@@ -536,7 +536,7 @@ def _page_chrome(subtitle: str, error: str | None) -> tuple[str, str]:
   <div class="sticky-top">
     <div class="page-header">
       <div>
-        <div class="wordmark"><h1>Brewlist</h1><span class="pips" aria-hidden="true">{"".join(f'<img src="/static/mana/{c}.svg" alt="">' for c in "WUBRG")}</span></div>
+        <div class="wordmark"><img class="logo" src="/static/logo.svg" alt=""><h1>Brewlist</h1></div>
         <p class="subtitle">{subtitle}</p>
       </div>
       <div class="header-actions">
@@ -713,7 +713,7 @@ def render_setup_page(error: str | None = None) -> str:
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="icon" type="image/svg+xml" href="https://svgs.scryfall.io/card-symbols/PW.svg">
+<link rel="icon" type="image/svg+xml" href="/static/logo.svg">
 <title>Brewlist -- Setup</title>
 <style>{PAGE_STYLE}</style>
 </head>
@@ -986,7 +986,7 @@ def render_decks_page(error: str | None = None, prefill_url: str = "") -> str:
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="icon" type="image/svg+xml" href="https://svgs.scryfall.io/card-symbols/PW.svg">
+<link rel="icon" type="image/svg+xml" href="/static/logo.svg">
 <title>Brewlist -- Decks</title>
 <style>{PAGE_STYLE}</style>
 </head>
@@ -2044,7 +2044,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="icon" type="image/svg+xml" href="https://svgs.scryfall.io/card-symbols/PW.svg">
+<link rel="icon" type="image/svg+xml" href="/static/logo.svg">
 <title>Brewlist -- Deck Builder</title>
 <style>{PAGE_STYLE}{BUILDER_STYLE}{MATCHUPS_CSS}{LANDSCAPE_CSS}{TILT_CSS}</style>
 </head>
