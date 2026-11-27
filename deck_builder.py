@@ -227,6 +227,18 @@ def _dead_fetch_land_colors(oracle_text: str, colors_allowed: set[str]) -> bool:
     return not (named_colors & colors_allowed)
 
 
+def _one_color_fetch(oracle_text: str, colors_allowed: set[str]) -> bool:
+    """True if oracle_text is a basic-type fetchland ("Search your library for a Swamp or Forest card") that can reach at most
+    ONE of the deck's colors. In that deck it is only a Swamp that costs a life: no fixing, so being on EDHREC's list (people
+    run them in every color for thinning or to trigger landfall) is not a reason to give it a land slot. A fetch that reaches two
+    of the deck's colors is real fixing and is left alone, as is any fetch for a basic of any type (Evolving Wilds)."""
+    m = _FETCH_LAND_RE.search(oracle_text or "")
+    if not m:
+        return False
+    named_colors = {color for name, color in _BASIC_LAND_TYPE_COLORS.items() if name in m.group(1)}
+    return bool(named_colors) and len(named_colors & colors_allowed) <= 1
+
+
 _COMMANDER_IDENTITY_MANA_RE = re.compile(r"[Aa]dd (?:one mana of )?any color in your commander'?s color identity")
 _PLAIN_COLORLESS_MANA_RE = re.compile(r"\{T\}[^.\n]*:\s*Add \{C\}")
 
@@ -2859,6 +2871,8 @@ def suggest_builder_cards(
 
         def _earns_slot(c: dict) -> bool:
             nm = normalize_name(c["name"])
+            if nm in edhrec_tracked_names and nm not in reason_by_name and nm not in theme_reason_by_name and _one_color_fetch(c.get("oracle_text") or "", deck_colors):
+                return False  # EDHREC lists it, but here it is just a worse basic
             if nm in edhrec_tracked_names or nm in reason_by_name or nm in theme_reason_by_name:
                 return True
             return len(deck_colors) >= 2 and len(_land_produces(c) & deck_colors) >= 2
