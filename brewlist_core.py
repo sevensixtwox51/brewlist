@@ -3638,9 +3638,15 @@ footer {{
 .stat-tile.owned .stat-value {{ color: var(--owned); }}
 .stat-tile.missing .stat-value {{ color: var(--missing); }}
 .stat-tile.cost .stat-value {{ color: var(--gold); }}
-.stat-sub.swap-line {{ margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--card-border); color: var(--text-dim); cursor: help; }}
+.stat-sub.swap-line {{ margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--card-border); color: var(--text-dim); }}
 .stat-sub.swap-line b {{ color: var(--owned); font-variant-numeric: tabular-nums; }}
-.stat-sub.swap-line .swap-save {{ display: block; font-size: 0.74rem; }}
+.info-bubble {{ position: relative; display: inline-flex; vertical-align: middle; margin-left: 4px; outline: none; }}
+.info-i {{ display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; border: 1px solid var(--text-dim); border-radius: 50%; font-size: 0.62rem; font-weight: 700; font-style: normal; line-height: 1; color: var(--text-dim); cursor: help; }}
+.info-bubble:hover .info-i, .info-bubble:focus .info-i {{ color: var(--accent); border-color: var(--accent); }}
+.info-pop {{ display: none; position: absolute; z-index: 60; top: calc(100% + 8px); left: 50%; transform: translateX(-50%); width: min(290px, 72vw); padding: 10px 12px; background: var(--bg-elevated); border: 1px solid var(--card-border); border-radius: 10px; box-shadow: var(--shadow); color: var(--text); font-size: 0.78rem; line-height: 1.4; text-align: left; font-weight: 400; }}
+.info-bubble:hover .info-pop, .info-bubble:focus .info-pop {{ display: block; }}
+.info-pop b {{ color: var(--owned); }}
+.info-pop .swap-list {{ margin: 6px 0 0; padding-left: 16px; color: var(--text-dim); font-size: 0.74rem; }}
 .stat-tile.value .stat-value, .stat-tile.completion .stat-value {{ color: var(--accent); }}
 .stat-tile.value {{ cursor: pointer; transition: transform .15s ease, border-color .15s ease; }}
 .stat-tile.value:hover {{ transform: translateY(-2px); border-color: var(--accent); }}
@@ -4840,13 +4846,17 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
     swap_save_nonfoil = totals.get("swap_savings_nonfoil") or 0.0
     swap_save_foil = totals.get("swap_savings_foil") or 0.0
     if swap_pairs and swap_save_nonfoil > 0:
-        swap_tip = "Each missing card with an already-owned stand-in (the 'You already own' suggestions on its tile), using each owned card at most once:\n" + "\n".join(
-            f"{missing} -> {alt}" for missing, alt in swap_pairs[:20]) + ("\n..." if len(swap_pairs) > 20 else "")
+        swap_items = "".join(f"<li>{html.escape(missing)} &rarr; {html.escape(alt)}</li>" for missing, alt in swap_pairs[:10])
+        swap_more = f"<li>and {len(swap_pairs) - 10} more</li>" if len(swap_pairs) > 10 else ""
         swap_line_html = (
-            f'<div class="stat-sub swap-line" id="swap-line" title="{html.escape(swap_tip)}">With your own cards instead: '
-            f'<b id="stat-swap-nonfoil">${max(0.0, totals["cost_nonfoil"] - swap_save_nonfoil):.2f}</b> non-foil &middot; '
-            f'<span id="stat-swap-foil">${max(0.0, totals["cost_foil"] - swap_save_foil):.2f}</span> foil'
-            f'<span class="swap-save">saves ${swap_save_nonfoil:.2f} by swapping in {len(swap_pairs)} card{"s" if len(swap_pairs) != 1 else ""} you own</span></div>'
+            '<div class="stat-sub swap-line" id="swap-line">With your own cards: '
+            f'<b id="stat-swap-nonfoil">${max(0.0, totals["cost_nonfoil"] - swap_save_nonfoil):.2f}</b>'
+            '<span class="info-bubble" tabindex="0" aria-label="How this is worked out"><i class="info-i">i</i><span class="info-pop">'
+            'What finishing the deck would cost if you used cards you already own in place of the missing ones that show a '
+            '&ldquo;You already own&rdquo; suggestion. Each owned card is used for one missing card at most, and the priciest '
+            f'cards choose first.<br><br>Foil: <b id="stat-swap-foil">${max(0.0, totals["cost_foil"] - swap_save_foil):.2f}</b><br>'
+            f'Saves <b>${swap_save_nonfoil:.2f}</b> across {len(swap_pairs)} card{"s" if len(swap_pairs) != 1 else ""}'
+            f'<ul class="swap-list">{swap_items}{swap_more}</ul></span></span></div>'
         )
     else:
         swap_line_html = ""
