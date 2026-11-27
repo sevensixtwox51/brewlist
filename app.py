@@ -96,6 +96,7 @@ from edhrec_data import refresh_all as edhrec_refresh_all
 from collection_insights import browse_cards, get_insights, cards_for, missing_for
 from matchups import analyze_matchups
 from landscape import LANDSCAPE_CSS, LANDSCAPE_JS
+from tilt import TILT_CSS, TILT_JS
 from matchups_ui import MATCHUPS_CSS, MATCHUPS_JS
 from research import archetypes as research_archetypes, commander_summary, search_commanders, typical_deck
 from research_page import render_research_page
@@ -2045,7 +2046,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" type="image/svg+xml" href="https://svgs.scryfall.io/card-symbols/PW.svg">
 <title>Brewlist -- Deck Builder</title>
-<style>{PAGE_STYLE}{BUILDER_STYLE}{MATCHUPS_CSS}{LANDSCAPE_CSS}</style>
+<style>{PAGE_STYLE}{BUILDER_STYLE}{MATCHUPS_CSS}{LANDSCAPE_CSS}{TILT_CSS}</style>
 </head>
 <body>
 <img id="hover-preview" alt="">
@@ -2641,10 +2642,12 @@ function openLightbox(thumb) {{
   lightboxThumb = thumb;
   lightboxFlip.hidden = !thumb.dataset.backFull;
   showLightboxFace();
+  bwLb.setFoil(!!thumb.closest('.builder-tile.foil'));  // a foil gets the rainbow band as the card tilts
   if (hoverPreview) hoverPreview.classList.remove('show');
   lightbox.hidden = false;
 }}
 function closeLightbox() {{
+  bwLb.reset();
   lightbox.hidden = true;
   lightboxImg.removeAttribute('src');
   lightboxThumb = null;
@@ -2717,6 +2720,8 @@ document.getElementById('collection-grid').addEventListener('mousemove', (e) => 
 {LANDSCAPE_JS}
 const hoverPreview = document.getElementById('hover-preview');
 bwUpright(hoverPreview); bwUpright(document.getElementById('lightbox-img'));
+{TILT_JS}
+const bwLb = bwTiltArt(document.getElementById('lightbox-img'));
 // On a slow connection the full-size image takes a while, and sweeping the mouse over
 // tiles used to start a download for every tile passed -- the one you stopped on waited
 // in line behind them. Now: the thumbnail already on screen (blurry, but instant) shows

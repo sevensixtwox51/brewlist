@@ -232,7 +232,8 @@ card database and Scryfall's Oracle Tags.
   that art), and step through the list with the arrow keys. Foil printings
   get the same hover shimmer as the compare report's foil tiles, and in the
   lightbox the card tilts toward your pointer as if you were holding it, with a
-  glare that sweeps across it (and a rainbow band for a foil). Surge foils are labeled as such
+  glare that sweeps across it (and a rainbow band for a foil). The compare
+  report's and the builder's lightboxes do the same. Surge foils are labeled as such
   (found from Scryfall's promo types; your foil printings are looked up once,
   the first time you open Browse, which takes a few seconds and needs the
   internet, and saved). Value is the
@@ -514,6 +515,7 @@ appreciated!
 | `collection_insights.py`, `collection_page.py` | The Collection insights page: the calculations (read-only, nothing from the builder or compare code) and its page. |
 | `matchups.py` | The Matchups section of Analyze: what a deck is weak to and strong against (read-only, local data). |
 | `research.py`, `research_page.py` | The Commander research page: the calculations (read-only, built on EDHREC's saved data and the Matchups analysis) and its page. |
+| `tilt.py` | The held-in-hand tilt, glare and foil band shared by the builder and compare-report lightboxes. |
 | `analysis_ui.py` | The full analysis in the compare report: draws the builder's Analyze checks (from the same `/builder/*` endpoints) for the compared deck. |
 | `matchups_ui.py` | The Matchups panel's look and HTML, shared by Analyze and Commander research. |
 | `app.py` | Flask web app, including the Deck Builder (`/builder`). Its `static/` folder holds the mana-symbol SVGs. |
