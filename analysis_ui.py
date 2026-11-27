@@ -256,29 +256,37 @@ function muImg(id) { return id ? 'https://cards.scryfall.io/normal/front/' + id[
   };
   const done = (k) => { pending.delete(k); progress(); };
   const fail = (msg) => { pending.clear(); progress(); note.hidden = false; note.textContent = msg; };
-  progress();
-  post('/builder/stats', base).then((d) => {
-    done('stats');
-    if (d.error) { fail(d.error); return; }
-    fill('fa-rule0', badgesHtml(d) + rule0Html(d));
-    fill('fa-shape', shapeHtml(d));
-    const syn = synergyHtml(d); if (syn) fill('fa-synergy', syn);
-    const combos = d.combos_included_list || [];
-    post('/builder/mana-sim', { cards: deck.cards, commander: deck.commander }).then((sim) => {
-      if (sim && !sim.error) {
-        fill('fa-mana', manaSimHtml(sim));
-        post('/builder/land-curve', { cards: deck.cards, commander: deck.commander }).then((c) => { if (c && !c.error) $('fa-mana').querySelector('.fa-content').insertAdjacentHTML('beforeend', landCurveHtml(c)); }).catch(() => {});
-      }
-      done('mana');
-    }).catch(() => done('mana'));
-    post('/builder/turn-clock', { cards: deck.cards, commander: deck.commander, combos }).then((clock) => {
-      if (clock && !clock.error) {
-        fill('fa-clock', turnClockHtml(clock));
-        post('/builder/resilience', { cards: deck.cards, commander: deck.commander, combos }).then((res) => { if (res && !res.error) fill('fa-resilience', resilienceHtml(res)); done('resilience'); }).catch(() => done('resilience'));
-      } else done('resilience');
-      done('clock');
-    }).catch(() => { done('clock'); done('resilience'); });
-    post('/builder/matchups', { cards: deck.cards, commander: deck.commander }).then((res) => { if (res && !res.error) fill('fa-matchups', muRender(res, { intro: 'Cards an opponent could use against this deck.' })); done('matchups'); }).catch(() => done('matchups'));
-  }).catch(() => fail('Could not reach the Brewlist app, so the deeper checks were skipped.'));
+  // The section starts collapsed, so the checks only run (once) the first time it is opened.
+  let started = false;
+  const start = () => {
+    if (started) return;
+    started = true;
+    progress();
+    post('/builder/stats', base).then((d) => {
+      done('stats');
+      if (d.error) { fail(d.error); return; }
+      fill('fa-rule0', badgesHtml(d) + rule0Html(d));
+      fill('fa-shape', shapeHtml(d));
+      const syn = synergyHtml(d); if (syn) fill('fa-synergy', syn);
+      const combos = d.combos_included_list || [];
+      post('/builder/mana-sim', { cards: deck.cards, commander: deck.commander }).then((sim) => {
+        if (sim && !sim.error) {
+          fill('fa-mana', manaSimHtml(sim));
+          post('/builder/land-curve', { cards: deck.cards, commander: deck.commander }).then((c) => { if (c && !c.error) $('fa-mana').querySelector('.fa-content').insertAdjacentHTML('beforeend', landCurveHtml(c)); }).catch(() => {});
+        }
+        done('mana');
+      }).catch(() => done('mana'));
+      post('/builder/turn-clock', { cards: deck.cards, commander: deck.commander, combos }).then((clock) => {
+        if (clock && !clock.error) {
+          fill('fa-clock', turnClockHtml(clock));
+          post('/builder/resilience', { cards: deck.cards, commander: deck.commander, combos }).then((res) => { if (res && !res.error) fill('fa-resilience', resilienceHtml(res)); done('resilience'); }).catch(() => done('resilience'));
+        } else done('resilience');
+        done('clock');
+      }).catch(() => { done('clock'); done('resilience'); });
+      post('/builder/matchups', { cards: deck.cards, commander: deck.commander }).then((res) => { if (res && !res.error) fill('fa-matchups', muRender(res, { intro: 'Cards an opponent could use against this deck.' })); done('matchups'); }).catch(() => done('matchups'));
+    }).catch(() => fail('Could not reach the Brewlist app, so the deeper checks were skipped.'));
+  };
+  const details = document.querySelector('.deck-analysis-body').closest('details');
+  if (!details || details.open) start(); else details.addEventListener('toggle', () => { if (details.open) start(); });
 })();
 """

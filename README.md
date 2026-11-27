@@ -168,8 +168,8 @@ Paste a Moxfield or Archidekt link on the Decks page:
 
 ![Combos panel](screenshots/combos.png)
 
-- A **Deck Analysis** section laid out like the builder's Analyze (for a deck
-  with a commander it fills in by itself a few seconds after the report opens):
+- A **Deck Analysis** section laid out like the builder's Analyze (collapsed until
+  you open it; for a deck with a commander the checks then fill in by themselves):
   a Rule 0 summary and bracket across the top, then two columns of panels: deck
   shape against typical targets with Karsten's land formula and colored sources,
   synergy packages, a mana simulation with a land-count table, the Turn Clock,

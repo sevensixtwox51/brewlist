@@ -4908,7 +4908,7 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
         + "</ul></div>"
         if maybeboard else ""
     )
-    deck_analysis_html = f"""<details class="combos-panel" open>
+    deck_analysis_html = f"""<details class="combos-panel">
 <summary>&#128202; Deck Analysis</summary>
 <div class="deck-analysis-body">
   {pitch_html}
