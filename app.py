@@ -6123,7 +6123,19 @@ def collection_upload():
     upload = request.files.get("manabox_csv")
     if not upload or not upload.filename:
         return jsonify(error="Choose a .csv file first."), 400
-    upload.save(COLLECTION_PATH)
+    # Check it is a ManaBox export BEFORE it replaces the collection on file: a wrong file used to overwrite a good
+    # collection and then every page complained about it.
+    tmp_path = f"{COLLECTION_PATH}.upload"
+    upload.save(tmp_path)
+    try:
+        load_collection(tmp_path)
+    except ValueError as e:
+        os.remove(tmp_path)
+        return jsonify(error=f"{e} Your existing collection was left as it was."), 400
+    except Exception:  # noqa: BLE001 -- unreadable file (wrong encoding, not text at all)
+        os.remove(tmp_path)
+        return jsonify(error="Couldn't read that file as a ManaBox collection export (.csv). Your existing collection was left as it was."), 400
+    os.replace(tmp_path, COLLECTION_PATH)
     meta = {
         "filename": upload.filename,
         "uploaded": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
@@ -7209,9 +7221,14 @@ def compare_start():
     if not deck_url_input:
         return jsonify(error="A Moxfield or Archidekt deck URL is required."), 400
 
+    # A web address has to be one of the two sites; anything else (another site, a search page) isn't sent anywhere.
+    if re.match(r"(?i)https?://", deck_url_input) and not re.search(r"(?i)(moxfield\.com|archidekt\.com)/", deck_url_input):
+        return jsonify(error="That doesn't look like a Moxfield or Archidekt deck link. Paste the address of the deck, like https://moxfield.com/decks/... or https://archidekt.com/decks/..."), 400
     source, deck_id = parse_deck_ref(deck_url_input)
-    if not deck_id:
-        return jsonify(error=f"Couldn't figure out a deck ID from '{deck_url_input}'."), 400
+    # A link is "moxfield.com/decks/<id>" or "archidekt.com/decks/<id>" (or just the id): anything else, like a few words of
+    # text, is rejected here instead of being sent to the site as a web address.
+    if not deck_id or not re.fullmatch(r"[A-Za-z0-9_\-]{3,64}", deck_id):
+        return jsonify(error="That doesn't look like a Moxfield or Archidekt deck link. Paste the address of the deck, like https://moxfield.com/decks/... or https://archidekt.com/decks/..."), 400
     project_key = deck_key(source, deck_id)
 
     include_sideboard = "include_sideboard" in request.form
@@ -7231,6 +7248,8 @@ def compare_start():
         deck = fetch_deck(source, deck_id)
     except ValueError as e:
         return jsonify(error=str(e)), 400
+    except Exception as e:  # noqa: BLE001 -- offline, the site is down or changed: say so instead of a server error
+        return jsonify(error=f"Couldn't load that deck from {'Archidekt' if source == 'archidekt' else 'Moxfield'} ({type(e).__name__}). Check the link and your internet connection."), 502
 
     deck_name = deck.get("name", deck_id)
     if source == "archidekt":

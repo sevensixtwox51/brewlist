@@ -236,6 +236,7 @@ class CardResult:
     owned_collector_number: str = ""  # printing the *source* decklist referenced, which can differ
     owned_value: float = 0.0  # today's market value of the copies you're using here
     reserved: int = 0  # copies subtracted from `have` because a saved override reserves them elsewhere
+    reserved_value: float = 0.0  # market value of those reserved copies (so un-reserving one can put it back into the owned value)
 
 
 # --------------------------------------------------------------------------
@@ -2512,6 +2513,11 @@ def build_comparison(
             picks, remainder = select_used_printings(owned_card, owned_used, prefer_foil=e.is_foil)
             needed_ids.update(p.scryfall_id for p, _ in picks)
 
+        if owned_card and reserved_qty:  # price the reserved copies too (they are worth something if un-reserved)
+            held = min(reserved_qty, max(0, e.quantity - owned_used), owned_card.total)
+            if held:
+                needed_ids.update(p.scryfall_id for p, _ in select_used_printings(owned_card, held, prefer_foil=e.is_foil)[0])
+
         per_entry.append((e, have, shortfall, owned_used, picks, remainder, reserved_qty))
 
     # Every card already in this decklist, by normalized name -- a budget
@@ -2728,6 +2734,18 @@ def build_comparison(
             else:
                 totals["unpriced_count"] += 1
 
+        # The copies this deck wanted but a saved reservation took away, valued as the owned copies they are, so the report can
+        # offer "un-reserve" and move the numbers back correctly.
+        reserved_value = 0.0
+        held_back = min(reserved_qty, max(0, e.quantity - owned_used)) if reserved_qty else 0
+        if held_back:
+            oc = owned_collection.get(normalize_name(e.name))
+            if oc and oc.printings:
+                for printing, qty in select_used_printings(oc, min(held_back, oc.total), prefer_foil=e.is_foil)[0]:
+                    price = price_for_printing(price_cache.get(printing.scryfall_id) or {}, printing)
+                    if price is not None:
+                        reserved_value += price * qty
+
         totals["owned_value"] += owned_value
         totals["deck_value"] += owned_value
 
@@ -2756,7 +2774,7 @@ def build_comparison(
         buckets.setdefault(bucket, []).append(
             CardResult(
                 e, have, shortfall, prices, owned_scryfall_id, owned_is_foil,
-                owned_set_code, owned_collector_number, owned_value, reserved_qty,
+                owned_set_code, owned_collector_number, owned_value, reserved_qty, reserved_value,
             )
         )
 
@@ -3832,7 +3850,7 @@ function updateOverrideCounts() {{
     if (cb.checked === wasPreexisting) return;  // matches baked-in baseline, no delta
 
     const sign = cb.checked ? 1 : -1;
-    const qty = Number(card.dataset.qty) || 0;
+    const qty = Number(card.dataset.reservedCount || card.dataset.qty) || 0;
     const priceNonfoil = card.dataset.priceNonfoil ? Number(card.dataset.priceNonfoil) : 0;
     const priceFoil = card.dataset.priceFoil ? Number(card.dataset.priceFoil) : 0;
     const ownedVal = card.dataset.ownedValue ? Number(card.dataset.ownedValue) : 0;
@@ -5193,8 +5211,17 @@ def render_html(deck_name: str, deck_url: str, deck_id: str, bucket_names: list[
 </div>""")
             else:
                 have_str = f" &middot; have {r.have}" if r.have else ""
+                # A card you own but reserved for another deck (a saved override) is "missing" here, and has to stay
+                # un-reservable: the same toggle as on an owned tile, ticked, with what the owned copy is worth.
+                if r.reserved > 0:
+                    reserved_attrs = f' data-owned-value="{r.reserved_value:.2f}" data-reserved-qty="1" data-reserved-count="{min(r.reserved, r.shortfall)}"'
+                    reserved_toggle = '<label class="override-toggle"><input type="checkbox" class="need-override" checked> Need another copy (used elsewhere)</label>'
+                    have_str += f" &middot; {r.reserved} reserved for another deck"
+                else:
+                    reserved_attrs, reserved_toggle = "", ""
                 card_tiles.append(f"""
-<div class="card missing{foil_class}" data-ci="{''.join(card_colors)}" data-name="{name_esc.lower()}"{flavor_attr} data-qty="{r.shortfall}" data-display-name="{name_esc}" {shop_data_attrs}{card_full_attr}>
+<div class="card missing{foil_class}" data-ci="{''.join(card_colors)}" data-name="{name_esc.lower()}"{flavor_attr} data-qty="{r.shortfall}" data-display-name="{name_esc}"{reserved_attrs} {shop_data_attrs}{card_full_attr}>
+  {reserved_toggle}
   <div class="card-main">
     {commander_sticker_html}
     {thumb_html}

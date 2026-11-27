@@ -53,7 +53,8 @@ ANALYSIS_CSS = MATCHUPS_CSS + """
 .rule0-list { margin: 0 0 4px; padding-left: 20px; font-size: 0.85rem; color: var(--text); columns: 2 340px; column-gap: 24px; }
 .rule0-list li { margin-bottom: 5px; break-inside: avoid; }
 .fa-badges { margin: 0 0 12px; }
-.bv-badge { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; margin: 0 6px 6px 0; border-radius: 999px; background: var(--bg); border: 1px solid var(--card-border); font-size: 0.78rem; color: var(--text); cursor: help; }
+.bv-badge { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; margin: 0 6px 6px 0; border-radius: 999px; background: var(--bg); border: 1px solid var(--card-border); font-size: 0.78rem; color: var(--text); cursor: help; position: relative; }
+.bv-badge .tooltip-popup { display: none; position: absolute; top: 100%; left: 0; margin-top: 6px; background: var(--bg-elevated); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 10px; font-size: 0.78rem; font-weight: 400; color: var(--text); white-space: normal; width: max-content; max-width: 220px; box-shadow: var(--shadow); z-index: 20; }
 .bv-badge.warn { border-color: color-mix(in srgb, var(--missing) 45%, var(--card-border)); color: var(--missing); }
 .bv-badge.good { border-color: color-mix(in srgb, var(--owned) 45%, var(--card-border)); color: var(--owned); }
 .bv-badge.highlight { border-color: color-mix(in srgb, var(--gold) 45%, var(--card-border)); color: var(--gold); }
@@ -117,7 +118,7 @@ function muImg(id) { return id ? 'https://cards.scryfall.io/normal/front/' + id[
     if (d.wotc_bracket) b.push({ label: 'Bracket ' + d.wotc_bracket[0], tip: "Estimated from WotC's published Bracket rules (Game Changers, mass land denial, combos, extra turns): " + d.wotc_bracket[1] });
     b.push(d.spellbook_unavailable ? { label: '&#128279; combos: lookup unavailable', tip: "Commander Spellbook couldn't be reached, so combos, mass land denial and extra turns are unknown, not zero." }
       : { label: '&#128279; ' + d.combos_included + ' combo' + (d.combos_included === 1 ? '' : 's') + ', ' + d.combos_almost + ' one away', tip: d.combos_included + ' known combo(s) already in this deck, and ' + d.combos_almost + ' more exactly one card away (via Commander Spellbook)' });
-    return '<div class="fa-badges">' + b.map((x) => '<span class="bv-badge ' + (x.cls || '') + '" title="' + escapeHtml(x.tip) + '">' + x.label + '</span>').join('') + '</div>';
+    return '<div class="fa-badges">' + b.map((x) => '<span class="bv-badge ' + (x.cls || '') + '">' + x.label + '<span class="tooltip-popup">' + escapeHtml(x.tip) + '</span></span>').join('') + '</div>';
   }
   function rule0Html(d) {
     const items = ['<b>Colors:</b> ' + colorsLabel()];
@@ -225,6 +226,26 @@ function muImg(id) { return id ? 'https://cards.scryfall.io/normal/front/' + id[
       + rrow('Board wipe on turn ' + res.wipe_turn, res.wipe, 'Every creature and token dies on that turn unless a protection spell is in hand; reanimation brings creatures back.') + rrow('Wipe and spot removal', res.both, 'Both in the same game, the closest to a real table.')
       + rrow('Commander removed when cast (twice)', res.commander, 'Removed each time it is cast, and recasting costs {2} more.')
       + '<div class="hint">' + advice + ' Protection ' + res.protection + ' &middot; reanimation ' + res.recursion + ' &middot; card draw ' + res.draw + ' &middot; threats ' + res.threats + '.</div>';
+  }
+
+  // badge tooltips open instantly under the badge and are nudged back inside the section
+  const rule0 = $('fa-rule0');
+  if (rule0) {
+    rule0.addEventListener('mouseover', (e) => {
+      const badge = e.target.closest('.bv-badge'); if (!badge) return;
+      const tip = badge.querySelector('.tooltip-popup'); if (!tip) return;
+      tip.style.left = '0px'; tip.style.display = 'block';
+      const box = rule0.getBoundingClientRect(), t = tip.getBoundingClientRect(), pad = 10;
+      let shift = 0;
+      if (t.right > box.right - pad) shift -= t.right - (box.right - pad);
+      if (t.left + shift < box.left + pad) shift += box.left + pad - (t.left + shift);
+      tip.style.left = shift + 'px';
+    });
+    rule0.addEventListener('mouseout', (e) => {
+      const badge = e.target.closest('.bv-badge');
+      if (!badge || badge.contains(e.relatedTarget)) return;
+      const tip = badge.querySelector('.tooltip-popup'); if (tip) tip.style.display = 'none';
+    });
   }
 
   // hover a named card in the Matchups panel to see it
