@@ -407,7 +407,7 @@ function renderModalCards() {
   const tile = (c) => {
     const img = c.scryfall_id ? '<img loading="lazy" alt="' + esc(c.name) + '" src="' + cardImg(c.scryfall_id) + '">' : '<div style="aspect-ratio:5/7;border-radius:6%;background:var(--bg);"></div>';
     if (!missing) {
-      return '<div class="ins-card" data-id="' + esc(c.scryfall_id || '') + '"><div class="pic' + (c.foil ? ' foil' : '') + '">' + img + flipBtn(c) + ((c.quantity || 1) > 1 ? '<span class="qty">×' + c.quantity + '</span>' : '') + '</div>'
+      return '<div class="ins-card" data-id="' + esc(c.scryfall_id || '') + '"><div class="pic' + (c.foil ? ' foil' : '') + '">' + img + flipBtn(c) + ((c.quantity || 1) > 1 ? '<span class="qty">×' + c.quantity + '</span>' : '') + (c.rank ? '<span class="rank" title="EDHREC popularity rank (lower is more popular)">#' + fmt(c.rank) + '</span>' : '') + '</div>'
         + '<div class="nm">' + esc(c.name) + (c.foil ? ' ✦' : '') + '</div><div class="ty">' + esc(c.type_line || '') + '</div></div>';
     }
     const price = c.price != null ? '<a class="price" target="_blank" rel="noopener noreferrer" href="' + esc(c.url || scryUrl(c.name)) + '" title="Cheapest nonfoil listing">$' + Number(c.price).toFixed(2) + ' · ' + esc(STORES[c.store] || c.store || '') + '</a>' : '';

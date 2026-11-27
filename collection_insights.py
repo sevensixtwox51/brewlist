@@ -160,7 +160,8 @@ def _pool_members(defn: dict, pool: list[dict], groups: dict, labels: dict, clea
 
 def _card(r: dict) -> dict:
     return {"name": r["name"], "scryfall_id": r.get("scryfall_id"), "type_line": r.get("type_line"), "mana_cost": r.get("mana_cost"),
-            "quantity": r.get("quantity") or 1, "set_code": r.get("set_code"), "foil": bool(r.get("foil")), "layout": r.get("layout")}
+            "quantity": r.get("quantity") or 1, "set_code": r.get("set_code"), "foil": bool(r.get("foil")), "layout": r.get("layout"),
+            "rank": r.get("edhrec_rank")}
 
 
 def _sorted_cards(rows: list[dict]) -> list[dict]:
