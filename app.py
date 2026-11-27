@@ -2538,7 +2538,11 @@ document.getElementById('deck-name').addEventListener('input', (e) => {{ brew.de
   }});
 }});
 
-function normalizeName(name) {{ return name.trim().toLowerCase(); }}
+// Same rule as normalize_name in brewlist_core.py (accents dropped, curly apostrophes straightened, spaces collapsed), so names match the
+// server's keys: ratings, tags and popularity are keyed that way, and a card like "Éowyn" otherwise never found its own.
+const NAME_MARKS = new RegExp('[' + String.fromCharCode(0x300) + '-' + String.fromCharCode(0x36f) + ']', 'g');
+const NAME_QUOTES = new RegExp('[' + String.fromCharCode(0x2018, 0x2019) + ']', 'g');
+function normalizeName(name) {{ return name.normalize('NFKD').replace(NAME_MARKS, '').replace(NAME_QUOTES, "'").split(' ').filter(Boolean).join(' ').trim().toLowerCase(); }}
 
 // Same direct Scryfall CDN hotlink pattern as scryfall_image_url() in
 // brewlist_core.py -- no API call needed, just the card's own Scryfall ID.
