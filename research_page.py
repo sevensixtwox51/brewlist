@@ -113,7 +113,7 @@ function tileHtml(c) {
 }
 function runSearch() {
   const mine = ++searchSeq;
-  resultsEl.innerHTML = '<div class="rs-loading">Searching&hellip;</div>';
+  resultsEl.innerHTML = '<div class="rs-loading">Searching&hellip;<div class="load-bar ind"><i></i></div></div>';
   fetch('/research/search?q=' + encodeURIComponent(searchEl.value.trim()) + '&scope=' + scopeEl.value + '&window=' + windowEl.value).then((r) => r.json()).then((d) => {
     if (mine !== searchSeq) return;
     if (d.error) { resultsEl.innerHTML = '<div class="rs-loading">' + esc(d.error) + '</div>'; return; }
@@ -131,7 +131,7 @@ changeBtn.addEventListener('click', () => { selected = null; deckSeq++; detailEl
 function chooseCommander(name) {
   const mine = ++deckSeq;
   pickEl.style.display = 'none'; changeBtn.style.display = ''; hideZoom();
-  detailEl.innerHTML = '<div class="rs-loading">Looking up ' + esc(name) + '&hellip; (the first look at a commander that isn’t saved yet needs the internet)</div>';
+  detailEl.innerHTML = '<div class="rs-loading">Looking up ' + esc(name) + '&hellip; (the first look at a commander that isn’t saved yet needs the internet)<div class="load-bar ind"><i></i></div></div>';
   window.scrollTo({ top: 0 });
   fetch('/research/commander?name=' + encodeURIComponent(name) + '&window=' + windowEl.value).then((r) => r.json()).then((d) => {
     if (mine !== deckSeq) return;
@@ -182,7 +182,7 @@ function chooseArchetype(slug) {
   const key = selected.commander.name + '|' + slug;
   if (deckCache[key]) { renderDeck(deckCache[key]); return; }
   const mine = ++deckSeq;
-  deckEl.innerHTML = '<div class="rs-loading">Building the typical list and checking it against your collection&hellip;</div>';
+  deckEl.innerHTML = '<div class="rs-loading">Building the typical list and checking it against your collection&hellip;<div class="load-bar ind"><i></i></div></div>';
   fetch('/research/deck?name=' + encodeURIComponent(selected.commander.name) + '&theme=' + encodeURIComponent(slug)).then((r) => r.json()).then((d) => {
     if (mine !== deckSeq || archetype !== slug) return;
     if (d.error) { deckEl.innerHTML = '<div class="rs-pick"><p>' + esc(d.error) + '</p></div>'; return; }

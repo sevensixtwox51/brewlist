@@ -32,7 +32,7 @@ __all__ = [
     "parse_deck_ref", "deck_key", "split_deck_key", "fetch_deck", "extract_entries",
     "normalize_name", "find_collection_candidates", "load_collection", "load_overrides",
     "fetch_scryfall_prices_by_id", "price_for_printing", "select_used_printings",
-    "printing_info_fetch_running", "flavor_names_in_cache", "surge_foil_ids", "ensure_printing_info", "colors_produced", "price_index_age_days", "price_index_built_at", "rebuild_price_index", "rebuild_price_index_isolated", "ensure_price_index", "game_changers_in_index",
+    "printing_info_fetch_running", "printing_progress", "flavor_names_in_cache", "surge_foil_ids", "ensure_printing_info", "colors_produced", "price_index_age_days", "price_index_built_at", "rebuild_price_index", "rebuild_price_index_isolated", "ensure_price_index", "game_changers_in_index",
     "load_store_prefs", "save_store_prefs", "active_price_stores", "best_offer", "STORE_LABELS", "STORE_DISPLAY_NAMES", "update_from_git",
     "EXTRA_STORE_LABELS", "PICKABLE_STORE_LABELS",
     "commander_legality_in_index", "deck_is_commander_format",
@@ -1854,6 +1854,14 @@ def flavor_names_in_cache() -> dict[str, str]:
     return {sid: e["fn"] for sid, e in _read_printing_info().items() if e.get("fn")}
 
 
+_printing_progress = {"running": False, "done": 0, "total": 0}
+
+
+def printing_progress() -> dict:
+    """How far ensure_printing_info is through its Scryfall lookups (for a page's progress bar)."""
+    return dict(_printing_progress)
+
+
 def ensure_printing_info(scryfall_ids, max_fetch: int = 450, need_pt: bool = False) -> int:
     """Fetch and cache art data for printings not seen yet (Scryfall's
     75-per-request collection endpoint). At most `max_fetch` ids per call so a
@@ -1864,6 +1872,8 @@ def ensure_printing_info(scryfall_ids, max_fetch: int = 450, need_pt: bool = Fal
     cache = dict(_read_printing_info())
     need = [sid for sid in dict.fromkeys(scryfall_ids) if sid and _printing_info_missing(cache, sid, need_pt)][:max_fetch]
     fetched = 0
+    if need:
+        _printing_progress.update(running=True, done=0, total=len(need))
     for i in range(0, len(need), 75):
         chunk = need[i:i + 75]
         try:
@@ -1888,7 +1898,9 @@ def ensure_printing_info(scryfall_ids, max_fetch: int = 450, need_pt: bool = Fal
         for sid in chunk:
             cache.setdefault(sid, {})  # not found: remember, don't ask again
         fetched += len(chunk)
+        _printing_progress["done"] = fetched
         _time.sleep(0.11)  # Scryfall asks for <=10 requests/second
+    _printing_progress["running"] = False
     if fetched:
         try:
             os.makedirs(os.path.dirname(PRINTING_INFO_PATH), exist_ok=True)

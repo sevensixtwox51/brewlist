@@ -45,6 +45,7 @@ from brewlist_core import (
     ensure_price_index,
     flavor_names_in_cache,
     printing_info_fetch_running,
+    printing_progress,
     rebuild_price_index_isolated,
     ensure_printing_info_async,
     ensure_printing_info,
@@ -301,6 +302,12 @@ def _run_brew_report_job(job_id, entries, owned, deck_id, deck_name, is_commande
 # --------------------------------------------------------------------------
 
 PAGE_STYLE = """
+/* A loading bar: add class "ind" when the wait has no steps to report (it slides back and forth); otherwise set the width of its <i>. */
+.load-bar { height: 6px; background: var(--card-border); border-radius: 999px; overflow: hidden; max-width: 340px; margin: 12px auto 0; position: relative; }
+.load-bar > i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .3s; }
+.load-bar.ind > i { position: absolute; width: 38%; animation: load-slide 1.2s ease-in-out infinite; }
+@keyframes load-slide { 0% { left: -40%; } 100% { left: 102%; } }
+@media (prefers-reduced-motion: reduce) { .load-bar.ind > i { animation: none; width: 100%; opacity: 0.45; } }
 :root {
   --bg: #14110f; --bg-elevated: #1e1a17; --card-bg: #241f1b; --card-border: #3a322a;
   --text: #ece3d0; --text-dim: #9b8f7a; --accent: #e9c46a; --owned: #6fcf8a;
@@ -2197,7 +2204,7 @@ def render_builder_page(deck_id: str | None = None) -> str:
           <span class="hint" id="edhrec-status" style="margin:0;"></span>
         </div>
       </div>
-      <div class="collection-grid" id="collection-grid"><div class="hint" style="margin-top:50px;">Loading your collection&hellip;</div></div>
+      <div class="collection-grid" id="collection-grid"><div class="hint" style="margin-top:50px;text-align:center;grid-column:1/-1;">Loading your collection&hellip;<div class="load-bar ind"><i></i></div></div></div>
     </div>
     <div class="card deck-panel">
       <div class="deck-stats" id="deck-stats"></div>
@@ -3627,7 +3634,7 @@ const replacePopup = document.getElementById('replace-popup');
 function closeReplacePopup() {{ replacePopup.classList.remove('show'); }}
 function openReplacePopup(btn, card) {{
   const rect = btn.getBoundingClientRect();
-  replacePopup.innerHTML = '<h5>Suggested replacements</h5><div class="hint">Loading&hellip;</div>';
+  replacePopup.innerHTML = '<h5>Suggested replacements</h5><div class="hint">Loading&hellip;<div class="load-bar ind"><i></i></div></div>';
   replacePopup.classList.add('show');
   placePopup(replacePopup, btn, 260);
   fetch('/builder/replace', {{
@@ -6086,8 +6093,14 @@ def store_prefs_save():
 
 @app.route("/collection/progress", methods=["GET"])
 def collection_insights_progress():
-    """Which step the collection insights are on while they are being worked out (for the page's progress bar)."""
-    return jsonify(insights_progress())
+    """What the collection page is waiting on, for its progress bars: a step of the insights, or (opening Browse for the first
+    time) the lookup of your foil printings on Scryfall."""
+    p = dict(insights_progress(), kind="insights")
+    if not p["running"]:
+        pp = printing_progress()
+        if pp["running"]:
+            return jsonify(running=True, kind="printings", step=pp["done"], total=pp["total"], label="Checking your foil printings on Scryfall")
+    return jsonify(p)
 
 
 @app.route("/collection/data", methods=["GET"])

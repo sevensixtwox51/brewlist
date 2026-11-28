@@ -274,7 +274,7 @@ COLLECTION_BODY = """
       </div>
       <div class="stat-tiles br-summary" id="br-summary"></div>
       <p class="br-note" id="br-note"></p>
-      <div id="br-results"><div class="ins-loading">Loading your cards&hellip;</div></div>
+      <div id="br-results"><div class="ins-loading"><div id="br-prog-label">Loading your cards&hellip;</div><div class="ph-progress" style="max-width:340px;margin:12px auto 0;"><i id="br-prog-bar" style="width:4%"></i></div></div></div>
     </div>
   </div>
   <div id="ins-tip" role="tooltip"></div>
@@ -471,7 +471,7 @@ function loadModalMode() {
   modalFilter.value = '';
   if (modalCache[modalMode]) { modalCards = modalCache[modalMode]; renderModalCards(); return; }
   document.getElementById('ins-modal-count').textContent = '';
-  modalBody.innerHTML = '<div class="ins-empty">Loading…</div>';
+  modalBody.innerHTML = '<div class="ins-empty">Loading…<div class="load-bar ind"><i></i></div></div>';
   fetch('/collection/cards?key=' + encodeURIComponent(modalKey) + (modalMode === 'missing' ? '&missing=1' : '')).then((r) => r.json()).then((d) => {
     if (mine !== modalSeq) return;
     if (d.error) { modalBody.innerHTML = '<div class="ins-empty">' + esc(d.error) + '</div>'; return; }
@@ -609,11 +609,12 @@ function phChart(dates, vals, W, H, marks) {
   for (let k = 0; k < 3; k++) { const v = g.y0 + (g.y1 - g.y0) * k / 2, y = g.Y(v).toFixed(1); grid += '<line class="ph-grid" x1="' + g.L + '" x2="' + (g.W - g.R) + '" y1="' + y + '" y2="' + y + '"/><text class="ph-ax" x="' + (g.L - 6) + '" y="' + (Number(y) + 4) + '" text-anchor="end">' + lab(v) + '</text>'; }
   const dl = (d) => new Date(d + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
   let extra = '';
-  g.paid.forEach((v) => { const y = g.Y(v).toFixed(1); extra += '<line class="ph-paid" x1="' + g.L + '" x2="' + (g.W - g.R) + '" y1="' + y + '" y2="' + y + '"/><text class="ph-paidtx" x="' + (g.W - g.R) + '" y="' + (Number(y) - 4) + '" text-anchor="end">paid ' + lab(v) + '</text>'; });
-  ((marks && marks.added) || []).forEach((d) => {
-    const i = dates.indexOf(d); if (i < 0) return;
-    const x = g.X(i).toFixed(1);
-    extra += '<line class="ph-addln" x1="' + x + '" x2="' + x + '" y1="' + g.Y(vals[i]).toFixed(1) + '" y2="' + (g.H - g.B) + '"/><circle class="ph-addpt" cx="' + x + '" cy="' + (g.H - g.B) + '" r="4.5"/>';
+  g.paid.forEach((v) => { const y = g.Y(v).toFixed(1); extra += '<line class="ph-paid" x1="' + g.L + '" x2="' + (g.W - g.R) + '" y1="' + y + '" y2="' + y + '"/><text class="ph-paidtx" x="' + (g.L + 4) + '" y="' + (Number(y) - 4) + '">paid ' + lab(v) + '</text>'; });
+  // a flag where a copy was added: on its dashed price-paid line on that day (on the price line itself when there is no line to sit on)
+  ((marks && marks.addedInfo) || []).forEach((a) => {
+    const i = dates.indexOf(a.date); if (i < 0) return;
+    const x = g.X(i).toFixed(1), y = (a.paid != null && g.paid.indexOf(a.paid) >= 0 ? g.Y(a.paid) : g.Y(vals[i])).toFixed(1);
+    extra += '<line class="ph-addln" x1="' + x + '" x2="' + x + '" y1="' + y + '" y2="' + (g.H - g.B) + '"/><circle class="ph-addpt" cx="' + x + '" cy="' + y + '" r="4.5"/>';
   });
   return '<div class="ph"><svg viewBox="0 0 ' + g.W + ' ' + g.H + '" role="img" aria-label="Price history">' + grid
     + '<path class="ph-area" d="M' + pts[0] + ' L' + pts.join(' L') + ' L' + g.X(n - 1).toFixed(1) + ',' + (g.H - g.B) + ' L' + g.L + ',' + (g.H - g.B) + ' Z"/>'
@@ -758,6 +759,7 @@ function brInit(d) {
 function brLoad() {
   if (BR.loaded || BR.loading) return;
   BR.loading = true;
+  watchProgress('br-prog-label', 'br-prog-bar', () => BR.loading);
   fetch('/collection/browse').then((r) => r.json()).then((d) => {
     BR.loading = false;
     if (d.error) { brEl('br-results').innerHTML = '<div class="ins-empty">' + esc(d.error) + '</div>'; return; }
@@ -895,7 +897,7 @@ function lbHist(cur) {
     phWire(box, d.dates, d.prices, 260, 130, marks);
   };
   if (histCache[key]) { show(histCache[key]); return; }
-  box.innerHTML = '<p class="ph-note" style="margin:0;">Loading\u2026</p>';
+  box.innerHTML = '<p class="ph-note" style="margin:0;">Loading\u2026</p><div class="load-bar ind"><i></i></div>';
   fetch('/collection/history/card?id=' + encodeURIComponent(cur.id) + '&f=' + cur.f + '&s=' + encodeURIComponent(cur.set || '')).then((r) => r.json()).then((d) => { histCache[key] = d; show(d); }).catch(() => { box.innerHTML = ''; });
 }
 function lbOpen(i, list) {
@@ -984,18 +986,22 @@ function loadHistPanel() {
   });
 }
 
-// The first look at a big collection takes a few seconds: show which step the server is on, until the data arrives.
-let insPolling = true;
-(function insProgress() {
+// Slow first loads (a big collection's insights; looking up foil printings on Scryfall) show what the server is doing: poll its progress
+// while `active()` says the page is still waiting, and write it into the label and bar.
+function watchProgress(labelId, barId, active) {
   const tick = () => {
-    if (!insPolling) return;
+    if (!active()) return;
     fetch('/collection/progress').then((r) => r.json()).then((p) => {
-      const lab = document.getElementById('ins-prog-label'), bar = document.getElementById('ins-prog-bar');
-      if (insPolling && lab && bar && p.running && p.step) { lab.textContent = p.label + ' (' + p.step + ' of ' + p.total + ')'; bar.style.width = Math.round(100 * (p.step - 0.5) / p.total) + '%'; }
-    }).catch(() => {}).then(() => { if (insPolling) setTimeout(tick, 300); });
+      const lab = document.getElementById(labelId), bar = document.getElementById(barId);
+      if (!active() || !lab || !bar || !p.running) return;
+      if (p.kind === 'printings') { lab.textContent = p.label + ' (' + p.step + ' of ' + p.total + ')'; bar.style.width = Math.max(4, Math.round(100 * p.step / p.total)) + '%'; }
+      else if (p.step) { lab.textContent = p.label + ' (' + p.step + ' of ' + p.total + ')'; bar.style.width = Math.round(100 * (p.step - 0.5) / p.total) + '%'; }
+    }).catch(() => {}).then(() => { if (active()) setTimeout(tick, 300); });
   };
   tick();
-})();
+}
+let insPolling = true;
+watchProgress('ins-prog-label', 'ins-prog-bar', () => insPolling);
 fetch('/collection/data').then((r) => r.json()).then((d) => {
   insPolling = false;
   const el = document.getElementById('insights');
