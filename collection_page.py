@@ -867,19 +867,19 @@ document.addEventListener('keydown', (e) => {
 });
 if (location.hash === '#browse') setView('browse');
 
-// Open a card's lightbox (its price history is in there) straight from the Insights movers. Browse is left sorted by 30-day change
-// with no filters, so the arrow keys step on to the next-biggest movers.
-function brShowCard(name, dir) {
-  setView('browse');
+// Open a card's lightbox (its price history is in there) right where you are on Insights: Browse's own view and filters are not touched.
+// The arrows step through the same list of movers (risers or fallers) the card was clicked in.
+function brShowCard(name, names) {
+  brLoad();
   let tries = 0;
   const go = () => {
-    if (!BR.loaded) { if (++tries < 100) setTimeout(go, 100); return; }
-    brEl('br-reset').click();
-    brEl('br-sort').value = 'chg30'; BR.sort = 'chg30'; BR.desc = dir !== 'fall';
-    brEl('br-dir').innerHTML = BR.desc ? '&#8595;' : '&#8593;';
-    brChanged();
-    const i = (BR.rows || []).findIndex((c) => c.name === name);
-    if (i >= 0) lbOpen(i);
+    if (!BR.loaded) { if (++tries < 300) setTimeout(go, 100); return; }
+    const byName = {}; BR.data.cards.forEach((c) => { byName[c.name] = c; });
+    const rows = names.map((n) => byName[n]).filter(Boolean);
+    const i = rows.findIndex((c) => c.name === name);
+    if (i < 0) return;
+    BR.rows = rows;  // what the lightbox steps through (Browse sets it again whenever it draws its own list)
+    lbOpen(i);
   };
   go();
 }
@@ -928,7 +928,7 @@ function loadHistPanel() {
         + '<p class="ph-note">Updated ' + esc(st.updated || '') + ' \u00b7 refreshing the card database also extends the history.' + cover + ' <a href="#" id="ph-update">Update now</a></p></div>';
       const tot = document.getElementById('ph-total'); tot.innerHTML = phChart(h.dates, h.values); phWire(tot, h.dates, h.values);
       document.getElementById('ph-update').addEventListener('click', (e) => { e.preventDefault(); histStart(); });
-      el.querySelectorAll('.ph-movers a').forEach((a) => a.addEventListener('click', () => brShowCard(a.dataset.name, a.dataset.dir)));
+      el.querySelectorAll('.ph-movers a').forEach((a) => a.addEventListener('click', () => brShowCard(a.dataset.name, [...a.parentElement.querySelectorAll('a')].map((x) => x.dataset.name))));
     });
   });
 }
