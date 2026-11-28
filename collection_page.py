@@ -846,7 +846,7 @@ function lbHist(cur) {
   };
   if (histCache[key]) { show(histCache[key]); return; }
   box.innerHTML = '<p class="ph-note" style="margin:0;">Loading\u2026</p>';
-  fetch('/collection/history/card?id=' + encodeURIComponent(cur.id) + '&f=' + cur.f).then((r) => r.json()).then((d) => { histCache[key] = d; show(d); }).catch(() => { box.innerHTML = ''; });
+  fetch('/collection/history/card?id=' + encodeURIComponent(cur.id) + '&f=' + cur.f + '&s=' + encodeURIComponent(cur.set || '')).then((r) => r.json()).then((d) => { histCache[key] = d; show(d); }).catch(() => { box.innerHTML = ''; });
 }
 function lbOpen(i) { hideZoom(); LB.i = i; LB.p = 0; LB.face = 'front'; brEl('br-lb').classList.add('show'); document.body.style.overflow = 'hidden'; lbRender(); }
 function lbClose() { brEl('br-lb').classList.remove('show'); document.body.style.overflow = ''; LB.i = -1; }
@@ -922,7 +922,7 @@ function loadHistPanel() {
       const chips = '<span class="ph-chip"><small>Latest, ' + new Date(h.dates[h.dates.length - 1] + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + '</small>' + money(now) + '</span>' + ['7', '30', '90'].filter((k) => h.changes[k] != null).map((k) => '<span class="ph-chip"><small>' + k + ' days</small>' + chgHtml(h.changes[k]) + '</span>').join('');
       const list = (arr, dir) => arr.length ? arr.map((m) => '<a data-dir="' + dir + '" data-name="' + esc(m.name) + '"><span>' + esc(m.name) + '</span>' + chgHtml(m.chg30) + '</a>').join('') : '<div class="ins-empty" style="padding:6px 0;">None</div>';
       const cover = h.covered < h.total_copies ? ' ' + fmt(h.total_copies - h.covered) + ' of your ' + fmt(h.total_copies) + ' copies are left out because they have no history yet (they join after the next database refresh).' : '';
-      el.innerHTML = '<div class="card ins-section"><h2>Value over time</h2><p class="ins-sub">What the cards you own today were worth on each past day (TCGplayer market price). It does not know when you got each card, so it is a price history, not a record of past collections.</p>'
+      el.innerHTML = '<div class="card ins-section"><h2>Value over time</h2><p class="ins-sub">What the cards you own today were worth on each past day (TCGplayer market price). Prices from before a set\u2019s release date are left out (they are preorder prices), so a card counts from the day its set came out. It does not know when you got each card, so it is a price history, not a record of past collections.</p>'
         + '<div class="ph-chips">' + chips + '</div><div id="ph-total"></div>'
         + '<div class="ph-movers"><div><h3>Biggest risers, 30 days</h3>' + list(h.risers, 'rise') + '</div><div><h3>Biggest fallers, 30 days</h3>' + list(h.fallers, 'fall') + '</div></div>'
         + '<p class="ph-note">Updated ' + esc(st.updated || '') + ' \u00b7 refreshing the card database also extends the history.' + cover + ' <a href="#" id="ph-update">Update now</a></p></div>';

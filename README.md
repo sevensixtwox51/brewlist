@@ -229,7 +229,9 @@ card database and Scryfall's Oracle Tags.
   the price on that day). The first time, press **Get price history**: it reads
   MTGJSON's price data once (a few hundred MB, about a minute) and keeps the
   daily prices of your own printings in `data/price_history.json`. Refreshing the
-  card database adds to it, so it keeps growing past 90 days. It is a history of
+  card database adds to it, so it keeps growing past 90 days. Prices from before a set's
+  release date are left out (they are preorder prices and skew the real cost),
+  and the changes only count cards that were already out. It is a history of
   today's cards' prices, not of what you owned on each day.
 - **Browse cards:** a second tab on the page lists every card you own (lands
   included) and lets you filter it by name or type, card type, color (click a

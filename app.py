@@ -6112,7 +6112,8 @@ def collection_browse_data():
     foil_ids = [x["id"] for c in data["cards"] for x in c.get("pr", []) if x.get("f")]
     ensure_printing_info(foil_ids, max_fetch=2000, need_pt=True)
     hist = price_history.load(DATA_DIR)
-    cards = [dict(c, **price_history.card_changes(c.get("pr", []), hist)) for c in data["cards"]] if hist else data["cards"]
+    rel = _set_release_dates()
+    cards = [dict(c, **price_history.card_changes([dict(x, rel=rel.get(x.get("set"))) for x in c.get("pr", [])], hist)) for c in data["cards"]] if hist else data["cards"]
     return jsonify(dict(data, cards=cards, surge=sorted(surge_foil_ids(foil_ids)), has_history=bool(hist)))
 
 
@@ -6121,13 +6122,19 @@ _HIST_JOB: dict = {"running": False, "stage": None, "done": 0, "total": 0, "erro
 _HIST_LOCK = threading.Lock()
 
 
+def _set_release_dates() -> dict[str, str]:
+    """{SET CODE: release date}: price history before a set's release date is preorder pricing and is left out."""
+    return {code: v.get("release_date") for code, v in (sets_data_in_index() or {}).items() if v.get("release_date")}
+
+
 def _owned_printings_for_history() -> list[dict] | None:
-    """Every printing you own as {id, f, q, name} (None if there is no collection)."""
+    """Every printing you own as {id, f, q, name, rel} (None if there is no collection); rel is the set's release date."""
     if not os.path.isfile(COLLECTION_PATH):
         return None
     get_insights(COLLECTION_PATH, os.path.getmtime(COLLECTION_PATH), load_collection, owned_collection_gameplay_view)
     data = browse_cards() or {}
-    return [dict(x, name=c["name"]) for c in data.get("cards", []) for x in c.get("pr", [])]
+    rel = _set_release_dates()
+    return [dict(x, name=c["name"], rel=rel.get(x.get("set"))) for c in data.get("cards", []) for x in c.get("pr", [])]
 
 
 @app.route("/collection/history/status", methods=["GET"])
@@ -6178,13 +6185,7 @@ def collection_history_total():
         return jsonify(has_history=False)
     ser = price_history.collection_series(prints, hist)
     dates, values = ser["dates"], ser["values"]
-    changes = {}
-    for days in (7, 30, 90):
-        if len(dates) > 1:
-            last = _dt.date.fromisoformat(dates[-1])
-            target = (last - _dt.timedelta(days=days)).isoformat()
-            ref = next((v for d, v in zip(reversed(dates), reversed(values)) if d <= target), None)
-            changes[str(days)] = None if ref is None else round(values[-1] - ref, 2)
+    changes = {str(days): price_history.collection_change(prints, hist, days) for days in (7, 30, 90)}
     cards = {}
     for x in prints:
         cards.setdefault(x["name"], []).append(x)
@@ -6207,7 +6208,7 @@ def collection_history_card():
         f = int(request.args.get("f", "0"))
     except ValueError:
         f = 0
-    series = price_history.series_for(price_history.load(DATA_DIR).get(sid), f == 1, f == 2)
+    series = price_history.series_for(price_history.load(DATA_DIR).get(sid), f == 1, f == 2, _set_release_dates().get(request.args.get("s", "")))
     return jsonify(dates=[d for d, _p in series], prices=[p for _d, p in series])
 
 

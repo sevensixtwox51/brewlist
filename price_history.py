@@ -117,15 +117,16 @@ def mtime(data_dir: str) -> float:
         return 0.0
 
 
-def series_for(entry: dict | None, foil: bool, etched: bool) -> list[tuple[str, float]]:
+def series_for(entry: dict | None, foil: bool, etched: bool, release: str | None = None) -> list[tuple[str, float]]:
     """The dated prices (oldest first) of the finish the app values this printing at, falling back the same way
-    price_for_printing does when that finish has no price."""
+    price_for_printing does when that finish has no price. Prices from before the set's release date (`release`, an ISO date)
+    are dropped: they are preorder prices, which run well off what the card actually sells for."""
     if not entry:
         return []
     for key in _FINISH_ORDER["etched" if etched else ("foil" if foil else "normal")]:
         s = entry.get(key)
         if s:
-            return sorted(s.items())
+            return sorted((d, p) for d, p in s.items() if not release or d >= release)
     return []
 
 
@@ -151,7 +152,7 @@ def card_changes(prints: list[dict], hist: dict) -> dict:
     for label, days in (("chg7", 7), ("chg30", 30)):
         total, seen = 0.0, False
         for x in prints:
-            s = series_for(hist.get(x["id"]), x.get("f") == 1, x.get("f") == 2)
+            s = series_for(hist.get(x["id"]), x.get("f") == 1, x.get("f") == 2, x.get("rel"))
             ch = change_since(s, days)
             if ch is not None:
                 total += ch * (x.get("q") or 1)
@@ -160,28 +161,41 @@ def card_changes(prints: list[dict], hist: dict) -> dict:
     return out
 
 
+def collection_change(printings: list[dict], hist: dict, days: int) -> float | None:
+    """How much the cards you own gained or lost in value over `days`, counting only printings that were already priced (and
+    released) back then, so a card that came out last week does not show up as a gain."""
+    total, seen = 0.0, False
+    for x in printings:
+        ch = change_since(series_for(hist.get(x["id"]), x.get("f") == 1, x.get("f") == 2, x.get("rel")), days)
+        if ch is not None:
+            total += ch * (x.get("q") or 1)
+            seen = True
+    return round(total, 2) if seen else None
+
+
 def collection_series(printings: list[dict], hist: dict) -> dict:
     """What the collection you own TODAY was worth on each past day: {"dates", "values", "covered", "copies", "total_copies"}.
-    A printing with no price on some early day counts at its first known price (so it does not appear out of nowhere), and one
+    A printing counts from its set's release date on (never before: preorder prices are not what the card is worth), and one
     missing a day counts at its last known price. Printings with no history at all are left out and reported in `copies`."""
     rows = []
     covered = copies = 0
     for x in printings:
         q = x.get("q") or 1
         copies += q
-        s = series_for(hist.get(x["id"]), x.get("f") == 1, x.get("f") == 2)
+        s = series_for(hist.get(x["id"]), x.get("f") == 1, x.get("f") == 2, x.get("rel"))
         if s:
             rows.append((q, s))
             covered += q
     dates = sorted({d for _, s in rows for d, _p in s})
     values = [0.0] * len(dates)
     for q, s in rows:
-        j, cur = 0, s[0][1]
+        j, cur = 0, None
         for i, d in enumerate(dates):
             while j < len(s) and s[j][0] <= d:
                 cur = s[j][1]
                 j += 1
-            values[i] += q * cur
+            if cur is not None:
+                values[i] += q * cur
     return {"dates": dates, "values": [round(v, 2) for v in values], "covered": covered, "total_copies": copies}
 
 
