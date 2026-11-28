@@ -95,7 +95,7 @@ import tag_synergy
 import price_history
 from edhrec_data import bulk_commander_popularity, commander_data_problem, commander_profile, commander_theme_page
 from edhrec_data import refresh_all as edhrec_refresh_all
-from collection_insights import browse_cards, get_insights, cards_for, missing_for
+from collection_insights import browse_cards, get_insights, cards_for, missing_for, progress as insights_progress
 from matchups import analyze_matchups
 from landscape import LANDSCAPE_CSS, LANDSCAPE_JS
 from tilt import TILT_CSS, TILT_JS
@@ -6082,6 +6082,12 @@ def store_prefs_save():
         return jsonify(error="Pick at least one store."), 400
     save_store_prefs(selected)
     return jsonify(stores=selected)
+
+
+@app.route("/collection/progress", methods=["GET"])
+def collection_insights_progress():
+    """Which step the collection insights are on while they are being worked out (for the page's progress bar)."""
+    return jsonify(insights_progress())
 
 
 @app.route("/collection/data", methods=["GET"])

@@ -207,6 +207,20 @@ def _creature_types(type_line: str) -> list[str]:
     return [t for t in type_line.split("—", 1)[1].split() if t not in ("//",) and t.isalpha()]
 
 
+# What the page's progress bar shows while build_insights runs (it takes a few seconds): which of its steps it is on.
+_STEPS = ["Counting your cards and their value", "Comparing with every Commander card that exists", "Sorting by color", "Finding roles (ramp, removal, draw...)",
+          "Finding themes", "Counting types, mana values and tribes", "Finding popular cards to add", "Getting the card browser ready"]
+_progress = {"running": False, "step": 0, "total": len(_STEPS), "label": ""}
+
+
+def _mark(step: int) -> None:
+    _progress.update(running=True, step=step, label=_STEPS[min(step, len(_STEPS)) - 1] if step else "")
+
+
+def progress() -> dict:
+    return dict(_progress)
+
+
 def build_insights(owned: dict, owned_rows: list[dict]) -> dict:
     """`owned` is load_collection's {name: OwnedCard}; `owned_rows` are owned_collection_gameplay_view rows."""
     gameplay = gameplay_data_in_index()
@@ -216,6 +230,7 @@ def build_insights(owned: dict, owned_rows: list[dict]) -> dict:
     sets = sets_data_in_index()
 
     # ---- snapshot -------------------------------------------------------------------------------------------
+    _mark(1)
     copies = foil_copies = 0
     value = 0.0
     priced = 0
@@ -242,6 +257,7 @@ def build_insights(owned: dict, owned_rows: list[dict]) -> dict:
     }
 
     # ---- the pool (every Commander-legal nonland card in the game) and what you own of it -------------------
+    _mark(2)
     pool = _one_per_card([g for g in gameplay.values()
                           if _legal(g) and not _is_land(g.get("type_line")) and not _NON_LIBRARY_TYPE_RE.search(g.get("type_line") or "")])
     mine = [r for r in owned_rows if not _is_land(r.get("type_line")) and _legal(r) and not _NON_LIBRARY_TYPE_RE.search(r.get("type_line") or "")]
@@ -252,6 +268,7 @@ def build_insights(owned: dict, owned_rows: list[dict]) -> dict:
     baseline = len(mine) / max(1, len(pool))
 
     # ---- colors ---------------------------------------------------------------------------------------------
+    _mark(3)
     lists: dict[str, list[dict]] = {}  # the cards behind every number, looked up by key when something is clicked
     col_totals = {c: 0 for c in COLUMNS}
     by_color: dict[str, list[dict]] = {c: [] for c in COLUMNS}
@@ -264,6 +281,7 @@ def build_insights(owned: dict, owned_rows: list[dict]) -> dict:
     colors = {"columns": [{"key": c, "label": COLOR_NAMES[c], "unique": col_totals[c]} for c in COLUMNS], "nonland_total": len(mine)}
 
     # ---- roles x colors ---------------------------------------------------------------------------------------
+    _mark(4)
     # Each cell is a count of cards you own, with the number that exist in the whole game for that role and color so
     # the page can also show the share you own. How it is shaded is decided on the page, across each row.
     cleaned = _role_member_names(groups, labels)
@@ -298,6 +316,7 @@ def build_insights(owned: dict, owned_rows: list[dict]) -> dict:
     roles = {"columns": [{"key": c, "label": COLOR_NAMES[c], "total": col_totals[c]} for c in COLUMNS], "rows": role_rows}
 
     # ---- themes -----------------------------------------------------------------------------------------------
+    _mark(5)
     themes = []
     theme_members: dict[str, set[str]] = {}
     for name, defn in _THEMES:
@@ -324,6 +343,7 @@ def build_insights(owned: dict, owned_rows: list[dict]) -> dict:
     themes.sort(key=lambda t: -t["index"])
 
     # ---- types, curve, tribes ---------------------------------------------------------------------------------
+    _mark(6)
     by_cat: dict[str, dict] = {}
     for r in owned_rows:
         d = by_cat.setdefault(r.get("category") or "Other", {"unique": 0, "copies": 0})
@@ -361,6 +381,7 @@ def build_insights(owned: dict, owned_rows: list[dict]) -> dict:
     }
 
     # ---- the most popular cards you don't own, behind every number (the "popular to add" view) ----------------
+    _mark(7)
     price_data = prices_data_in_index()
     missing: dict[str, list[dict]] = {}
     pool_aliases = {id(g): _aliases(g["name"]) for g in pool}
@@ -389,6 +410,7 @@ def build_insights(owned: dict, owned_rows: list[dict]) -> dict:
             if t in wanted_tribes:
                 add(f"tribe:{t}", g)
 
+    _mark(8)
     browse = _browse_payload(owned, owned_rows, prices, sets, role_members, theme_members, [r["role"] for r in role_rows], [t["name"] for t in themes], snapshot["value"])
     return {"snapshot": snapshot, "colors": colors, "roles": roles, "themes": themes, "types": types,
             "baseline_pct": round(baseline * 100, 1), "pool_size": len(pool), "_lists": lists, "_missing": missing, "_browse": browse}
@@ -458,8 +480,12 @@ def get_insights(collection_path: str, collection_mtime: float, load_owned, owne
         if _cache["key"] == key and _cache["data"] is not None:
             return _cache["data"]
         t = time.time()
-        owned = load_owned(collection_path)
-        data = build_insights(owned, owned_view(owned, gp))
+        _mark(0)
+        try:
+            owned = load_owned(collection_path)
+            data = build_insights(owned, owned_view(owned, gp))
+        finally:
+            _progress.update(running=False, step=_progress["total"] if _progress["step"] else 0, label="")
         data["seconds"] = round(time.time() - t, 1)
         _cache.update(key=key, lists=data.pop("_lists"), missing=data.pop("_missing"), browse=data.pop("_browse"), data=data)
         return data

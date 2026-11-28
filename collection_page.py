@@ -242,7 +242,7 @@ table.br-list { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
 COLLECTION_BODY = """
   <div class="ins-back"><a href="/decks" class="btn ghost small">&larr; Decks</a></div>
   <div class="ins-view-tabs" id="ins-view-tabs" role="tablist"><button type="button" data-view="insights" class="on">Insights</button><button type="button" data-view="browse" title="See, filter and add up the cards you own">Browse cards</button></div>
-  <div id="insights"><div class="ins-loading">Reading your collection&hellip;</div></div>
+  <div id="insights"><div class="ins-loading"><div id="ins-prog-label">Reading your collection&hellip;</div><div class="ph-progress" style="max-width:340px;margin:12px auto 0;"><i id="ins-prog-bar" style="width:4%"></i></div></div></div>
   <div id="browse" hidden>
     <div class="card ins-section">
       <h2>Browse your cards</h2>
@@ -970,14 +970,27 @@ function loadHistPanel() {
   });
 }
 
+// The first look at a big collection takes a few seconds: show which step the server is on, until the data arrives.
+let insPolling = true;
+(function insProgress() {
+  const tick = () => {
+    if (!insPolling) return;
+    fetch('/collection/progress').then((r) => r.json()).then((p) => {
+      const lab = document.getElementById('ins-prog-label'), bar = document.getElementById('ins-prog-bar');
+      if (insPolling && lab && bar && p.running && p.step) { lab.textContent = p.label + ' (' + p.step + ' of ' + p.total + ')'; bar.style.width = Math.round(100 * (p.step - 0.5) / p.total) + '%'; }
+    }).catch(() => {}).then(() => { if (insPolling) setTimeout(tick, 300); });
+  };
+  tick();
+})();
 fetch('/collection/data').then((r) => r.json()).then((d) => {
+  insPolling = false;
   const el = document.getElementById('insights');
   if (d.error) { el.innerHTML = '<div class="card"><p>' + esc(d.error) + '</p><a class="btn small" href="/">Go to Setup</a></div>'; return; }
   if (d.price_stores && d.price_stores.length) priceStores = d.price_stores.join(', ');
   el.innerHTML = snapshotHtml(d.snapshot) + '<div id="ins-hist"></div>' + colorsHtml(d.colors) + rolesHtml(d.roles) + themesHtml(d.themes) + typesHtml(d.types)
     + '<p class="ins-note">All of this is worked out on your computer from your collection and the local card database (' + fmt(d.pool_size) + ' Commander-legal nonland cards; you own ' + d.baseline_pct + '% of them). Nothing is sent anywhere.</p>';
   paintHeat(); loadHistPanel();
-}).catch(() => { showError('Could not reach the server.'); document.getElementById('insights').innerHTML = ''; });
+}).catch(() => { insPolling = false; showError('Could not reach the server.'); document.getElementById('insights').innerHTML = ''; });
 """
 
 
