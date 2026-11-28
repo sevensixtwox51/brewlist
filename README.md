@@ -224,7 +224,7 @@ card database and Scryfall's Oracle Tags.
 - **Price history:** the Insights tab has a **Value over time** chart: what the
   cards you own today were worth on each of the last 90 days (TCGplayer market
   price), the change over 7, 30 and 90 days, and your biggest risers and fallers
-  this month. In Browse, sort by 7-day or 30-day price change, and the lightbox
+  this month. In Browse, sort by 7-day or 30-day price change (and, from the purchase prices in your export, by gain or loss against what you paid, with a total on the summary row), and the lightbox
   shows a price chart for the printing you are looking at (hover any chart for
   the price on that day). The first time, press **Get price history**: it reads
   MTGJSON's price data once (a few hundred MB, about a minute) and keeps the

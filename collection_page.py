@@ -266,7 +266,7 @@ COLLECTION_BODY = """
         <label class="br-check"><input type="checkbox" id="br-foil"> Has a foil</label>
         <select id="br-sort" title="How to order the cards">
           <option value="name">Sort: name</option><option value="each" selected>Sort: priciest copy</option><option value="value">Sort: total value</option>
-          <option value="cmc">Sort: mana value</option><option value="rank">Sort: popularity</option><option value="qty">Sort: copies owned</option>
+          <option value="gain">Sort: gain vs. what you paid</option><option value="cmc">Sort: mana value</option><option value="rank">Sort: popularity</option><option value="qty">Sort: copies owned</option>
         </select>
         <button type="button" class="btn ghost small" id="br-dir" title="Reverse the order">&#8595;</button>
         <div class="ins-tabs" id="br-viewmode"><button type="button" data-v="cards" class="on">Cards</button><button type="button" data-v="list">List</button></div>
@@ -677,7 +677,7 @@ function brFiltered() {
   });
   // Ascending is the natural order of what is sorted; cards with nothing to sort on (no price, unranked) always go last.
   const dir = BR.desc ? -1 : 1, key = BR.sort;
-  const val = { name: (c) => c.name.toLowerCase(), each: (c) => c.top, value: (c) => c.value, cmc: (c) => c.cmc, rank: (c) => c.rank, qty: (c) => c.qty, chg7: (c) => c.chg7, chg30: (c) => c.chg30 }[key];
+  const val = { name: (c) => c.name.toLowerCase(), each: (c) => c.top, value: (c) => c.value, cmc: (c) => c.cmc, rank: (c) => c.rank, qty: (c) => c.qty, chg7: (c) => c.chg7, chg30: (c) => c.chg30, gain: (c) => c.gain }[key];
   rows.sort((a, b) => {
     const x = val(a), y = val(b);
     if (x == null && y == null) return a.name.localeCompare(b.name);
@@ -701,23 +701,25 @@ function brRender() {
     + tile(fmt(copies), 'Copies', '')
     + tile(money(worth), 'Total value', filtering ? 'of ' + money(BR.data.total_value) + ' overall' : 'at today’s market price', PRICE_SRC)
     + tile(rows.length ? money(worth / rows.length) : '—', 'Average per card', rows.length ? 'per unique card' : '')
-    + tile(best ? money(best.top) : '—', 'Priciest copy', best ? esc(best.name) : '');
+    + tile(best ? money(best.top) : '—', 'Priciest copy', best ? esc(best.name) : '')
+    + (rows.some((c) => c.gain != null) ? tile(chgHtml(rows.reduce((t, c) => t + (c.gain || 0), 0)), 'Vs. what you paid', 'on ' + fmt(rows.filter((c) => c.gain != null).length) + ' cards with a recorded price') : '');
   brEl('br-note').textContent = 'Value is today’s market price of the exact printing you own (the same prices as the Market value tile; not your store setting, which only applies to cards you’d buy).'
     + (unpriced ? ' ' + fmt(unpriced) + ' ' + (unpriced === 1 ? 'copy has' : 'copies have') + ' no price on file and count as $0.' : '')
     + ((BR.pmin != null || BR.pmax != null) ? ' With a price filter on, cards with no price are left out.' : '');
   const shownRows = rows.slice(0, BR.shown);
-  const chgSort = BR.sort === 'chg7' || BR.sort === 'chg30';
+  const chgSort = BR.sort === 'chg7' || BR.sort === 'chg30' || BR.sort === 'gain';
+  const chgWhen = { chg7: '7 days', chg30: '30 days', gain: 'Vs. paid' }[BR.sort];
   let html;
   if (!rows.length) html = '<div class="ins-empty">No cards match these filters.</div>';
   else if (BR.view === 'list') {
-    html = '<table class="br-list"><thead><tr><th>Card</th><th>Type</th><th>Sets</th><th class="num" title="EDHREC popularity rank (lower is more popular)">Popularity</th><th class="num">Copies</th><th class="num">Each copy</th><th class="num">Value</th>' + (chgSort ? '<th class="num">' + (BR.sort === 'chg7' ? '7 days' : '30 days') + '</th>' : '') + '</tr></thead><tbody>'
+    html = '<table class="br-list"><thead><tr><th>Card</th><th>Type</th><th>Sets</th><th class="num" title="EDHREC popularity rank (lower is more popular)">Popularity</th><th class="num">Copies</th><th class="num">Each copy</th><th class="num">Value</th>' + (chgSort ? '<th class="num">' + chgWhen + '</th>' : '') + '</tr></thead><tbody>'
       + shownRows.map((c, i) => '<tr class="ins-card" data-i="' + i + '" data-id="' + esc(c.id || '') + '"><td>' + esc(c.name) + (c.foil ? ' ✦' : '') + '</td><td class="ty">' + esc(c.type_line || '') + '</td><td>' + esc(c.sets.join(', ')) + '</td><td class="num">' + (c.rank ? '#' + fmt(c.rank) : '—') + '</td><td class="num">' + c.qty + '</td><td class="num">' + eachTxt(c) + '</td><td class="num">' + (c.value != null ? money(c.value) : '—') + '</td>' + (chgSort ? '<td class="num">' + chgHtml(c[BR.sort]) + '</td>' : '') + '</tr>').join('')
       + '</tbody></table>';
   } else {
     html = '<div class="ins-cards" style="padding:0;">' + shownRows.map((c, i) => {
       const img = c.id ? '<img loading="lazy" alt="' + esc(c.name) + '" src="' + cardImg(c.id) + '">' : '<div style="aspect-ratio:5/7;border-radius:6%;background:var(--bg);"></div>';
       const worthTxt = c.value != null ? '<span class="worth">' + money(c.value) + (c.qty > 1 ? ' <small>(' + eachTxt(c) + (c.top === c.low ? ' each' : '') + ')</small>' : '') + '</span>' : '<span class="worth"><small>no price</small></span>';
-      const chgLine = chgSort ? '<span class="worth">' + chgHtml(c[BR.sort]) + ' <small>' + (BR.sort === 'chg7' ? 'in 7 days' : 'in 30 days') + '</small></span>' : '';
+      const chgLine = chgSort ? '<span class="worth">' + chgHtml(c[BR.sort]) + ' <small>' + (BR.sort === 'gain' ? 'vs. paid' : (BR.sort === 'chg7' ? 'in 7 days' : 'in 30 days')) + '</small></span>' : '';
       return '<div class="ins-card" data-i="' + i + '" data-id="' + esc(c.id || '') + '"><div class="pic' + (shownIsFoil(c) ? ' foil' : '') + '">' + img + flipBtn({ scryfall_id: c.id, layout: c.layout }) + (c.qty > 1 ? '<span class="qty">×' + c.qty + '</span>' : '') + (c.rank ? '<span class="rank" title="EDHREC popularity rank (lower is more popular)">#' + fmt(c.rank) + '</span>' : '') + '</div>'
         + '<div class="nm">' + esc(c.name) + (c.foil ? ' ✦' : '') + '</div><div class="ty">' + esc(c.type_line || '') + '</div>' + worthTxt + chgLine + '</div>';
     }).join('') + '</div>';
@@ -748,6 +750,12 @@ function brRenderSets() {
 }
 function brInit(d) {
   BR.data = d; BR.loaded = true; BR.surge = new Set(d.surge || []);
+  // gain: what a card's copies are worth now minus what you paid (only copies with a recorded purchase price and a current price)
+  d.cards.forEach((c) => {
+    let gain = 0, cost = 0, copies = 0;
+    (c.pr || []).forEach((x) => { if (x.p == null) return; (x.l || []).forEach((l) => { if (l[1] != null) { gain += l[0] * (x.p - l[1]); cost += l[0] * l[1]; copies += l[0]; } }); });
+    c.gain = copies ? Math.round(gain * 100) / 100 : null; c.cost = copies ? Math.round(cost * 100) / 100 : null; c.paidCopies = copies;
+  });
   if (d.has_history) brEl('br-sort').insertAdjacentHTML('beforeend', '<option value="chg7">Sort: 7-day price change</option><option value="chg30">Sort: 30-day price change</option>');
   brEl('br-cat').innerHTML += d.categories.map((c) => '<option value="' + esc(c) + '">' + esc(c) + '</option>').join('');
   brEl('br-role').innerHTML += d.roles.map((r, i) => '<option value="' + i + '">' + esc(r) + '</option>').join('');
@@ -785,7 +793,7 @@ brEl('br-pmin').addEventListener('input', (e) => { BR.pmin = numOrNull(e.target.
 brEl('br-pmax').addEventListener('input', (e) => { BR.pmax = numOrNull(e.target.value); brChanged(); });
 brEl('br-sort').addEventListener('change', (e) => {
   BR.sort = e.target.value;
-  BR.desc = ['each', 'value', 'qty', 'chg7', 'chg30'].includes(BR.sort);  // money and copies read best biggest first; the rest start at the small end
+  BR.desc = ['each', 'value', 'qty', 'chg7', 'chg30', 'gain'].includes(BR.sort);  // money and copies read best biggest first; the rest start at the small end
   brEl('br-dir').innerHTML = BR.desc ? '&#8595;' : '&#8593;'; brChanged();
 });
 brEl('br-dir').addEventListener('click', () => { BR.desc = !BR.desc; brEl('br-dir').innerHTML = BR.desc ? '&#8595;' : '&#8593;'; brChanged(); });
