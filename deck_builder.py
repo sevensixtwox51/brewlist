@@ -191,6 +191,7 @@ _ROLE_TAG_LABELS = {
 # Maps each real basic land type name to the WUBRG letter it produces --
 # used only by _dead_fetch_land_colors below.
 _BASIC_LAND_TYPE_COLORS = {"Plains": "W", "Island": "U", "Swamp": "B", "Mountain": "R", "Forest": "G"}
+_BASIC_FETCH_RE = re.compile(r"search your library for (?:a|an|up to \w+) basic ", re.I)  # a land or spell that fetches basic lands
 _FETCH_LAND_RE = re.compile(r"[Ss]earch your library for an?\s+([^.]*?)\s+card")
 
 # Supertypes that belong to a separate special deck (Planechase/Archenemy/
@@ -2892,6 +2893,16 @@ def suggest_builder_cards(
             cap = max(0, round(avg_nonbasic) - have_nonbasic)
             if len(good) > cap and sum(basics_available.values()) >= max(0, role_needed.get("Lands", 0) - cap):
                 good, over_cap = good[:cap], good[cap:]
+        # A land that fetches a BASIC land (Terramorphic Expanse, Evolving Wilds, Fabled Passage, the Landscapes...) finds nothing in a
+        # deck with no basics. So when the picks include such lands, keep room for some basics -- the lowest-ranked picks give up their
+        # slots (a fetcher that is cut needs none).
+        land_slots = role_needed.get("Lands", 0)
+        while good:
+            fetchers = sum(1 for c in good if _BASIC_FETCH_RE.search(c.get("oracle_text") or ""))
+            reserve = min(8, 2 * fetchers, sum(basics_available.values()))
+            if len(good) <= land_slots - reserve:
+                break
+            over_cap.insert(0, good.pop())
         if sum(basics_available.values()) >= max(0, role_needed.get("Lands", 0) - len(good)):
             dropped_lands = over_cap + [c for c in lands_pool if not _is_basic_land_card(c) and c not in good and c not in over_cap]
             role_candidates["Lands"] = good
@@ -3198,12 +3209,20 @@ def suggest_builder_cards(
             made &= deck_colors
             if len(made) >= 2:
                 fixer_pool.append((c, made, tapped))
-        while lands_gap > 0 and fixer_pool and len(deck_colors) >= 2:
+        # Lands that fetch a basic need basics left in the deck to fetch: the swaps stop while at least that many basics remain
+        # (2 per such land, up to 8), counting the fetchers picked so far and the one a swap would add.
+        def _basics_floor(extra: int = 0) -> int:
+            n = sum(1 for c in ordered if "Land" in (c.get("type_line") or "") and _BASIC_FETCH_RE.search(c.get("oracle_text") or ""))
+            return min(8, 2 * (n + extra), sum(basics_available.values()))
+
+        while lands_gap > _basics_floor() and fixer_pool and len(deck_colors) >= 2:
             best = None
             for item in fixer_pool:
                 _c, made, tapped = item
                 if tapped and tapped_lands >= _TAPPED_LAND_CAP:
                     continue
+                if lands_gap - 1 < _basics_floor(1 if _BASIC_FETCH_RE.search(_c.get("oracle_text") or "") else 0):
+                    continue  # this swap would leave too few basics for the fetch lands
                 gain = sum(1 for col in made if sources[col] < _target(col)) - 1  # net of the basic it replaces
                 score = gain - (0.3 if tapped else 0.0)
                 if gain >= 1 and (best is None or score > best[0]):
