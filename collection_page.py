@@ -158,8 +158,11 @@ table.br-list { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
 .ins-card .worth small { color: var(--text-dim); font-weight: 400; }
 .br-lb { display: none; position: fixed; inset: 0; z-index: 350; background: rgba(8, 6, 4, 0.86); align-items: center; justify-content: center; padding: 3vh 16px; }
 .br-lb.show { display: flex; }
-.br-lb-panel { position: relative; display: flex; flex-wrap: wrap; gap: 26px; align-items: flex-start; max-width: min(960px, 100%); max-height: 94vh; overflow: auto; background: var(--bg-elevated); border: 1px solid var(--card-border); border-radius: 16px; padding: 36px 40px; box-shadow: var(--shadow); }
-.br-lb-art { position: relative; flex: 0 0 auto; width: min(380px, 70vw); }
+.br-lb-panel { position: relative; display: flex; flex-wrap: nowrap; gap: 32px; align-items: flex-start; width: min(1240px, 100%); max-height: 94vh; overflow: auto; background: var(--bg-elevated); border: 1px solid var(--card-border); border-radius: 16px; padding: 28px 36px; box-shadow: var(--shadow); }
+/* The card is as big as the window allows: its height fills the panel (94vh less padding), its width follows at 5:7. The panel has a fixed width, so it
+   cannot shrink to fit its text and flip a card between side-by-side and stacked (A.I.M. Labs vs A.I.M. Synthoids did). */
+.br-lb-art { position: relative; flex: 0 0 auto; width: min(calc((94vh - 64px) * 5 / 7), 52vw); }
+@media (max-width: 760px) { .br-lb-panel { flex-wrap: wrap; width: auto; max-width: 100%; } .br-lb-art { width: min(380px, 70vw); } }
 /* The card is held in the hand: it tilts toward the pointer in 3D, its shadow slides the other way, and a glare sweeps
    across it (a rainbow band too when the printing is a foil) as the angle changes. */
 .br-lb-art { perspective: 1300px; }
@@ -176,7 +179,7 @@ table.br-list { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
 @media (prefers-reduced-motion: reduce) { .br-tilt, .br-tilt.live { transition: none; } }
 .br-lb-art .flip { position: absolute; top: 10px; right: 10px; z-index: 2; width: 32px; height: 32px; border-radius: 999px; border: 1px solid var(--card-border); background: rgba(0,0,0,0.7); color: var(--text); cursor: pointer; font-size: 1rem; }
 .br-lb-art .flip:hover { color: var(--accent); border-color: var(--accent); }
-.br-lb-info { flex: 1 1 280px; min-width: 260px; }
+.br-lb-info { flex: 1 1 300px; min-width: 260px; }
 .br-lb-info h3 { font-family: var(--serif); font-weight: 600; font-size: 1.6rem; color: var(--accent); margin: 0 0 2px; }
 .br-lb-info .ty { color: var(--text-dim); font-size: 0.9rem; }
 .br-lb-info .sum { margin: 10px 0 14px; font-size: 0.95rem; }

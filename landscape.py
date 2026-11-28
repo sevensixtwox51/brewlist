@@ -11,7 +11,8 @@ LANDSCAPE_CSS = """
 #ins-zoom:has(img.land), #rs-zoom:has(img.land) { width: 430px; }
 #ins-zoom img.land, #rs-zoom img.land { border-radius: 10px; }
 #lightbox-img.land, #br-lb-img.land { border-radius: 3.5% / 4.75%; }
-.br-lb-art:has(img.land) { width: min(560px, 72vw); }
+.br-lb-art:has(img.land) { width: min(calc((94vh - 64px) * 7 / 5), 720px, 58vw); }
+@media (max-width: 760px) { .br-lb-art:has(img.land) { width: min(560px, 72vw); } }
 .br-tilt img.land { aspect-ratio: 7 / 5; }
 """
 
