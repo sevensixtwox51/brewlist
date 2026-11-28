@@ -804,10 +804,10 @@ lbArt.addEventListener('pointerleave', () => {
 });
 
 // ---- click a card: a lightbox with every printing of it you own ----
-const LB = { i: -1, p: 0, face: 'front' };
+const LB = { i: -1, p: 0, face: 'front', list: [] };  // list: the cards the lightbox steps through (Browse's listing, or a list of movers)
 const finishName = (f) => f === 2 ? 'Etched' : (f === 1 ? 'Foil' : 'Nonfoil');
 function lbRender() {
-  const c = (BR.rows || [])[LB.i]; if (!c) return;
+  const c = (LB.list || [])[LB.i]; if (!c) return;
   const pr = c.pr && c.pr.length ? c.pr : [{ id: c.id, set: (c.sets || [])[0] || '', n: '', f: c.foil ? 1 : 0, q: c.qty, p: c.each }];
   if (LB.p >= pr.length) LB.p = 0;
   const cur = pr[LB.p];
@@ -829,7 +829,7 @@ function lbRender() {
       + '<span class="sub">' + esc(x.set) + (x.n ? ' #' + esc(x.n) : '') + ' · ×' + x.q + '</span></button>').join('');
   brEl('br-lb-info').insertAdjacentHTML('beforeend', '<div class="br-hist"><h4>Price history</h4><div id="br-lb-hist"></div></div>');
   lbHist(cur);
-  const many = (BR.rows || []).length > 1;
+  const many = (LB.list || []).length > 1;
   brEl('br-lb-prev').style.display = brEl('br-lb-next').style.display = many ? '' : 'none';
 }
 const histCache = {};
@@ -848,9 +848,11 @@ function lbHist(cur) {
   box.innerHTML = '<p class="ph-note" style="margin:0;">Loading\u2026</p>';
   fetch('/collection/history/card?id=' + encodeURIComponent(cur.id) + '&f=' + cur.f + '&s=' + encodeURIComponent(cur.set || '')).then((r) => r.json()).then((d) => { histCache[key] = d; show(d); }).catch(() => { box.innerHTML = ''; });
 }
-function lbOpen(i) { hideZoom(); LB.i = i; LB.p = 0; LB.face = 'front'; brEl('br-lb').classList.add('show'); document.body.style.overflow = 'hidden'; lbRender(); }
+function lbOpen(i, list) {
+  LB.list = list || BR.rows || [];
+  hideZoom(); LB.i = i; LB.p = 0; LB.face = 'front'; brEl('br-lb').classList.add('show'); document.body.style.overflow = 'hidden'; lbRender(); }
 function lbClose() { brEl('br-lb').classList.remove('show'); document.body.style.overflow = ''; LB.i = -1; }
-function lbStep(d) { const n = (BR.rows || []).length; if (!n) return; LB.i = (LB.i + d + n) % n; LB.p = 0; LB.face = 'front'; lbRender(); }
+function lbStep(d) { const n = (LB.list || []).length; if (!n) return; LB.i = (LB.i + d + n) % n; LB.p = 0; LB.face = 'front'; lbRender(); }
 brEl('br-results').addEventListener('click', (e) => {
   if (e.target.closest('.flip') || e.target.closest('#br-more')) return;
   const t = e.target.closest('[data-i]'); if (t) lbOpen(Number(t.dataset.i));
@@ -878,8 +880,7 @@ function brShowCard(name, names) {
     const rows = names.map((n) => byName[n]).filter(Boolean);
     const i = rows.findIndex((c) => c.name === name);
     if (i < 0) return;
-    BR.rows = rows;  // what the lightbox steps through (Browse sets it again whenever it draws its own list)
-    lbOpen(i);
+    lbOpen(i, rows);
   };
   go();
 }
