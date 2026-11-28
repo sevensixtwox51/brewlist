@@ -215,6 +215,8 @@ table.br-list { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
 .ph-tip b { color: var(--accent); font-variant-numeric: tabular-nums; }
 .chg { font-variant-numeric: tabular-nums; font-weight: 600; }
 .chg.up { color: var(--owned); } .chg.dn { color: #ff8a7a; } .chg.flat { color: var(--text-dim); }
+.ph-info { cursor: help; color: var(--text-dim); font-size: 0.85em; margin-left: 4px; font-family: var(--sans, inherit); font-weight: 400; }
+.ph-info:hover { color: var(--accent); }
 .ph-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 10px; }
 .ph-chip { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 10px; padding: 6px 12px; font-size: 0.85rem; }
 .ph-chip small { display: block; color: var(--text-dim); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.06em; }
@@ -313,14 +315,26 @@ function tipHtml(title, lines, top, foot) {
   return '<div class="tt">' + esc(title) + '</div>' + lines.map((l) => '<div>' + l + '</div>').join('') + names + (thumbs ? '<div class="thumbs">' + thumbs + '</div>' : '') + (foot ? '<div class="foot">' + esc(foot) + '</div>' : '');
 }
 const tipAttr = (html) => ' data-tip="' + esc(html) + '"';
+// Where every price on this page comes from (kept in one place so the wording is the same everywhere).
+const PRICE_SRC = tipAttr(tipHtml('Where these prices come from', [
+  'TCGplayer <b>Market Price</b>: worked out from recent sales completed on TCGplayer.com, for each card and finish (nonfoil, foil or etched).',
+  'It is not specific to a condition. TCGplayer publishes it for the card as a whole, not for Near Mint alone. Most singles sell as Near Mint, so it usually tracks Near Mint closely, but it can sit a little lower for older cards that also sell lightly played.'
+], null, 'Data from MTGJSON, refreshed with the card database.'));
+const HIST_INFO = '<span class="ph-info"' + tipAttr(tipHtml('About this chart', [
+  'What the cards you own <b>today</b> were worth on each past day.',
+  'Prices from before a set\u2019s release date are left out (they are preorder prices), so a card counts from the day its set came out.',
+  'It does not know when you got each card, so it is a price history, not a record of past collections.',
+  'Prices are TCGplayer Market Price: worked out from recent sales on TCGplayer.com, for each card and finish. It is not specific to a condition: most singles sell as Near Mint, so it usually tracks Near Mint closely, but it can sit a little lower for older cards that also sell lightly played.'
+], null, 'Data from MTGJSON, refreshed with the card database.')) + ' aria-label="About this chart">\u24d8</span>';
+const PRICE_INFO = '<span class="ph-info"' + PRICE_SRC + ' aria-label="Where these prices come from">\u24d8</span>';
 const showError = (m) => { const b = document.getElementById('error-box'); if (b) { b.textContent = m; b.style.display = 'block'; } };
 
 function snapshotHtml(s) {
-  const tile = (value, label, sub) => '<div class="stat-tile"><div class="stat-value">' + value + '</div><div class="stat-label">' + label + '</div>' + (sub ? '<div class="stat-sub">' + sub + '</div>' : '') + '</div>';
+  const tile = (value, label, sub, tip) => '<div class="stat-tile"' + (tip || '') + '><div class="stat-value">' + value + '</div><div class="stat-label">' + label + '</div>' + (sub ? '<div class="stat-sub">' + sub + '</div>' : '') + '</div>';
   return '<div class="stat-tiles">'
     + tile(fmt(s.unique), 'Unique cards', fmt(s.lands) + ' lands')
     + tile(fmt(s.copies), 'Copies', '')
-    + tile('$' + fmt(Math.round(s.value)), 'Market value', 'at today’s market price')
+    + tile('$' + fmt(Math.round(s.value)), 'Market value', 'at today’s market price', PRICE_SRC)
     + tile(s.foil_pct + '%', 'Foils', 'of your copies')
     + tile(fmt(s.sets), 'Sets', 'you own cards from')
     + '</div>';
@@ -680,11 +694,11 @@ function brRender() {
   const worth = rows.reduce((n, c) => n + (c.value || 0), 0);
   const unpriced = rows.reduce((n, c) => n + c.unpriced, 0);
   const best = rows.reduce((m, c) => (c.top != null && (!m || c.top > m.top) ? c : m), null);
-  const tile = (value, label, sub) => '<div class="stat-tile"><div class="stat-value">' + value + '</div><div class="stat-label">' + label + '</div>' + (sub ? '<div class="stat-sub">' + sub + '</div>' : '') + '</div>';
+  const tile = (value, label, sub, tip) => '<div class="stat-tile"' + (tip || '') + '><div class="stat-value">' + value + '</div><div class="stat-label">' + label + '</div>' + (sub ? '<div class="stat-sub">' + sub + '</div>' : '') + '</div>';
   const filtering = rows.length !== BR.data.cards.length;
   brEl('br-summary').innerHTML = tile(fmt(rows.length), 'Unique cards', filtering ? 'of ' + fmt(BR.data.cards.length) + ' you own' : 'you own')
     + tile(fmt(copies), 'Copies', '')
-    + tile(money(worth), 'Total value', filtering ? 'of ' + money(BR.data.total_value) + ' overall' : 'at today’s market price')
+    + tile(money(worth), 'Total value', filtering ? 'of ' + money(BR.data.total_value) + ' overall' : 'at today’s market price', PRICE_SRC)
     + tile(rows.length ? money(worth / rows.length) : '—', 'Average per card', rows.length ? 'per unique card' : '')
     + tile(best ? money(best.top) : '—', 'Priciest copy', best ? esc(best.name) : '');
   brEl('br-note').textContent = 'Value is today’s market price of the exact printing you own (the same prices as the Market value tile; not your store setting, which only applies to cards you’d buy).'
@@ -849,7 +863,7 @@ function lbRender() {
       + '<span class="nm">' + esc(names[x.set] || x.set || 'Unknown set') + (x.f ? '<span class="tag">' + (BR.surge.has(x.id) ? 'Surge foil' : finishName(x.f)) + '</span>' : '') + '</span>'
       + '<span class="px">' + (x.p != null ? money(x.p * x.q) + (x.q > 1 ? '<small>' + money(x.p) + ' each</small>' : '') : '—') + '</span>'
       + '<span class="sub">' + esc(x.set) + (x.n ? ' #' + esc(x.n) : '') + ' · ×' + x.q + '</span></button>').join('');
-  brEl('br-lb-info').insertAdjacentHTML('beforeend', '<div class="br-hist"><h4>Price history</h4><div id="br-lb-hist"></div></div>');
+  brEl('br-lb-info').insertAdjacentHTML('beforeend', '<div class="br-hist"><h4>Price history ' + PRICE_INFO + '</h4><div id="br-lb-hist"></div></div>');
   lbHist(cur);
   const many = (LB.list || []).length > 1;
   brEl('br-lb-prev').style.display = brEl('br-lb-next').style.display = many ? '' : 'none';
@@ -959,7 +973,7 @@ function loadHistPanel() {
       const chips = '<span class="ph-chip"><small>Latest, ' + new Date(h.dates[h.dates.length - 1] + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + '</small>' + money(now) + '</span>' + ['7', '30', '90'].filter((k) => h.changes[k] != null).map((k) => '<span class="ph-chip"><small>' + k + ' days</small>' + chgHtml(h.changes[k]) + '</span>').join('');
       const list = (arr, dir) => arr.length ? arr.map((m) => '<a data-dir="' + dir + '" data-name="' + esc(m.name) + '"><span>' + esc(m.name) + '</span>' + chgHtml(m.chg30) + '</a>').join('') : '<div class="ins-empty" style="padding:6px 0;">None</div>';
       const cover = h.covered < h.total_copies ? ' ' + fmt(h.total_copies - h.covered) + ' of your ' + fmt(h.total_copies) + ' copies are left out because they have no history yet (they join after the next database refresh).' : '';
-      el.innerHTML = '<div class="card ins-section"><h2>Value over time</h2><p class="ins-sub">What the cards you own today were worth on each past day (TCGplayer market price). Prices from before a set\u2019s release date are left out (they are preorder prices), so a card counts from the day its set came out. It does not know when you got each card, so it is a price history, not a record of past collections.</p>'
+      el.innerHTML = '<div class="card ins-section"><h2>Value over time ' + HIST_INFO + '</h2>'
         + '<div class="ph-chips">' + chips + '</div><div id="ph-total"></div>'
         + '<div class="ph-movers"><div><h3>Biggest risers, 30 days</h3>' + list(h.risers, 'rise') + '</div><div><h3>Biggest fallers, 30 days</h3>' + list(h.fallers, 'fall') + '</div></div>'
         + '<p class="ph-note">Updated ' + esc(st.updated || '') + ' \u00b7 refreshing the card database also extends the history.' + cover + ' <a href="#" id="ph-update">Update now</a></p></div>';
