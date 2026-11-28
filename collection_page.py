@@ -66,7 +66,10 @@ table.ins-grid { border-collapse: separate; border-spacing: 4px; width: 100%; mi
 .ins-bars .num { text-align: right; color: var(--text-dim); font-variant-numeric: tabular-nums; }
 .ins-curve { display: flex; align-items: flex-end; gap: 8px; height: 140px; margin-top: 6px; }
 .ins-curve .col { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; font-size: 0.78rem; color: var(--text-dim); }
-.ins-curve .col .bar { width: 100%; background: var(--accent); border-radius: 5px 5px 0 0; min-height: 2px; }
+.ins-curve .col .bar { width: 100%; background: var(--accent); border-radius: 5px 5px 0 0; min-height: 2px; display: flex; flex-direction: column-reverse; overflow: hidden; }
+.ins-curve .col .bar .seg { min-height: 1px; }
+.ins-curve-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 10px; font-size: 0.76rem; color: var(--text-dim); }
+.ins-curve-legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; }
 .ins-curve .col b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; margin-bottom: 3px; }
 .ins-tribes { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
 .ins-note { color: var(--text-dim); font-size: 0.78rem; margin-top: 18px; max-width: 80ch; }
@@ -425,10 +428,18 @@ function typesHtml(t) {
   const maxU = Math.max(...t.by_category.map((x) => x.unique), 1);
   const cats = t.by_category.map((x) => '<div class="row" data-key="type:' + esc(x.type) + '" data-title="' + esc(x.type) + '"' + tipAttr(tipHtml(x.type, ['<b>' + fmt(x.unique) + '</b> unique cards, ' + fmt(x.copies) + ' copies'], null, 'Click to see them, or for popular cards to add')) + '><span>' + esc(x.type) + '</span><div><div class="bar" style="width:' + (100 * x.unique / maxU) + '%;"></div></div><span class="num">' + fmt(x.unique) + '</span></div>').join('');
   const maxC = Math.max(...t.curve, 1);
-  const curve = t.curve.map((n, i) => '<div class="col" data-key="cmc:' + i + '" data-title="Mana value ' + (i === 7 ? '7+' : i) + '"' + tipAttr(tipHtml('Mana value ' + (i === 7 ? '7+' : i), ['<b>' + n + '</b> nonland cards'], null, 'Click to see them, or for popular cards to add')) + '><b>' + n + '</b><div class="bar" style="height:' + Math.max(2, 100 * n / maxC * 0.78) + '%;"></div>' + (i === 7 ? '7+' : i) + '</div>').join('');
+  // each bar is stacked by color identity, the same buckets as the Colors bar above (bottom to top: W U B R G, then multicolor, then colorless)
+  const keys = t.curve_color_keys || [], names = { W: 'White', U: 'Blue', B: 'Black', R: 'Red', G: 'Green', M: 'Multicolor', C: 'Colorless' };
+  const curve = t.curve.map((n, i) => {
+    const parts = keys.map((k, j) => ({ k, n: (t.curve_colors[i] || [])[j] || 0 })).filter((x) => x.n > 0);
+    const segs = parts.map((x) => '<div class="seg" style="flex:' + x.n + ';background:' + MANA_HEX[x.k] + ';"></div>').join('');
+    const lines = parts.length ? parts.slice().reverse().map((x) => '<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:' + MANA_HEX[x.k] + ';margin-right:6px;"></span>' + names[x.k] + ' <b>' + x.n + '</b>') : ['<b>' + n + '</b> nonland cards'];
+    return '<div class="col" data-key="cmc:' + i + '" data-title="Mana value ' + (i === 7 ? '7+' : i) + '"' + tipAttr(tipHtml('Mana value ' + (i === 7 ? '7+' : i), ['<b>' + n + '</b> nonland cards'].concat(parts.length ? lines : []), null, 'Click to see them, or for popular cards to add')) + '><b>' + n + '</b><div class="bar" style="height:' + Math.max(2, 100 * n / maxC * 0.78) + '%;">' + segs + '</div>' + (i === 7 ? '7+' : i) + '</div>';
+  }).join('');
+  const legend = keys.filter((k, j) => t.curve_colors.some((row) => (row[j] || 0) > 0)).map((k) => '<span><i style="background:' + MANA_HEX[k] + ';"></i>' + names[k] + '</span>').join('');
   const tribes = t.tribes.map((x) => '<span class="ins-chip" data-key="tribe:' + esc(x.type) + '" data-title="' + esc(x.type) + ' creatures"' + tipAttr(tipHtml(x.type + ' creatures', ['<b>' + x.n + '</b> unique creatures'], null, 'Click to see them, or for popular cards to add')) + '>' + esc(x.type) + ' <b>' + x.n + '</b></span>').join('');
   return '<div class="ins-two"><div class="card ins-section"><h2>Card types</h2><p class="ins-sub">Unique cards of each type.</p><div class="ins-bars">' + cats + '</div></div>'
-    + '<div class="card ins-section"><h2>Mana curve</h2><p class="ins-sub">Nonland cards by mana value (average ' + t.avg_cmc + ').</p><div class="ins-curve">' + curve + '</div></div></div>'
+    + '<div class="card ins-section"><h2>Mana curve</h2><p class="ins-sub">Nonland cards by mana value (average ' + t.avg_cmc + ').</p><div class="ins-curve">' + curve + '</div><div class="ins-curve-legend">' + legend + '</div></div></div>'
     + '<div class="card ins-section"><h2>Creature types</h2><p class="ins-sub">Your deepest tribes, by unique creatures.</p><div class="ins-tribes">' + tribes + '</div></div>';
 }
 

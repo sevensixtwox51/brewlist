@@ -350,6 +350,7 @@ def build_insights(owned: dict, owned_rows: list[dict]) -> dict:
         d["unique"] += 1
         d["copies"] += r.get("quantity") or 1
     curve = [0] * 8
+    curve_colors = [{c: 0 for c in COLUMNS} for _ in range(8)]  # each bar of the curve, split by color identity (same buckets as the Colors bar)
     cmc_sum = cmc_n = 0
     tribes: dict[str, int] = {}
     curve_rows: dict[int, list[dict]] = {i: [] for i in range(8)}
@@ -357,6 +358,7 @@ def build_insights(owned: dict, owned_rows: list[dict]) -> dict:
     for r in mine:
         c = int(r.get("cmc") or 0)
         curve[min(c, 7)] += 1
+        curve_colors[min(c, 7)][_color_bucket(r.get("color_identity"))] += 1
         curve_rows[min(c, 7)].append(r)
         cmc_sum += float(r.get("cmc") or 0)
         cmc_n += 1
@@ -376,6 +378,8 @@ def build_insights(owned: dict, owned_rows: list[dict]) -> dict:
     types = {
         "by_category": [{"type": k, **v} for k, v in sorted(by_cat.items(), key=lambda kv: -kv[1]["unique"])],
         "curve": curve,
+        "curve_colors": [[b[c] for c in COLUMNS] for b in curve_colors],  # per bar, in the order of curve_color_keys
+        "curve_color_keys": COLUMNS,
         "avg_cmc": round(cmc_sum / cmc_n, 2) if cmc_n else 0,
         "tribes": [{"type": k, "n": v} for k, v in sorted(tribes.items(), key=lambda kv: -kv[1])[:14]],
     }
