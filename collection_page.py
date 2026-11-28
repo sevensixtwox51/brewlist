@@ -232,10 +232,10 @@ COLLECTION_BODY = """
         <label class="br-check" title="Only cards that can lead a Commander deck: legendary creatures, legendary Vehicles and cards that say they can be your commander"><input type="checkbox" id="br-cmdr"> Can be a commander</label>
         <label class="br-check"><input type="checkbox" id="br-foil"> Has a foil</label>
         <select id="br-sort" title="How to order the cards">
-          <option value="name">Sort: name</option><option value="each">Sort: priciest copy</option><option value="value">Sort: total value</option>
+          <option value="name">Sort: name</option><option value="each" selected>Sort: priciest copy</option><option value="value">Sort: total value</option>
           <option value="cmc">Sort: mana value</option><option value="rank">Sort: popularity</option><option value="qty">Sort: copies owned</option>
         </select>
-        <button type="button" class="btn ghost small" id="br-dir" title="Reverse the order">&#8593;</button>
+        <button type="button" class="btn ghost small" id="br-dir" title="Reverse the order">&#8595;</button>
         <div class="ins-tabs" id="br-viewmode"><button type="button" data-v="cards" class="on">Cards</button><button type="button" data-v="list">List</button></div>
         <a href="#" id="br-reset" style="font-size:0.85rem;">Reset filters</a>
       </div>
@@ -534,7 +534,7 @@ document.addEventListener('click', hideTip, true);
 // ---- Browse cards: every card you own, filtered and added up ----
 const brEl = (id) => document.getElementById(id);
 const BR = { data: null, loaded: false, loading: false, q: '', cat: '', role: '', theme: '', pips: { W: 0, U: 0, B: 0, R: 0, G: 0 }, colorless: false, exact: true,
-  sets: new Set(), surge: new Set(), pmin: null, pmax: null, foil: false, cmdr: false, sort: 'name', desc: false, view: 'cards', shown: 96 };
+  sets: new Set(), surge: new Set(), pmin: null, pmax: null, foil: false, cmdr: false, sort: 'each', desc: true, view: 'cards', shown: 96 };
 const money = (n) => '$' + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const PAGE = 96;
 
@@ -706,11 +706,11 @@ brEl('br-setclear').addEventListener('click', (e) => { e.preventDefault(); BR.se
 brEl('br-setdone').addEventListener('click', (e) => { e.preventDefault(); brEl('br-setpop').classList.remove('show'); });
 brEl('br-reset').addEventListener('click', (e) => {
   e.preventDefault();
-  Object.assign(BR, { q: '', cat: '', role: '', theme: '', colorless: false, exact: true, pmin: null, pmax: null, foil: false, cmdr: false, sort: 'name', desc: false });
+  Object.assign(BR, { q: '', cat: '', role: '', theme: '', colorless: false, exact: true, pmin: null, pmax: null, foil: false, cmdr: false, sort: 'each', desc: true });
   BR.sets.clear(); 'WUBRG'.split('').forEach((c) => { BR.pips[c] = 0; });
   ['br-q', 'br-pmin', 'br-pmax'].forEach((id) => { brEl(id).value = ''; });
   ['br-cat', 'br-role', 'br-theme'].forEach((id) => { brEl(id).value = ''; });
-  brEl('br-sort').value = 'name'; brEl('br-exact').checked = true; brEl('br-foil').checked = false; brEl('br-cmdr').checked = false; brEl('br-dir').innerHTML = '&#8593;';
+  brEl('br-sort').value = 'each'; brEl('br-exact').checked = true; brEl('br-foil').checked = false; brEl('br-cmdr').checked = false; brEl('br-dir').innerHTML = '&#8595;';
   brSyncPips(); brRenderSets(); brChanged();
 });
 brEl('br-results').addEventListener('click', (e) => { if (e.target.closest('#br-more')) { BR.shown += PAGE; brRender(); } });

@@ -225,7 +225,7 @@ card database and Scryfall's Oracle Tags.
   included) and lets you filter it by name or type, card type, color (click a
   color to allow it, again to require it, with an exact-colors toggle like the
   builder's), sets, price of a copy (judged by the priciest copy you own of a
-  card), foils, whether it can be a commander (the builder's own rule), and the roles and themes above. Sort by name, priciest copy,
+  card), foils, whether it can be a commander (the builder's own rule), and the roles and themes above. Cards start sorted by priciest copy; you can also sort by name,
   total value, mana value, popularity or copies. The totals follow the
   filters: unique cards, copies, total value, average per card and the
   priciest copy. It shows pictures or a compact list, with hover to enlarge and
