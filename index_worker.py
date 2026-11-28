@@ -6,6 +6,7 @@ health check, which then shows "Server not responding". Run here, the server sta
 
 Progress goes to stdout, one JSON object per line: {"p": [done, total, stage]}, then {"ok": true} or {"error": "..."}.
 Usage: python3 index_worker.py [path]  (see brewlist_core.rebuild_price_index_isolated)
+       python3 index_worker.py --history <data dir>  (only refresh the price history of your printings; see price_history.py)
 """
 import json
 import os
@@ -14,10 +15,12 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from brewlist_core import PRICE_INDEX_PATH, rebuild_price_index  # noqa: E402
+import price_history  # noqa: E402
 
 
 def main() -> int:
-    path = sys.argv[1] if len(sys.argv) > 1 else PRICE_INDEX_PATH
+    history_only = len(sys.argv) > 2 and sys.argv[1] == "--history"
+    path = sys.argv[1] if len(sys.argv) > 1 and not history_only else PRICE_INDEX_PATH
     last = {"t": 0.0, "stage": object()}
 
     def emit(done, total, stage=None):
@@ -29,7 +32,10 @@ def main() -> int:
         print(json.dumps({"p": [done, total, stage]}), flush=True)
 
     try:
-        rebuild_price_index(path, on_progress=emit)
+        if history_only:
+            price_history.build_history_only(sys.argv[2], on_progress=emit)
+        else:
+            rebuild_price_index(path, on_progress=emit)
     except BaseException as e:  # noqa: BLE001 -- whatever went wrong is the parent's error message
         print(json.dumps({"error": str(e) or e.__class__.__name__}), flush=True)
         return 1

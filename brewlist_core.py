@@ -1227,6 +1227,12 @@ def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[
         total_cards = sum(len(set_obj.get("cards", [])) for set_obj in all_printings.values())
         cards_seen = 0
 
+        # The daily price series of the printings you own are kept (price_history.py) -- the index itself only keeps today's price.
+        import price_history as _price_history
+        history_dir = os.path.dirname(os.path.abspath(path))
+        history_ids = _price_history.owned_scryfall_ids(history_dir)
+        history_found: dict = {}
+
         working: dict[str, dict] = {}
         # Cards on WotC's official Commander "Game Changers" list, by name --
         # tracked unconditionally for every paper card (not just ones with
@@ -1393,6 +1399,7 @@ def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[
                 purchase_urls = card.get("purchaseUrls") or {}
 
                 scryfall_id = (card.get("identifiers") or {}).get("scryfallId")
+                _price_history.capture(scryfall_id, paper, history_ids, history_found)
                 if scryfall_id:
                     tcg_retail = (paper.get("tcgplayer") or {}).get("retail") or {}
                     by_scryfall_id[scryfall_id] = {
@@ -1452,6 +1459,11 @@ def rebuild_price_index(path: str = PRICE_INDEX_PATH, on_progress=None) -> dict[
                             cur = entry.get("cardmarket_foil")
                             if cur is None or p < cur[0]:
                                 entry["cardmarket_foil"] = (p, cm_url)
+        if history_found:
+            try:
+                _price_history.merge(history_dir, history_found)
+            except OSError:
+                pass  # the history is a bonus: a full disk must not fail the rebuild
     finally:
         for p in (printings_tmp, prices_tmp):
             if os.path.exists(p):
@@ -1949,12 +1961,12 @@ def sets_data_in_index(path: str = PRICE_INDEX_PATH) -> dict[str, dict]:
     return _hot_index_section("sets", path) or {}
 
 
-def rebuild_price_index_isolated(path: str = PRICE_INDEX_PATH, on_progress=None) -> None:
+def rebuild_price_index_isolated(path: str = PRICE_INDEX_PATH, on_progress=None, history_only: bool = False) -> None:
     """rebuild_price_index in a separate process (see index_worker.py), so the parsing it does cannot stall the web server's
     other requests. Same progress callback; raises ValueError with the worker's message when the rebuild fails."""
     worker = os.environ.get("BREWLIST_INDEX_WORKER") or os.path.join(_CORE_DIR, "index_worker.py")
     proc = subprocess.Popen(
-        [sys.executable, worker, path], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
+        [sys.executable, worker] + (["--history", os.path.dirname(os.path.abspath(path))] if history_only else [path]), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
         cwd=_CORE_DIR,
     )
     error, tail = None, []

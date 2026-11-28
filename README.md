@@ -221,6 +221,16 @@ card database and Scryfall's Oracle Tags.
 
 ![Popular to add: the most popular white tutors you don't own, with prices](screenshots/collection-popular.png)
 
+- **Price history:** the Insights tab has a **Value over time** chart: what the
+  cards you own today were worth on each of the last 90 days (TCGplayer market
+  price), the change over 7, 30 and 90 days, and your biggest risers and fallers
+  this month. In Browse, sort by 7-day or 30-day price change, and the lightbox
+  shows a price chart for the printing you are looking at (hover any chart for
+  the price on that day). The first time, press **Get price history**: it reads
+  MTGJSON's price data once (a few hundred MB, about a minute) and keeps the
+  daily prices of your own printings in `data/price_history.json`. Refreshing the
+  card database adds to it, so it keeps growing past 90 days. It is a history of
+  today's cards' prices, not of what you owned on each day.
 - **Browse cards:** a second tab on the page lists every card you own (lands
   included) and lets you filter it by name or type, card type, color (click a
   color to allow it, again to require it, with an exact-colors toggle like the
@@ -517,6 +527,7 @@ appreciated!
 | `collection_insights.py`, `collection_page.py` | The Collection insights page: the calculations (read-only, nothing from the builder or compare code) and its page. |
 | `matchups.py` | The Matchups section of Analyze: what a deck is weak to and strong against (read-only, local data). |
 | `research.py`, `research_page.py` | The Commander research page: the calculations (read-only, built on EDHREC's saved data and the Matchups analysis) and its page. |
+| `price_history.py` | Keeps the daily price history of the printings you own (from MTGJSON) and works out the value-over-time series and card price changes. |
 | `tilt.py` | The held-in-hand tilt, glare and foil band shared by the builder and compare-report lightboxes. |
 | `analysis_ui.py` | The full analysis in the compare report: draws the builder's Analyze checks (from the same `/builder/*` endpoints) for the compared deck. |
 | `matchups_ui.py` | The Matchups panel's look and HTML, shared by Analyze and Commander research. |

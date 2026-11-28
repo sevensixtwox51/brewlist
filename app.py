@@ -15,6 +15,7 @@ below). Set PORT to force a specific one instead.
 
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import os
 import socket
@@ -91,6 +92,7 @@ from deck_builder import (
     suggest_replacements,
 )
 import tag_synergy
+import price_history
 from edhrec_data import bulk_commander_popularity, commander_data_problem, commander_profile, commander_theme_page
 from edhrec_data import refresh_all as edhrec_refresh_all
 from collection_insights import browse_cards, get_insights, cards_for, missing_for
@@ -6109,7 +6111,104 @@ def collection_browse_data():
     # Which foil printings are surge foils: only foils can be, so look up just those (cached after the first time).
     foil_ids = [x["id"] for c in data["cards"] for x in c.get("pr", []) if x.get("f")]
     ensure_printing_info(foil_ids, max_fetch=2000, need_pt=True)
-    return jsonify(dict(data, surge=sorted(surge_foil_ids(foil_ids))))
+    hist = price_history.load(DATA_DIR)
+    cards = [dict(c, **price_history.card_changes(c.get("pr", []), hist)) for c in data["cards"]] if hist else data["cards"]
+    return jsonify(dict(data, cards=cards, surge=sorted(surge_foil_ids(foil_ids)), has_history=bool(hist)))
+
+
+# ---- Price history of the cards you own (see price_history.py): the stored daily series, and the job that fetches them ----
+_HIST_JOB: dict = {"running": False, "stage": None, "done": 0, "total": 0, "error": None}
+_HIST_LOCK = threading.Lock()
+
+
+def _owned_printings_for_history() -> list[dict] | None:
+    """Every printing you own as {id, f, q, name} (None if there is no collection)."""
+    if not os.path.isfile(COLLECTION_PATH):
+        return None
+    get_insights(COLLECTION_PATH, os.path.getmtime(COLLECTION_PATH), load_collection, owned_collection_gameplay_view)
+    data = browse_cards() or {}
+    return [dict(x, name=c["name"]) for c in data.get("cards", []) for x in c.get("pr", [])]
+
+
+@app.route("/collection/history/status", methods=["GET"])
+def collection_history_status():
+    hist = price_history.load(DATA_DIR)
+    with _HIST_LOCK:
+        job = dict(_HIST_JOB)
+    return jsonify(has_history=bool(hist), printings=len(hist), updated=(_dt.date.fromtimestamp(price_history.mtime(DATA_DIR)).isoformat() if hist else None), job=job)
+
+
+@app.route("/collection/history/build", methods=["POST"])
+def collection_history_build():
+    """Fetches the price history of your printings from MTGJSON (a few hundred MB of download; done in a process of its own)."""
+    if not os.path.isfile(COLLECTION_PATH):
+        return jsonify(error="No ManaBox collection on file yet -- upload your export first."), 400
+    with _HIST_LOCK:
+        if _HIST_JOB["running"]:
+            return jsonify(running=True, started=False)
+        _HIST_JOB.update(running=True, stage="downloading", done=0, total=0, error=None)
+
+    def _run():
+        def _on_progress(done, total, stage=None):
+            with _HIST_LOCK:
+                _HIST_JOB.update(done=done, total=total, stage=stage or "downloading")
+        err = None
+        try:
+            rebuild_price_index_isolated(on_progress=_on_progress, history_only=True)
+        except Exception as e:  # noqa: BLE001 -- shown to the person on the page
+            err = str(e) or e.__class__.__name__
+        with _HIST_LOCK:
+            _HIST_JOB.update(running=False, stage=None, error=err)
+
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify(running=True, started=True)
+
+
+@app.route("/collection/history/total", methods=["GET"])
+def collection_history_total():
+    """What the collection you own today was worth on each past day, the change over 7/30/90 days, and the biggest movers."""
+    try:
+        prints = _owned_printings_for_history()
+    except ValueError as e:
+        return jsonify(error=str(e))
+    if prints is None:
+        return jsonify(error="No ManaBox collection on file yet.")
+    hist = price_history.load(DATA_DIR)
+    if not hist:
+        return jsonify(has_history=False)
+    ser = price_history.collection_series(prints, hist)
+    dates, values = ser["dates"], ser["values"]
+    changes = {}
+    for days in (7, 30, 90):
+        if len(dates) > 1:
+            last = _dt.date.fromisoformat(dates[-1])
+            target = (last - _dt.timedelta(days=days)).isoformat()
+            ref = next((v for d, v in zip(reversed(dates), reversed(values)) if d <= target), None)
+            changes[str(days)] = None if ref is None else round(values[-1] - ref, 2)
+    cards = {}
+    for x in prints:
+        cards.setdefault(x["name"], []).append(x)
+    movers = []
+    for name, pr in cards.items():
+        ch = price_history.card_changes(pr, hist)
+        if ch["chg30"] is not None:
+            movers.append({"name": name, "chg30": ch["chg30"], "chg7": ch["chg7"]})
+    movers.sort(key=lambda m: m["chg30"])
+    risers = [m for m in reversed(movers) if m["chg30"] > 0][:5]
+    fallers = [m for m in movers if m["chg30"] < 0][:5]
+    return jsonify(has_history=True, dates=dates, values=values, changes=changes, covered=ser["covered"], total_copies=ser["total_copies"], risers=risers, fallers=fallers)
+
+
+@app.route("/collection/history/card", methods=["GET"])
+def collection_history_card():
+    """The daily price of one printing you own (the finish the app values it at): f = 0 nonfoil, 1 foil, 2 etched."""
+    sid = request.args.get("id", "")
+    try:
+        f = int(request.args.get("f", "0"))
+    except ValueError:
+        f = 0
+    series = price_history.series_for(price_history.load(DATA_DIR).get(sid), f == 1, f == 2)
+    return jsonify(dates=[d for d, _p in series], prices=[p for _d, p in series])
 
 
 @app.route("/collection/cards", methods=["GET"])

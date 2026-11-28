@@ -196,6 +196,31 @@ table.br-list { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
 .br-pr .tag { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 999px; border: 1px solid var(--accent); color: var(--accent); font-size: 0.68rem; font-weight: 700; }
 .br-lb-close { position: absolute; top: 8px; right: 12px; background: none; border: none; color: var(--text-dim); font-size: 1.7rem; line-height: 1; cursor: pointer; z-index: 3; }
 .br-lb-close:hover { color: var(--accent); }
+/* price history: the chart, the change chips, the Insights panel */
+.ph { position: relative; }
+.ph svg { display: block; width: 100%; height: auto; overflow: visible; }
+.ph .ph-line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.ph .ph-area { fill: var(--accent); opacity: 0.1; }
+.ph .ph-grid { stroke: var(--card-border); stroke-width: 1; }
+.ph .ph-ax { fill: var(--text-dim); font-size: 11px; }
+.ph .ph-cur { stroke: var(--text-dim); stroke-width: 1; stroke-dasharray: 3 3; }
+.ph .ph-dot { fill: var(--accent); stroke: var(--bg-elevated); stroke-width: 2; }
+.ph-tip { position: absolute; top: 0; pointer-events: none; background: rgba(0,0,0,0.85); border: 1px solid var(--card-border); border-radius: 8px; padding: 3px 8px; font-size: 0.78rem; white-space: nowrap; display: none; z-index: 2; }
+.ph-tip b { color: var(--accent); font-variant-numeric: tabular-nums; }
+.chg { font-variant-numeric: tabular-nums; font-weight: 600; }
+.chg.up { color: var(--owned); } .chg.dn { color: #ff8a7a; } .chg.flat { color: var(--text-dim); }
+.ph-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 10px; }
+.ph-chip { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 10px; padding: 6px 12px; font-size: 0.85rem; }
+.ph-chip small { display: block; color: var(--text-dim); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.06em; }
+.ph-movers { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 14px; }
+.ph-movers h3 { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-dim); margin: 0 0 6px; font-weight: 600; }
+.ph-movers a { display: flex; justify-content: space-between; gap: 10px; padding: 3px 0; font-size: 0.88rem; color: var(--text); text-decoration: none; cursor: pointer; }
+.ph-movers a:hover span:first-child { color: var(--accent); }
+.ph-note { color: var(--text-dim); font-size: 0.8rem; margin: 10px 0 0; }
+.ph-progress { height: 6px; background: var(--card-border); border-radius: 999px; overflow: hidden; margin: 10px 0 4px; }
+.ph-progress i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .3s; }
+.br-hist { margin-top: 16px; }
+@media (max-width: 700px) { .ph-movers { grid-template-columns: 1fr; } }
 .br-lb-nav { position: fixed; top: 50%; transform: translateY(-50%); width: 44px; height: 64px; border-radius: 12px; border: 1px solid var(--card-border); background: rgba(0,0,0,0.55); color: var(--text); font-size: 1.8rem; cursor: pointer; z-index: 351; }
 .br-lb-nav:hover { color: var(--accent); border-color: var(--accent); }
 .br-lb-nav.prev { left: 14px; } .br-lb-nav.next { right: 14px; }
@@ -539,6 +564,47 @@ const money = (n) => '$' + Number(n || 0).toLocaleString(undefined, { minimumFra
 const PAGE = 96;
 
 // what one copy is worth: a single figure, or the range when the printings you hold differ (a foil and a regular copy)
+const chgTxt = (v) => (v > 0 ? '+' : (v < 0 ? '\u2212' : '')) + money(Math.abs(v));
+const chgCls = (v) => v > 0.004 ? 'up' : (v < -0.004 ? 'dn' : 'flat');
+const chgHtml = (v) => v == null ? '<span class="chg flat">\u2014</span>' : '<span class="chg ' + chgCls(v) + '">' + chgTxt(v) + '</span>';
+// A line chart of dated values with a hover readout. Returns the markup; phWire(el, dates, vals) makes it respond to the pointer.
+function phChart(dates, vals, W, H) {
+  W = W || 640; H = H || 180;
+  const L = W < 400 ? 40 : 52, R = 10, T = 10, B = 22, n = vals.length;
+  if (n < 2) return '<div class="ins-empty" style="padding:14px;">Not enough days of history yet.</div>';
+  const lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
+  const span = (hi - lo) || Math.max(hi * 0.1, 0.01), y0 = Math.max(0, lo - span * 0.1), y1 = hi + span * 0.1;
+  const X = (i) => L + (W - L - R) * i / (n - 1), Y = (v) => T + (H - T - B) * (1 - (v - y0) / (y1 - y0));
+  const pts = vals.map((v, i) => X(i).toFixed(1) + ',' + Y(v).toFixed(1));
+  const lab = (v) => '$' + (v >= 100 ? Math.round(v).toLocaleString() : v.toFixed(2));
+  let grid = '';
+  for (let k = 0; k < 3; k++) { const v = y0 + (y1 - y0) * k / 2, y = Y(v).toFixed(1); grid += '<line class="ph-grid" x1="' + L + '" x2="' + (W - R) + '" y1="' + y + '" y2="' + y + '"/><text class="ph-ax" x="' + (L - 6) + '" y="' + (Number(y) + 4) + '" text-anchor="end">' + lab(v) + '</text>'; }
+  const dl = (d) => new Date(d + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  return '<div class="ph"><svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Price history">' + grid
+    + '<path class="ph-area" d="M' + pts[0] + ' L' + pts.join(' L') + ' L' + X(n - 1).toFixed(1) + ',' + (H - B) + ' L' + L + ',' + (H - B) + ' Z"/>'
+    + '<polyline class="ph-line" points="' + pts.join(' ') + '"/>'
+    + '<text class="ph-ax" x="' + L + '" y="' + (H - 4) + '">' + dl(dates[0]) + '</text><text class="ph-ax" x="' + (W - R) + '" y="' + (H - 4) + '" text-anchor="end">' + dl(dates[n - 1]) + '</text>'
+    + '<line class="ph-cur" y1="' + T + '" y2="' + (H - B) + '" style="display:none"/><circle class="ph-dot" r="4" style="display:none"/></svg><div class="ph-tip"></div></div>';
+}
+function phWire(el, dates, vals, W, H) {
+  const box = el.querySelector('.ph'); if (!box || vals.length < 2) return;
+  const svg = box.querySelector('svg'), cur = svg.querySelector('.ph-cur'), dot = svg.querySelector('.ph-dot'), tip = box.querySelector('.ph-tip');
+  W = W || 640; H = H || 180;
+  const L = W < 400 ? 40 : 52, R = 10, T = 10, B = 22, n = vals.length;
+  const lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals), span = (hi - lo) || Math.max(hi * 0.1, 0.01), y0 = Math.max(0, lo - span * 0.1), y1 = hi + span * 0.1;
+  const off = () => { cur.style.display = dot.style.display = tip.style.display = 'none'; };
+  box.addEventListener('pointerleave', off);
+  box.addEventListener('pointermove', (e) => {
+    const r = svg.getBoundingClientRect(), fx = (e.clientX - r.left) / r.width * W;
+    const i = Math.max(0, Math.min(n - 1, Math.round((fx - L) / (W - L - R) * (n - 1))));
+    const x = L + (W - L - R) * i / (n - 1), y = T + (H - T - B) * (1 - (vals[i] - y0) / (y1 - y0));
+    cur.setAttribute('x1', x); cur.setAttribute('x2', x); dot.setAttribute('cx', x); dot.setAttribute('cy', y);
+    cur.style.display = dot.style.display = ''; tip.style.display = 'block';  // the tip is display:none in the stylesheet, so '' would leave it hidden
+    tip.innerHTML = new Date(dates[i] + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) + ' · <b>' + money(vals[i]) + '</b>';
+    const px = x / W * r.width, tw = tip.offsetWidth;
+    tip.style.left = Math.max(0, Math.min(r.width - tw, px - tw / 2)) + 'px';
+  });
+}
 const eachTxt = (c) => c.top == null ? '—' : (c.top === c.low ? money(c.top) : money(c.low) + '–' + money(c.top));
 // the tile shows one printing (the best one you own); it shimmers when that printing is a foil
 const shownIsFoil = (c) => { const x = (c.pr || []).find((p) => p.id === c.id); return x ? x.f > 0 : c.foil > 0; };
@@ -574,7 +640,7 @@ function brFiltered() {
   });
   // Ascending is the natural order of what is sorted; cards with nothing to sort on (no price, unranked) always go last.
   const dir = BR.desc ? -1 : 1, key = BR.sort;
-  const val = { name: (c) => c.name.toLowerCase(), each: (c) => c.top, value: (c) => c.value, cmc: (c) => c.cmc, rank: (c) => c.rank, qty: (c) => c.qty }[key];
+  const val = { name: (c) => c.name.toLowerCase(), each: (c) => c.top, value: (c) => c.value, cmc: (c) => c.cmc, rank: (c) => c.rank, qty: (c) => c.qty, chg7: (c) => c.chg7, chg30: (c) => c.chg30 }[key];
   rows.sort((a, b) => {
     const x = val(a), y = val(b);
     if (x == null && y == null) return a.name.localeCompare(b.name);
@@ -603,18 +669,20 @@ function brRender() {
     + (unpriced ? ' ' + fmt(unpriced) + ' ' + (unpriced === 1 ? 'copy has' : 'copies have') + ' no price on file and count as $0.' : '')
     + ((BR.pmin != null || BR.pmax != null) ? ' With a price filter on, cards with no price are left out.' : '');
   const shownRows = rows.slice(0, BR.shown);
+  const chgSort = BR.sort === 'chg7' || BR.sort === 'chg30';
   let html;
   if (!rows.length) html = '<div class="ins-empty">No cards match these filters.</div>';
   else if (BR.view === 'list') {
-    html = '<table class="br-list"><thead><tr><th>Card</th><th>Type</th><th>Sets</th><th class="num" title="EDHREC popularity rank (lower is more popular)">Popularity</th><th class="num">Copies</th><th class="num">Each copy</th><th class="num">Value</th></tr></thead><tbody>'
-      + shownRows.map((c, i) => '<tr class="ins-card" data-i="' + i + '" data-id="' + esc(c.id || '') + '"><td>' + esc(c.name) + (c.foil ? ' ✦' : '') + '</td><td class="ty">' + esc(c.type_line || '') + '</td><td>' + esc(c.sets.join(', ')) + '</td><td class="num">' + (c.rank ? '#' + fmt(c.rank) : '—') + '</td><td class="num">' + c.qty + '</td><td class="num">' + eachTxt(c) + '</td><td class="num">' + (c.value != null ? money(c.value) : '—') + '</td></tr>').join('')
+    html = '<table class="br-list"><thead><tr><th>Card</th><th>Type</th><th>Sets</th><th class="num" title="EDHREC popularity rank (lower is more popular)">Popularity</th><th class="num">Copies</th><th class="num">Each copy</th><th class="num">Value</th>' + (chgSort ? '<th class="num">' + (BR.sort === 'chg7' ? '7 days' : '30 days') + '</th>' : '') + '</tr></thead><tbody>'
+      + shownRows.map((c, i) => '<tr class="ins-card" data-i="' + i + '" data-id="' + esc(c.id || '') + '"><td>' + esc(c.name) + (c.foil ? ' ✦' : '') + '</td><td class="ty">' + esc(c.type_line || '') + '</td><td>' + esc(c.sets.join(', ')) + '</td><td class="num">' + (c.rank ? '#' + fmt(c.rank) : '—') + '</td><td class="num">' + c.qty + '</td><td class="num">' + eachTxt(c) + '</td><td class="num">' + (c.value != null ? money(c.value) : '—') + '</td>' + (chgSort ? '<td class="num">' + chgHtml(c[BR.sort]) + '</td>' : '') + '</tr>').join('')
       + '</tbody></table>';
   } else {
     html = '<div class="ins-cards" style="padding:0;">' + shownRows.map((c, i) => {
       const img = c.id ? '<img loading="lazy" alt="' + esc(c.name) + '" src="' + cardImg(c.id) + '">' : '<div style="aspect-ratio:5/7;border-radius:6%;background:var(--bg);"></div>';
       const worthTxt = c.value != null ? '<span class="worth">' + money(c.value) + (c.qty > 1 ? ' <small>(' + eachTxt(c) + (c.top === c.low ? ' each' : '') + ')</small>' : '') + '</span>' : '<span class="worth"><small>no price</small></span>';
+      const chgLine = chgSort ? '<span class="worth">' + chgHtml(c[BR.sort]) + ' <small>' + (BR.sort === 'chg7' ? 'in 7 days' : 'in 30 days') + '</small></span>' : '';
       return '<div class="ins-card" data-i="' + i + '" data-id="' + esc(c.id || '') + '"><div class="pic' + (shownIsFoil(c) ? ' foil' : '') + '">' + img + flipBtn({ scryfall_id: c.id, layout: c.layout }) + (c.qty > 1 ? '<span class="qty">×' + c.qty + '</span>' : '') + (c.rank ? '<span class="rank" title="EDHREC popularity rank (lower is more popular)">#' + fmt(c.rank) + '</span>' : '') + '</div>'
-        + '<div class="nm">' + esc(c.name) + (c.foil ? ' ✦' : '') + '</div><div class="ty">' + esc(c.type_line || '') + '</div>' + worthTxt + '</div>';
+        + '<div class="nm">' + esc(c.name) + (c.foil ? ' ✦' : '') + '</div><div class="ty">' + esc(c.type_line || '') + '</div>' + worthTxt + chgLine + '</div>';
     }).join('') + '</div>';
   }
   const left = rows.length - shownRows.length;
@@ -643,6 +711,7 @@ function brRenderSets() {
 }
 function brInit(d) {
   BR.data = d; BR.loaded = true; BR.surge = new Set(d.surge || []);
+  if (d.has_history) brEl('br-sort').insertAdjacentHTML('beforeend', '<option value="chg7">Sort: 7-day price change</option><option value="chg30">Sort: 30-day price change</option>');
   brEl('br-cat').innerHTML += d.categories.map((c) => '<option value="' + esc(c) + '">' + esc(c) + '</option>').join('');
   brEl('br-role').innerHTML += d.roles.map((r, i) => '<option value="' + i + '">' + esc(r) + '</option>').join('');
   brEl('br-theme').innerHTML += d.themes.map((t, i) => '<option value="' + i + '">' + esc(t) + '</option>').join('');
@@ -678,7 +747,7 @@ brEl('br-pmin').addEventListener('input', (e) => { BR.pmin = numOrNull(e.target.
 brEl('br-pmax').addEventListener('input', (e) => { BR.pmax = numOrNull(e.target.value); brChanged(); });
 brEl('br-sort').addEventListener('change', (e) => {
   BR.sort = e.target.value;
-  BR.desc = ['each', 'value', 'qty'].includes(BR.sort);  // money and copies read best biggest first; the rest start at the small end
+  BR.desc = ['each', 'value', 'qty', 'chg7', 'chg30'].includes(BR.sort);  // money and copies read best biggest first; the rest start at the small end
   brEl('br-dir').innerHTML = BR.desc ? '&#8595;' : '&#8593;'; brChanged();
 });
 brEl('br-dir').addEventListener('click', () => { BR.desc = !BR.desc; brEl('br-dir').innerHTML = BR.desc ? '&#8595;' : '&#8593;'; brChanged(); });
@@ -758,8 +827,26 @@ function lbRender() {
       + '<span class="nm">' + esc(names[x.set] || x.set || 'Unknown set') + (x.f ? '<span class="tag">' + (BR.surge.has(x.id) ? 'Surge foil' : finishName(x.f)) + '</span>' : '') + '</span>'
       + '<span class="px">' + (x.p != null ? money(x.p * x.q) + (x.q > 1 ? '<small>' + money(x.p) + ' each</small>' : '') : '—') + '</span>'
       + '<span class="sub">' + esc(x.set) + (x.n ? ' #' + esc(x.n) : '') + ' · ×' + x.q + '</span></button>').join('');
+  brEl('br-lb-info').insertAdjacentHTML('beforeend', '<div class="br-hist"><h4>Price history</h4><div id="br-lb-hist"></div></div>');
+  lbHist(cur);
   const many = (BR.rows || []).length > 1;
   brEl('br-lb-prev').style.display = brEl('br-lb-next').style.display = many ? '' : 'none';
+}
+const histCache = {};
+function lbHist(cur) {
+  const box = brEl('br-lb-hist'); if (!box) return;
+  if (!(BR.data && BR.data.has_history)) { box.innerHTML = '<p class="ph-note" style="margin:0;">No price history yet. Get it on the Insights tab (\u201cValue over time\u201d).</p>'; return; }
+  const key = cur.id + ':' + cur.f;
+  const show = (d) => {
+    if (brEl('br-lb-hist') !== box) return;  // the lightbox moved on to another card
+    if (!d.dates.length) { box.innerHTML = '<p class="ph-note" style="margin:0;">No history for this printing yet (it appears after the next database refresh).</p>'; return; }
+    const first = d.prices[0], last = d.prices[d.prices.length - 1];
+    box.innerHTML = '<div class="ph-chips"><span class="ph-chip"><small>Latest, ' + new Date(d.dates[d.dates.length - 1] + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + '</small>' + money(last) + '</span><span class="ph-chip"><small>Over ' + d.dates.length + ' days</small>' + chgHtml(last - first) + '</span></div>' + phChart(d.dates, d.prices, 260, 130);
+    phWire(box, d.dates, d.prices, 260, 130);
+  };
+  if (histCache[key]) { show(histCache[key]); return; }
+  box.innerHTML = '<p class="ph-note" style="margin:0;">Loading\u2026</p>';
+  fetch('/collection/history/card?id=' + encodeURIComponent(cur.id) + '&f=' + cur.f).then((r) => r.json()).then((d) => { histCache[key] = d; show(d); }).catch(() => { box.innerHTML = ''; });
 }
 function lbOpen(i) { hideZoom(); LB.i = i; LB.p = 0; LB.face = 'front'; brEl('br-lb').classList.add('show'); document.body.style.overflow = 'hidden'; lbRender(); }
 function lbClose() { brEl('br-lb').classList.remove('show'); document.body.style.overflow = ''; LB.i = -1; }
@@ -780,13 +867,63 @@ document.addEventListener('keydown', (e) => {
 });
 if (location.hash === '#browse') setView('browse');
 
+// ---- Value over time (needs the price history file; see price_history.py) ----
+let histPoll = null;
+function histPanelEl() { return document.getElementById('ins-hist'); }
+function histStart() {
+  fetch('/collection/history/build', { method: 'POST' }).then((r) => r.json()).then((d) => {
+    if (d.error) { histPanelEl().innerHTML = '<div class="card ins-section"><h2>Value over time</h2><p class="ins-sub">' + esc(d.error) + '</p></div>'; return; }
+    histWatch();
+  });
+}
+function histWatch() {
+  clearInterval(histPoll);
+  const tick = () => fetch('/collection/history/status').then((r) => r.json()).then((st) => {
+    const el = histPanelEl(); if (!el) return;
+    if (st.job.running) {
+      const j = st.job, pct = j.total ? Math.min(100, Math.round(100 * j.done / j.total)) : 0;
+      const txt = j.stage === 'processing' ? 'Reading the data for your cards\u2026 this takes about a minute.' : 'Downloading price data\u2026 ' + (j.total ? Math.round(j.done / 1048576) + ' of ' + Math.round(j.total / 1048576) + ' MB' : '');
+      el.innerHTML = '<div class="card ins-section"><h2>Value over time</h2><p class="ins-sub">' + txt + '</p><div class="ph-progress"><i style="width:' + pct + '%"></i></div></div>';
+    } else {
+      clearInterval(histPoll); histPoll = null;
+      if (st.job.error) el.innerHTML = '<div class="card ins-section"><h2>Value over time</h2><p class="ins-sub">Could not fetch the price history: ' + esc(st.job.error) + '</p><button type="button" class="btn small" id="ph-get">Try again</button></div>', document.getElementById('ph-get').addEventListener('click', histStart);
+      else location.reload();  // Browse picks up the history (sorts, charts) on a fresh load
+    }
+  });
+  tick(); histPoll = setInterval(tick, 2000);
+}
+function loadHistPanel() {
+  const el = histPanelEl(); if (!el) return;
+  fetch('/collection/history/status').then((r) => r.json()).then((st) => {
+    if (st.job.running) { histWatch(); return; }
+    return fetch('/collection/history/total').then((r) => r.json()).then((h) => {
+      if (h.error) { el.innerHTML = ''; return; }
+      if (!h.has_history) {
+        el.innerHTML = '<div class="card ins-section"><h2>Value over time</h2><p class="ins-sub">See what your collection was worth over the last 90 days, how each card has moved, and a price chart for every card in Browse. This downloads MTGJSON\u2019s price data once (a few hundred MB, about a minute to read) and keeps the history of your own cards from then on.</p><button type="button" class="btn small" id="ph-get">Get price history</button></div>';
+        document.getElementById('ph-get').addEventListener('click', histStart); return;
+      }
+      const now = h.values[h.values.length - 1];
+      const chips = '<span class="ph-chip"><small>Latest, ' + new Date(h.dates[h.dates.length - 1] + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + '</small>' + money(now) + '</span>' + ['7', '30', '90'].filter((k) => h.changes[k] != null).map((k) => '<span class="ph-chip"><small>' + k + ' days</small>' + chgHtml(h.changes[k]) + '</span>').join('');
+      const list = (arr) => arr.length ? arr.map((m) => '<a data-name="' + esc(m.name) + '"><span>' + esc(m.name) + '</span>' + chgHtml(m.chg30) + '</a>').join('') : '<div class="ins-empty" style="padding:6px 0;">None</div>';
+      const cover = h.covered < h.total_copies ? ' ' + fmt(h.total_copies - h.covered) + ' of your ' + fmt(h.total_copies) + ' copies are left out because they have no history yet (they join after the next database refresh).' : '';
+      el.innerHTML = '<div class="card ins-section"><h2>Value over time</h2><p class="ins-sub">What the cards you own today were worth on each past day (TCGplayer market price). It does not know when you got each card, so it is a price history, not a record of past collections.</p>'
+        + '<div class="ph-chips">' + chips + '</div><div id="ph-total"></div>'
+        + '<div class="ph-movers"><div><h3>Biggest risers, 30 days</h3>' + list(h.risers) + '</div><div><h3>Biggest fallers, 30 days</h3>' + list(h.fallers) + '</div></div>'
+        + '<p class="ph-note">Updated ' + esc(st.updated || '') + ' \u00b7 refreshing the card database also extends the history.' + cover + ' <a href="#" id="ph-update">Update now</a></p></div>';
+      const tot = document.getElementById('ph-total'); tot.innerHTML = phChart(h.dates, h.values); phWire(tot, h.dates, h.values);
+      document.getElementById('ph-update').addEventListener('click', (e) => { e.preventDefault(); histStart(); });
+      el.querySelectorAll('.ph-movers a').forEach((a) => a.addEventListener('click', () => { setView('browse'); const q = brEl('br-q'); q.value = a.dataset.name; BR.q = a.dataset.name; if (BR.loaded) brChanged(); }));
+    });
+  });
+}
+
 fetch('/collection/data').then((r) => r.json()).then((d) => {
   const el = document.getElementById('insights');
   if (d.error) { el.innerHTML = '<div class="card"><p>' + esc(d.error) + '</p><a class="btn small" href="/">Go to Setup</a></div>'; return; }
   if (d.price_stores && d.price_stores.length) priceStores = d.price_stores.join(', ');
-  el.innerHTML = snapshotHtml(d.snapshot) + colorsHtml(d.colors) + rolesHtml(d.roles) + themesHtml(d.themes) + typesHtml(d.types)
+  el.innerHTML = snapshotHtml(d.snapshot) + '<div id="ins-hist"></div>' + colorsHtml(d.colors) + rolesHtml(d.roles) + themesHtml(d.themes) + typesHtml(d.types)
     + '<p class="ins-note">All of this is worked out on your computer from your collection and the local card database (' + fmt(d.pool_size) + ' Commander-legal nonland cards; you own ' + d.baseline_pct + '% of them). Nothing is sent anywhere.</p>';
-  paintHeat();
+  paintHeat(); loadHistPanel();
 }).catch(() => { showError('Could not reach the server.'); document.getElementById('insights').innerHTML = ''; });
 """
 
