@@ -233,6 +233,11 @@ card database and Scryfall's Oracle Tags.
   release date are left out (they are preorder prices and skew the real cost),
   and the changes only count cards that were already out. It is a history of
   today's cards' prices, not of what you owned on each day.
+  The lightbox chart also marks when you added each copy and what you paid, from
+  the Added date and Purchase price in your ManaBox export: a dashed line at each
+  price paid, a flag on the day you added it, and a "vs. what you paid" figure.
+  (ManaBox often fills the purchase price in with that day's market price unless
+  you edited it, so it is only as real as what you entered there.)
 - **Browse cards:** a second tab on the page lists every card you own (lands
   included) and lets you filter it by name or type, card type, color (click a
   color to allow it, again to require it, with an exact-colors toggle like the

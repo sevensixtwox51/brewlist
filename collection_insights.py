@@ -424,7 +424,8 @@ def _browse_payload(owned: dict, owned_rows: list[dict], prices: dict, sets: dic
                 if code and code not in codes:
                     codes.append(code)
                 prs.append({"id": p.scryfall_id, "set": code, "n": p.collector_number, "f": 2 if p.etched else (1 if p.foil else 0),
-                            "q": p.quantity, "p": round(price, 2) if price is not None else None})
+                            "q": p.quantity, "p": round(price, 2) if price is not None else None,
+                            "l": [list(l) for l in p.lots]})
         for c in codes:
             set_counts[c] = set_counts.get(c, 0) + 1
         al = _aliases(r["name"])

@@ -544,6 +544,9 @@ class OwnedPrinting:
     quantity: int
     set_code: str = ""
     collector_number: str = ""
+    # One entry per export row of this printing: (copies, price paid per copy or None, date added "YYYY-MM-DD" or None).
+    # ManaBox records these when you add a card; the price is whatever it shows as the purchase price (often the market price that day).
+    lots: list = field(default_factory=list)
 
 
 @dataclass
@@ -594,16 +597,26 @@ def load_collection(source) -> dict[str, OwnedCard]:
                 card.nonfoil += qty
 
             scryfall_id = (row.get("Scryfall ID") or "").strip()
+            try:
+                paid = float((row.get("Purchase price") or "").strip() or 0)
+            except ValueError:
+                paid = 0.0
+            if (row.get("Purchase price currency") or "USD").strip().upper() != "USD":
+                paid = 0.0  # never mix another currency into dollar figures
+            added = (row.get("Added") or "").strip()[:10]
+            lot = (qty, round(paid, 2) if paid > 0 else None, added if re.fullmatch(r"\d{4}-\d{2}-\d{2}", added) else None)
             if scryfall_id:
                 for p in card.printings:
                     if p.scryfall_id == scryfall_id and p.foil == is_foil and p.etched == is_etched:
                         p.quantity += qty
+                        p.lots.append(lot)
                         break
                 else:
                     card.printings.append(OwnedPrinting(
                         scryfall_id, is_foil, is_etched, qty,
                         set_code=(row.get("Set code") or "").strip(),
                         collector_number=(row.get("Collector number") or "").strip(),
+                        lots=[lot],
                     ))
 
     if isinstance(source, (str, os.PathLike)):

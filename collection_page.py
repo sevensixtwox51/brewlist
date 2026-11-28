@@ -205,6 +205,12 @@ table.br-list { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
 .ph .ph-ax { fill: var(--text-dim); font-size: 11px; }
 .ph .ph-cur { stroke: var(--text-dim); stroke-width: 1; stroke-dasharray: 3 3; }
 .ph .ph-dot { fill: var(--accent); stroke: var(--bg-elevated); stroke-width: 2; }
+.ph .ph-paid { stroke: var(--owned); stroke-width: 1.5; stroke-dasharray: 5 4; opacity: 0.85; }
+.ph .ph-paidtx { fill: var(--owned); font-size: 10px; }
+.ph .ph-addln { stroke: var(--text-dim); stroke-width: 1; stroke-dasharray: 2 3; }
+.ph .ph-addpt { fill: var(--owned); stroke: var(--bg-elevated); stroke-width: 2; }
+.ph-lots { margin: 8px 0 0; padding: 0; list-style: none; font-size: 0.8rem; color: var(--text-dim); }
+.ph-lots li { padding: 1px 0; } .ph-lots b { color: var(--text); font-weight: 600; }
 .ph-tip { position: absolute; top: 0; pointer-events: none; background: rgba(0,0,0,0.85); border: 1px solid var(--card-border); border-radius: 8px; padding: 3px 8px; font-size: 0.78rem; white-space: nowrap; display: none; z-index: 2; }
 .ph-tip b { color: var(--accent); font-variant-numeric: tabular-nums; }
 .chg { font-variant-numeric: tabular-nums; font-weight: 600; }
@@ -567,41 +573,57 @@ const PAGE = 96;
 const chgTxt = (v) => (v > 0 ? '+' : (v < 0 ? '\u2212' : '')) + money(Math.abs(v));
 const chgCls = (v) => v > 0.004 ? 'up' : (v < -0.004 ? 'dn' : 'flat');
 const chgHtml = (v) => v == null ? '<span class="chg flat">\u2014</span>' : '<span class="chg ' + chgCls(v) + '">' + chgTxt(v) + '</span>';
-// A line chart of dated values with a hover readout. Returns the markup; phWire(el, dates, vals) makes it respond to the pointer.
-function phChart(dates, vals, W, H) {
+// A line chart of dated values with a hover readout. phChart returns the markup; phWire(el, dates, vals, W, H, marks) makes it respond to the pointer.
+// marks (optional): { paid: [prices you paid], added: [dates you added copies] } -- a dashed line per price paid, a flag where a copy was added.
+function phGeom(dates, vals, W, H, marks) {
   W = W || 640; H = H || 180;
-  const L = W < 400 ? 40 : 52, R = 10, T = 10, B = 22, n = vals.length;
-  if (n < 2) return '<div class="ins-empty" style="padding:14px;">Not enough days of history yet.</div>';
+  const n = vals.length, L = W < 400 ? 40 : 52, R = 10, T = 14, B = 22;
   const lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
-  const span = (hi - lo) || Math.max(hi * 0.1, 0.01), y0 = Math.max(0, lo - span * 0.1), y1 = hi + span * 0.1;
-  const X = (i) => L + (W - L - R) * i / (n - 1), Y = (v) => T + (H - T - B) * (1 - (v - y0) / (y1 - y0));
-  const pts = vals.map((v, i) => X(i).toFixed(1) + ',' + Y(v).toFixed(1));
+  // a price you paid widens the chart only when it is near the price range; a far-off one is described under the chart instead
+  const paid = ((marks && marks.paid) || []).filter((v) => v >= lo * 0.5 && v <= hi * 2);
+  const all = vals.concat(paid), lo2 = Math.min.apply(null, all), hi2 = Math.max.apply(null, all);
+  const span = (hi2 - lo2) || Math.max(hi2 * 0.1, 0.01), y0 = Math.max(0, lo2 - span * 0.1), y1 = hi2 + span * 0.1;
+  return { W, H, n, L, R, T, B, y0, y1, paid,
+    X: (i) => L + (W - L - R) * i / (n - 1), Y: (v) => T + (H - T - B) * (1 - (v - y0) / (y1 - y0)) };
+}
+function phChart(dates, vals, W, H, marks) {
+  if (vals.length < 2) return '<div class="ins-empty" style="padding:14px;">Not enough days of history yet.</div>';
+  const g = phGeom(dates, vals, W, H, marks), n = g.n;
+  const pts = vals.map((v, i) => g.X(i).toFixed(1) + ',' + g.Y(v).toFixed(1));
   const lab = (v) => '$' + (v >= 100 ? Math.round(v).toLocaleString() : v.toFixed(2));
   let grid = '';
-  for (let k = 0; k < 3; k++) { const v = y0 + (y1 - y0) * k / 2, y = Y(v).toFixed(1); grid += '<line class="ph-grid" x1="' + L + '" x2="' + (W - R) + '" y1="' + y + '" y2="' + y + '"/><text class="ph-ax" x="' + (L - 6) + '" y="' + (Number(y) + 4) + '" text-anchor="end">' + lab(v) + '</text>'; }
+  for (let k = 0; k < 3; k++) { const v = g.y0 + (g.y1 - g.y0) * k / 2, y = g.Y(v).toFixed(1); grid += '<line class="ph-grid" x1="' + g.L + '" x2="' + (g.W - g.R) + '" y1="' + y + '" y2="' + y + '"/><text class="ph-ax" x="' + (g.L - 6) + '" y="' + (Number(y) + 4) + '" text-anchor="end">' + lab(v) + '</text>'; }
   const dl = (d) => new Date(d + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-  return '<div class="ph"><svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Price history">' + grid
-    + '<path class="ph-area" d="M' + pts[0] + ' L' + pts.join(' L') + ' L' + X(n - 1).toFixed(1) + ',' + (H - B) + ' L' + L + ',' + (H - B) + ' Z"/>'
-    + '<polyline class="ph-line" points="' + pts.join(' ') + '"/>'
-    + '<text class="ph-ax" x="' + L + '" y="' + (H - 4) + '">' + dl(dates[0]) + '</text><text class="ph-ax" x="' + (W - R) + '" y="' + (H - 4) + '" text-anchor="end">' + dl(dates[n - 1]) + '</text>'
-    + '<line class="ph-cur" y1="' + T + '" y2="' + (H - B) + '" style="display:none"/><circle class="ph-dot" r="4" style="display:none"/></svg><div class="ph-tip"></div></div>';
+  let extra = '';
+  g.paid.forEach((v) => { const y = g.Y(v).toFixed(1); extra += '<line class="ph-paid" x1="' + g.L + '" x2="' + (g.W - g.R) + '" y1="' + y + '" y2="' + y + '"/><text class="ph-paidtx" x="' + (g.W - g.R) + '" y="' + (Number(y) - 4) + '" text-anchor="end">paid ' + lab(v) + '</text>'; });
+  ((marks && marks.added) || []).forEach((d) => {
+    const i = dates.indexOf(d); if (i < 0) return;
+    const x = g.X(i).toFixed(1);
+    extra += '<line class="ph-addln" x1="' + x + '" x2="' + x + '" y1="' + g.Y(vals[i]).toFixed(1) + '" y2="' + (g.H - g.B) + '"/><circle class="ph-addpt" cx="' + x + '" cy="' + (g.H - g.B) + '" r="4.5"/>';
+  });
+  return '<div class="ph"><svg viewBox="0 0 ' + g.W + ' ' + g.H + '" role="img" aria-label="Price history">' + grid
+    + '<path class="ph-area" d="M' + pts[0] + ' L' + pts.join(' L') + ' L' + g.X(n - 1).toFixed(1) + ',' + (g.H - g.B) + ' L' + g.L + ',' + (g.H - g.B) + ' Z"/>'
+    + extra + '<polyline class="ph-line" points="' + pts.join(' ') + '"/>'
+    + '<text class="ph-ax" x="' + g.L + '" y="' + (g.H - 4) + '">' + dl(dates[0]) + '</text><text class="ph-ax" x="' + (g.W - g.R) + '" y="' + (g.H - 4) + '" text-anchor="end">' + dl(dates[n - 1]) + '</text>'
+    + '<line class="ph-cur" y1="' + g.T + '" y2="' + (g.H - g.B) + '" style="display:none"/><circle class="ph-dot" r="4" style="display:none"/></svg><div class="ph-tip"></div></div>';
 }
-function phWire(el, dates, vals, W, H) {
+function phWire(el, dates, vals, W, H, marks) {
   const box = el.querySelector('.ph'); if (!box || vals.length < 2) return;
   const svg = box.querySelector('svg'), cur = svg.querySelector('.ph-cur'), dot = svg.querySelector('.ph-dot'), tip = box.querySelector('.ph-tip');
-  W = W || 640; H = H || 180;
-  const L = W < 400 ? 40 : 52, R = 10, T = 10, B = 22, n = vals.length;
-  const lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals), span = (hi - lo) || Math.max(hi * 0.1, 0.01), y0 = Math.max(0, lo - span * 0.1), y1 = hi + span * 0.1;
+  const g = phGeom(dates, vals, W, H, marks);
+  const added = {}; ((marks && marks.addedInfo) || []).forEach((a) => { (added[a.date] = added[a.date] || []).push(a); });
   const off = () => { cur.style.display = dot.style.display = tip.style.display = 'none'; };
   box.addEventListener('pointerleave', off);
   box.addEventListener('pointermove', (e) => {
-    const r = svg.getBoundingClientRect(), fx = (e.clientX - r.left) / r.width * W;
-    const i = Math.max(0, Math.min(n - 1, Math.round((fx - L) / (W - L - R) * (n - 1))));
-    const x = L + (W - L - R) * i / (n - 1), y = T + (H - T - B) * (1 - (vals[i] - y0) / (y1 - y0));
+    const r = svg.getBoundingClientRect(), fx = (e.clientX - r.left) / r.width * g.W;
+    const i = Math.max(0, Math.min(g.n - 1, Math.round((fx - g.L) / (g.W - g.L - g.R) * (g.n - 1))));
+    const x = g.X(i), y = g.Y(vals[i]);
     cur.setAttribute('x1', x); cur.setAttribute('x2', x); dot.setAttribute('cx', x); dot.setAttribute('cy', y);
     cur.style.display = dot.style.display = ''; tip.style.display = 'block';  // the tip is display:none in the stylesheet, so '' would leave it hidden
-    tip.innerHTML = new Date(dates[i] + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) + ' · <b>' + money(vals[i]) + '</b>';
-    const px = x / W * r.width, tw = tip.offsetWidth;
+    const when = added[dates[i]];
+    tip.innerHTML = new Date(dates[i] + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) + ' · <b>' + money(vals[i]) + '</b>'
+      + (when ? '<br>You added ' + when.map((a) => '×' + a.q + (a.paid != null ? ' (paid ' + money(a.paid) + ' each)' : '')).join(', ') : '');
+    const px = x / g.W * r.width, tw = tip.offsetWidth;
     tip.style.left = Math.max(0, Math.min(r.width - tw, px - tw / 2)) + 'px';
   });
 }
@@ -841,8 +863,22 @@ function lbHist(cur) {
     if (brEl('br-lb-hist') !== box) return;  // the lightbox moved on to another card
     if (!d.dates.length) { box.innerHTML = '<p class="ph-note" style="margin:0;">No history for this printing yet (it appears after the next database refresh).</p>'; return; }
     const first = d.prices[0], last = d.prices[d.prices.length - 1];
-    box.innerHTML = '<div class="ph-chips"><span class="ph-chip"><small>Latest, ' + new Date(d.dates[d.dates.length - 1] + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + '</small>' + money(last) + '</span><span class="ph-chip"><small>Over ' + d.dates.length + ' days</small>' + chgHtml(last - first) + '</span></div>' + phChart(d.dates, d.prices, 260, 130);
-    phWire(box, d.dates, d.prices, 260, 130);
+    const dl = (iso) => new Date(iso + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    // When you added copies and what you paid (the purchase price and date in your ManaBox export)
+    const lots = (cur.l || []).map((l) => ({ q: l[0], paid: l[1], date: l[2] })).sort((x, y) => (x.date || '').localeCompare(y.date || ''));
+    const paidVals = [...new Set(lots.filter((l) => l.paid != null).map((l) => l.paid))].slice(0, 3);
+    const inRange = lots.filter((l) => l.date && d.dates.indexOf(l.date) >= 0);
+    const marks = { paid: paidVals, added: inRange.map((l) => l.date), addedInfo: inRange };
+    const priced = lots.filter((l) => l.paid != null);
+    const gain = priced.reduce((t, l) => t + l.q * (last - l.paid), 0), cost = priced.reduce((t, l) => t + l.q * l.paid, 0);
+    const lotLine = (l) => 'Added <b>' + (l.date ? new Date(l.date + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : 'on an unknown date') + '</b> · ×' + l.q
+      + (l.paid != null ? ' · paid ' + money(l.paid) + (l.q > 1 ? ' each' : '') : ' · no price recorded')
+      + (l.date && d.dates.indexOf(l.date) < 0 ? (l.date < d.dates[0] ? ' <span title="The chart starts at the set’s release or the first day of history">(before this chart starts)</span>' : '') : '');
+    box.innerHTML = '<div class="ph-chips"><span class="ph-chip"><small>Latest, ' + dl(d.dates[d.dates.length - 1]) + '</small>' + money(last) + '</span><span class="ph-chip"><small>Over ' + d.dates.length + ' days</small>' + chgHtml(last - first) + '</span>'
+      + (priced.length ? '<span class="ph-chip" title="Market value now against the purchase price in your export (' + money(cost) + ' for ' + priced.reduce((t, l) => t + l.q, 0) + ' copies)"><small>Vs. what you paid</small>' + chgHtml(gain) + '</span>' : '') + '</div>'
+      + phChart(d.dates, d.prices, 260, 130, marks)
+      + (lots.length ? '<ul class="ph-lots">' + lots.slice(0, 5).map((l) => '<li>' + lotLine(l) + '</li>').join('') + (lots.length > 5 ? '<li>+ ' + (lots.length - 5) + ' more</li>' : '') + '</ul>' : '');
+    phWire(box, d.dates, d.prices, 260, 130, marks);
   };
   if (histCache[key]) { show(histCache[key]); return; }
   box.innerHTML = '<p class="ph-note" style="margin:0;">Loading\u2026</p>';
