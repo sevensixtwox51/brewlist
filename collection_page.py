@@ -593,8 +593,8 @@ function phGeom(dates, vals, W, H, marks) {
   W = W || 640; H = H || 180;
   const n = vals.length, L = W < 400 ? 40 : 52, R = 10, T = 14, B = 22;
   const lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
-  // a price you paid widens the chart only when it is near the price range; a far-off one is described under the chart instead
-  const paid = ((marks && marks.paid) || []).filter((v) => v >= lo * 0.5 && v <= hi * 2);
+  // every price you paid gets its line, even one far from the price range or from before the chart starts (the chart widens to hold it)
+  const paid = (marks && marks.paid) || [];
   const all = vals.concat(paid), lo2 = Math.min.apply(null, all), hi2 = Math.max.apply(null, all);
   const span = (hi2 - lo2) || Math.max(hi2 * 0.1, 0.01), y0 = Math.max(0, lo2 - span * 0.1), y1 = hi2 + span * 0.1;
   return { W, H, n, L, R, T, B, y0, y1, paid,
